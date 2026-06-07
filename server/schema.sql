@@ -1,0 +1,188 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS leagues (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  city TEXT NOT NULL,
+  season TEXT NOT NULL,
+  current_competition_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  plan TEXT,
+  owner_email TEXT,
+  renewal_date TEXT,
+  ad_banner TEXT,
+  membership_notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS competitions (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'liga',
+  season TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  active_round INTEGER,
+  starts_at TEXT,
+  ends_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS league_identities (
+  league_id TEXT PRIMARY KEY REFERENCES leagues(id) ON DELETE CASCADE,
+  nickname TEXT,
+  activities TEXT,
+  public_intro TEXT,
+  primary_color TEXT,
+  accent_color TEXT,
+  secondary_color TEXT
+);
+
+CREATE TABLE IF NOT EXISTS league_rules (
+  league_id TEXT PRIMARY KEY REFERENCES leagues(id) ON DELETE CASCADE,
+  withdrawal_policy TEXT NOT NULL DEFAULT 'award_walkover',
+  forfeit_points INTEGER NOT NULL DEFAULT 3,
+  forfeit_goals_for INTEGER NOT NULL DEFAULT 3,
+  forfeit_goals_against INTEGER NOT NULL DEFAULT 0,
+  yellow_suspension_limit INTEGER NOT NULL DEFAULT 3,
+  default_red_suspension_matches INTEGER NOT NULL DEFAULT 1,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS league_highlights (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS teams (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  coach TEXT,
+  colors TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  withdrawn_round INTEGER,
+  withdrawn_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS players (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  number INTEGER,
+  position TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+);
+
+CREATE TABLE IF NOT EXISTS matches (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+  stage TEXT NOT NULL DEFAULT 'regular',
+  playoff_round TEXT,
+  playoff_leg TEXT,
+  aggregate_home INTEGER,
+  aggregate_away INTEGER,
+  round INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  time TEXT NOT NULL,
+  venue TEXT NOT NULL,
+  home_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  away_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  home_goals INTEGER,
+  away_goals INTEGER,
+  resolution_type TEXT NOT NULL DEFAULT 'normal',
+  resolution_note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS match_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+  minute INTEGER,
+  suspension_matches INTEGER,
+  reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS player_sanctions (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+  player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  matches INTEGER NOT NULL DEFAULT 0,
+  reason TEXT,
+  date TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS player_injuries (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+  player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  date TEXT,
+  expected_return TEXT,
+  needs_surgery INTEGER NOT NULL DEFAULT 0,
+  needs_support INTEGER NOT NULL DEFAULT 0,
+  support_detail TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  league_id TEXT REFERENCES leagues(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  password_hash TEXT,
+  failed_login_count INTEGER NOT NULL DEFAULT 0,
+  locked_until TEXT,
+  last_failed_login_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS memberships (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  plan TEXT NOT NULL,
+  status TEXT NOT NULL,
+  renewal_date TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sponsors (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  placement TEXT NOT NULL DEFAULT 'home_banner',
+  status TEXT NOT NULL DEFAULT 'active'
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT,
+  user_email TEXT,
+  user_role TEXT,
+  league_id TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  detail TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL
+);

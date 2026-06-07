@@ -1,0 +1,553 @@
+import "./env.js";
+import Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { seedData } from "../src/data/seedData.js";
+import { defaultCompetitionForLeague, normalizeStore } from "../src/lib/domain.js";
+import { hashPassword } from "./password.js";
+import { ROOT_DIR } from "./env.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const configuredDbPath = process.env.DB_PATH || "data/liga-futbol.sqlite";
+const DB_PATH = path.isAbsolute(configuredDbPath) ? configuredDbPath : path.join(ROOT_DIR, configuredDbPath);
+const DATA_DIR = path.dirname(DB_PATH);
+const SCHEMA_PATH = path.join(__dirname, "schema.sql");
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+export const db = new Database(DB_PATH);
+db.pragma("foreign_keys = ON");
+
+export function initializeDatabase() {
+  db.exec(fs.readFileSync(SCHEMA_PATH, "utf8"));
+  runMigrations();
+  const count = db.prepare("SELECT COUNT(*) AS total FROM leagues").get().total;
+  if (count === 0) importStore(normalizeStore(seedData));
+  seedUsers();
+}
+
+function runMigrations() {
+  const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
+  if (!userColumns.includes("password_hash")) {
+    db.prepare("ALTER TABLE users ADD COLUMN password_hash TEXT").run();
+  }
+  if (!userColumns.includes("failed_login_count")) {
+    db.prepare("ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0").run();
+  }
+  if (!userColumns.includes("locked_until")) {
+    db.prepare("ALTER TABLE users ADD COLUMN locked_until TEXT").run();
+  }
+  if (!userColumns.includes("last_failed_login_at")) {
+    db.prepare("ALTER TABLE users ADD COLUMN last_failed_login_at TEXT").run();
+  }
+
+  const leagueColumns = db.prepare("PRAGMA table_info(leagues)").all().map((column) => column.name);
+  if (!leagueColumns.includes("membership_notes")) {
+    db.prepare("ALTER TABLE leagues ADD COLUMN membership_notes TEXT").run();
+  }
+  if (!leagueColumns.includes("current_competition_id")) {
+    db.prepare("ALTER TABLE leagues ADD COLUMN current_competition_id TEXT").run();
+  }
+
+  const ruleColumns = db.prepare("PRAGMA table_info(league_rules)").all().map((column) => column.name);
+  if (!ruleColumns.includes("default_red_suspension_matches")) {
+    db.prepare("ALTER TABLE league_rules ADD COLUMN default_red_suspension_matches INTEGER NOT NULL DEFAULT 1").run();
+  }
+
+  const matchColumns = db.prepare("PRAGMA table_info(matches)").all().map((column) => column.name);
+  if (!matchColumns.includes("competition_id")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN competition_id TEXT").run();
+  }
+  if (!matchColumns.includes("stage")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN stage TEXT NOT NULL DEFAULT 'regular'").run();
+  }
+  if (!matchColumns.includes("playoff_round")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN playoff_round TEXT").run();
+  }
+  if (!matchColumns.includes("playoff_leg")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN playoff_leg TEXT").run();
+  }
+  if (!matchColumns.includes("aggregate_home")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN aggregate_home INTEGER").run();
+  }
+  if (!matchColumns.includes("aggregate_away")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN aggregate_away INTEGER").run();
+  }
+
+  const sanctionColumns = db.prepare("PRAGMA table_info(player_sanctions)").all().map((column) => column.name);
+  if (sanctionColumns.length && !sanctionColumns.includes("competition_id")) {
+    db.prepare("ALTER TABLE player_sanctions ADD COLUMN competition_id TEXT").run();
+  }
+
+  const competitionColumns = db.prepare("PRAGMA table_info(competitions)").all().map((column) => column.name);
+  if (competitionColumns.length && !competitionColumns.includes("active_round")) {
+    db.prepare("ALTER TABLE competitions ADD COLUMN active_round INTEGER").run();
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS competitions (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'liga',
+      season TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      active_round INTEGER,
+      starts_at TEXT,
+      ends_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS player_sanctions (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      matches INTEGER NOT NULL DEFAULT 0,
+      reason TEXT,
+      date TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS player_injuries (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      date TEXT,
+      expected_return TEXT,
+      needs_surgery INTEGER NOT NULL DEFAULT 0,
+      needs_support INTEGER NOT NULL DEFAULT 0,
+      support_detail TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
+      user_email TEXT,
+      user_role TEXT,
+      league_id TEXT,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT,
+      detail TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS password_reset_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  seedMissingCompetitions();
+}
+
+function seedMissingCompetitions() {
+  const leagues = db.prepare("SELECT id, name, city, season, current_competition_id FROM leagues").all();
+
+  for (const league of leagues) {
+    const existing = db.prepare("SELECT id FROM competitions WHERE league_id = ? ORDER BY id LIMIT 1").get(league.id);
+    const competition = existing || defaultCompetitionForLeague(league);
+
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO competitions (id, league_id, name, type, season, status, active_round, starts_at, ends_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        competition.id,
+        league.id,
+        competition.name,
+        competition.type,
+        competition.season,
+        competition.status,
+        null,
+        competition.startsAt || "",
+        competition.endsAt || ""
+      );
+    }
+
+    const currentCompetitionId = league.current_competition_id || competition.id;
+    db.prepare("UPDATE leagues SET current_competition_id = ? WHERE id = ?").run(currentCompetitionId, league.id);
+    db.prepare("UPDATE matches SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
+    db.prepare("UPDATE player_sanctions SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
+    db.prepare("UPDATE player_injuries SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
+  }
+}
+
+function seedUsers() {
+  const users = [
+    {
+      id: "user-super-admin",
+      leagueId: null,
+      name: "Super Admin",
+      email: "super@ligafut.local",
+      role: "super_admin",
+      password: "super123"
+    },
+    {
+      id: "user-admin-tinguindin",
+      leagueId: "liga-centro",
+      name: "Admin Tingüindín",
+      email: "admin.tinguindin@demo.com",
+      role: "league_admin",
+      password: "admin123"
+    }
+  ];
+
+  for (const user of users) {
+    if (user.leagueId && !db.prepare("SELECT id FROM leagues WHERE id = ?").get(user.leagueId)) continue;
+
+    db.prepare(`
+      INSERT INTO users (id, league_id, name, email, role, status, password_hash)
+      VALUES (?, ?, ?, ?, ?, 'active', ?)
+      ON CONFLICT(email) DO NOTHING
+    `).run(user.id, user.leagueId, user.name, user.email, user.role, hashPassword(user.password));
+  }
+}
+
+export function getStore() {
+  const leagues = db.prepare("SELECT * FROM leagues ORDER BY name").all().map((leagueRow) => {
+    const identity = db.prepare("SELECT * FROM league_identities WHERE league_id = ?").get(leagueRow.id) || {};
+    const rules = db.prepare("SELECT * FROM league_rules WHERE league_id = ?").get(leagueRow.id) || {};
+    const highlights = db.prepare("SELECT body FROM league_highlights WHERE league_id = ? ORDER BY sort_order, id").all(leagueRow.id).map((row) => row.body);
+    const competitions = db.prepare("SELECT * FROM competitions WHERE league_id = ? ORDER BY status, season DESC, name").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      season: row.season,
+      status: row.status,
+      activeRound: row.active_round,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at
+    }));
+    const teams = db.prepare("SELECT * FROM teams WHERE league_id = ? ORDER BY name").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      name: row.name,
+      coach: row.coach,
+      colors: row.colors,
+      status: row.status,
+      withdrawnRound: row.withdrawn_round,
+      withdrawnReason: row.withdrawn_reason
+    }));
+    const players = db.prepare("SELECT * FROM players WHERE league_id = ? ORDER BY team_id, number, name").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      teamId: row.team_id,
+      name: row.name,
+      number: row.number,
+      position: row.position,
+      status: row.status
+    }));
+    const sanctions = db.prepare("SELECT * FROM player_sanctions WHERE league_id = ? ORDER BY date DESC, id DESC").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      competitionId: row.competition_id,
+      playerId: row.player_id,
+      type: row.type,
+      matches: row.matches,
+      reason: row.reason,
+      date: row.date,
+      status: row.status,
+      notes: row.notes
+    }));
+    const injuries = db.prepare("SELECT * FROM player_injuries WHERE league_id = ? ORDER BY date DESC, id DESC").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      competitionId: row.competition_id,
+      playerId: row.player_id,
+      type: row.type,
+      date: row.date,
+      expectedReturn: row.expected_return,
+      needsSurgery: Boolean(row.needs_surgery),
+      needsSupport: Boolean(row.needs_support),
+      supportDetail: row.support_detail,
+      status: row.status,
+      notes: row.notes
+    }));
+    const matches = db.prepare("SELECT * FROM matches WHERE league_id = ? ORDER BY round, date, time").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      competitionId: row.competition_id,
+      stage: row.stage || "regular",
+      playoffRound: row.playoff_round,
+      playoffLeg: row.playoff_leg,
+      aggregateHome: row.aggregate_home,
+      aggregateAway: row.aggregate_away,
+      round: row.round,
+      date: row.date,
+      time: row.time,
+      venue: row.venue,
+      homeTeamId: row.home_team_id,
+      awayTeamId: row.away_team_id,
+      status: row.status,
+      homeGoals: row.home_goals,
+      awayGoals: row.away_goals,
+      resolutionType: row.resolution_type,
+      resolutionNote: row.resolution_note,
+      events: db.prepare("SELECT * FROM match_events WHERE match_id = ? ORDER BY id").all(row.id).map((event) => ({
+        type: event.type,
+        playerId: event.player_id,
+        teamId: event.team_id,
+        minute: event.minute,
+        suspensionMatches: event.suspension_matches,
+        reason: event.reason
+      }))
+    }));
+
+    return {
+      id: leagueRow.id,
+      name: leagueRow.name,
+      city: leagueRow.city,
+      season: leagueRow.season,
+      currentCompetitionId: leagueRow.current_competition_id,
+      competitions,
+      status: leagueRow.status,
+      plan: leagueRow.plan,
+      ownerEmail: leagueRow.owner_email,
+      renewalDate: leagueRow.renewal_date,
+      adBanner: leagueRow.ad_banner,
+      membershipNotes: leagueRow.membership_notes,
+      identity: {
+        nickname: identity.nickname,
+        activities: identity.activities,
+        publicIntro: identity.public_intro,
+        primaryColor: identity.primary_color,
+        accentColor: identity.accent_color,
+        secondaryColor: identity.secondary_color
+      },
+      rules: {
+        withdrawalPolicy: rules.withdrawal_policy,
+        forfeitPoints: rules.forfeit_points,
+        forfeitGoalsFor: rules.forfeit_goals_for,
+        forfeitGoalsAgainst: rules.forfeit_goals_against,
+        yellowSuspensionLimit: rules.yellow_suspension_limit,
+        defaultRedSuspensionMatches: rules.default_red_suspension_matches,
+        notes: rules.notes
+      },
+      highlights,
+      teams,
+      players,
+      sanctions,
+      injuries,
+      matches
+    };
+  });
+
+  return normalizeStore({
+    currentLeagueId: leagues[0]?.id || seedData.currentLeagueId,
+    leagues
+  });
+}
+
+export function importStore(store) {
+  const normalized = normalizeStore(store);
+  const userLeagueAssignments = db.prepare("SELECT id, league_id FROM users").all();
+  const nextLeagueIds = new Set(normalized.leagues.map((league) => league.id));
+  const removedLeagueIds = new Set(
+    userLeagueAssignments
+      .map((assignment) => assignment.league_id)
+      .filter((leagueId) => leagueId && !nextLeagueIds.has(leagueId))
+  );
+
+  const transaction = db.transaction(() => {
+    for (const leagueId of removedLeagueIds) {
+      db.prepare("DELETE FROM users WHERE role = 'league_admin' AND league_id = ?").run(leagueId);
+    }
+
+    db.exec(`
+      DELETE FROM match_events;
+      DELETE FROM player_injuries;
+      DELETE FROM player_sanctions;
+      DELETE FROM matches;
+      DELETE FROM players;
+      DELETE FROM teams;
+      DELETE FROM competitions;
+      DELETE FROM league_highlights;
+      DELETE FROM league_rules;
+      DELETE FROM league_identities;
+      DELETE FROM sponsors;
+      DELETE FROM memberships;
+      DELETE FROM leagues;
+    `);
+
+    for (const league of normalized.leagues) {
+      db.prepare(`
+        INSERT INTO leagues (id, name, city, season, current_competition_id, status, plan, owner_email, renewal_date, ad_banner, membership_notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        league.id,
+        league.name,
+        league.city,
+        league.season,
+        league.currentCompetitionId,
+        league.status,
+        league.plan,
+        league.ownerEmail,
+        league.renewalDate,
+        league.adBanner,
+        league.membershipNotes || ""
+      );
+
+      for (const competition of league.competitions || []) {
+        db.prepare(`
+          INSERT INTO competitions (id, league_id, name, type, season, status, active_round, starts_at, ends_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        competition.id,
+        league.id,
+        competition.name,
+        competition.type || "liga",
+        competition.season || league.season,
+        competition.status || "active",
+        Number(competition.activeRound || 0) || null,
+        competition.startsAt || "",
+        competition.endsAt || ""
+      );
+      }
+
+      db.prepare(`
+        INSERT INTO league_identities (league_id, nickname, activities, public_intro, primary_color, accent_color, secondary_color)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        league.id,
+        league.identity.nickname,
+        league.identity.activities,
+        league.identity.publicIntro,
+        league.identity.primaryColor,
+        league.identity.accentColor,
+        league.identity.secondaryColor
+      );
+
+      db.prepare(`
+        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        league.id,
+        league.rules?.withdrawalPolicy || "award_walkover",
+        Number(league.rules?.forfeitPoints ?? 3),
+        Number(league.rules?.forfeitGoalsFor ?? 3),
+        Number(league.rules?.forfeitGoalsAgainst ?? 0),
+        Number(league.rules?.yellowSuspensionLimit ?? 3),
+        Number(league.rules?.defaultRedSuspensionMatches ?? 1),
+        league.rules?.notes || "Si un equipo se da de baja, la liga puede otorgar triunfo por default segun sus estatutos."
+      );
+
+      league.highlights.forEach((highlight, index) => {
+        db.prepare("INSERT INTO league_highlights (league_id, body, sort_order) VALUES (?, ?, ?)").run(league.id, highlight, index);
+      });
+
+      for (const team of league.teams) {
+        db.prepare(`
+          INSERT INTO teams (id, league_id, name, coach, colors, status, withdrawn_round, withdrawn_reason)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          team.id,
+          league.id,
+          team.name,
+          team.coach,
+          team.colors,
+          team.status || "active",
+          team.withdrawnRound || null,
+          team.withdrawnReason || null
+        );
+      }
+
+      for (const player of league.players) {
+        db.prepare(`
+          INSERT INTO players (id, league_id, team_id, name, number, position, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(player.id, league.id, player.teamId, player.name, player.number, player.position, player.status || "active");
+      }
+
+      for (const sanction of league.sanctions || []) {
+        db.prepare(`
+          INSERT INTO player_sanctions (id, league_id, competition_id, player_id, type, matches, reason, date, status, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          sanction.id,
+          league.id,
+          sanction.competitionId || league.currentCompetitionId,
+          sanction.playerId,
+          sanction.type || "Sancion disciplinaria",
+          Number(sanction.matches || 0),
+          sanction.reason || "",
+          sanction.date || "",
+          sanction.status || "active",
+          sanction.notes || ""
+        );
+      }
+
+      for (const injury of league.injuries || []) {
+        db.prepare(`
+          INSERT INTO player_injuries (id, league_id, competition_id, player_id, type, date, expected_return, needs_surgery, needs_support, support_detail, status, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          injury.id,
+          league.id,
+          injury.competitionId || league.currentCompetitionId,
+          injury.playerId,
+          injury.type || "Lesion",
+          injury.date || "",
+          injury.expectedReturn || "",
+          injury.needsSurgery ? 1 : 0,
+          injury.needsSupport ? 1 : 0,
+          injury.supportDetail || "",
+          injury.status || "active",
+          injury.notes || ""
+        );
+      }
+
+      for (const match of league.matches) {
+        db.prepare(`
+          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, round, date, time, venue, home_team_id, away_team_id, status, home_goals, away_goals, resolution_type, resolution_note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          match.id,
+          league.id,
+          match.competitionId || league.currentCompetitionId,
+          match.stage || "regular",
+          match.playoffRound || "",
+          match.playoffLeg || "",
+          match.aggregateHome ?? null,
+          match.aggregateAway ?? null,
+          match.round,
+          match.date,
+          match.time || "",
+          match.venue || "",
+          match.homeTeamId,
+          match.awayTeamId,
+          match.status,
+          match.homeGoals,
+          match.awayGoals,
+          match.resolutionType || "normal",
+          match.resolutionNote || null
+        );
+
+        for (const event of match.events || []) {
+          db.prepare(`
+            INSERT INTO match_events (match_id, type, player_id, team_id, minute, suspension_matches, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, event.reason);
+        }
+      }
+    }
+
+    for (const assignment of userLeagueAssignments) {
+      if (assignment.league_id && nextLeagueIds.has(assignment.league_id)) {
+        db.prepare("UPDATE users SET league_id = ? WHERE id = ?").run(assignment.league_id, assignment.id);
+      }
+    }
+  });
+
+  transaction();
+  seedUsers();
+  return getStore();
+}
+
+export { DB_PATH };
