@@ -25,7 +25,7 @@ Este documento sirve para preparar una primera salida real de la Liga Municipal 
 - Verificar que `CORS_ORIGIN` use `https://` en produccion.
 - Verificar que `VITE_API_BASE_URL` sea `/api` o una URL publica `https://`.
 - Si web y API viven en el mismo dominio, definir `SERVE_STATIC=true` y `VITE_API_BASE_URL=/api`.
-- Fijar `NODE_VERSION=20.20.2` en Render o respetar `engines.node`.
+- Fijar `NODE_VERSION=20.18.0` en Render o respetar `engines.node`.
 - Crear bucket `ligatec-images` en Supabase Storage o definir `SUPABASE_STORAGE_BUCKET`.
 - Revisar `docs/supabase-storage.md`.
 - Definir `IMAGE_STORAGE_PROVIDER=supabase`.

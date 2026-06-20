@@ -11,7 +11,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION
-        value: "20.20.2"
+        value: "20.18.0"
       - key: SERVE_STATIC
         value: "true"
       - key: API_HOST

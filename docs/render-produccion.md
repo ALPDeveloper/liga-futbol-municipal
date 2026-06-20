@@ -54,7 +54,7 @@ Importante: antes de lanzamiento final, rota/regenera `SUPABASE_SERVICE_ROLE_KEY
 
 ```env
 NODE_ENV=production
-NODE_VERSION=20.20.2
+NODE_VERSION=20.18.0
 SERVE_STATIC=true
 API_HOST=0.0.0.0
 TRUST_PROXY=true
@@ -146,7 +146,7 @@ BACKUP_STORAGE_BUCKET=ligatec-backups npm run backup:db
 Ese Cron Job debe tener estas variables:
 
 ```env
-NODE_VERSION=20.20.2
+NODE_VERSION=20.18.0
 DATABASE_PROVIDER=postgres
 DATABASE_SSL=true
 DATABASE_URL=postgresql://...
