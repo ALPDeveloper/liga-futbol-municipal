@@ -6,7 +6,7 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
-    autoDeploy: false
+    autoDeployTrigger: off
     envVars:
       - key: NODE_ENV
         value: production
@@ -35,7 +35,7 @@ services:
       - key: PUBLIC_CACHE_SECONDS
         value: "5"
       - key: AUTH_SECRET
-        sync: false
+        generateValue: true
       - key: DATABASE_URL
         sync: false
       - key: CORS_ORIGIN
