@@ -1,27 +1,46 @@
 import assert from "node:assert/strict";
 import { seedData } from "../src/data/seedData.js";
 import {
+  addCompetition,
   addPlayerInjury,
   addPlayerSanction,
+  addAnnouncement,
+  addMatch,
+  addSponsor,
   addTeam,
   deleteLeague,
+  deleteAnnouncement,
   deletePlayer,
   deletePlayerInjury,
+  deletePlayoffMatches,
+  deleteSponsor,
+  generatePlayoffBracket,
+  generateSchedule,
   saveMatchSheet,
   saveResult,
   updatePlayerInjury,
   updateLeagueMembership,
   updateLeagueRules,
+  updateAnnouncement,
+  updateSponsor,
   updateTeam
 } from "../src/lib/actions.js";
 import {
   calculatePlayerStats,
   calculateStandings,
   calculateSuspensionNotices,
+  calculateYellowCardDiscipline,
+  buildSmartHighlights,
   getCurrentLeague,
-  normalizeStore
+  normalizeStore,
+  playoffMatches,
+  regularMatches,
+  sanitizeExternalUrl,
+  sanitizeImageUrl,
+  scopeLeagueToCompetition
 } from "../src/lib/domain.js";
-import { validatePlayerFullName } from "../src/lib/playerValidation.js";
+import { updateMatchSheetEventItem } from "../src/lib/matchSheet.js";
+import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { hashPassword, verifyPassword } from "../server/password.js";
 
 let store = normalizeStore(structuredClone(seedData));
@@ -30,15 +49,41 @@ let league = getCurrentLeague(store);
 const standings = calculateStandings(league);
 assert.equal(standings[0].team.name, "HALCONES FC");
 assert.equal(standings[0].points, 3);
+assert.equal(scopeLeagueToCompetition(league, "comp-copa-tinguindin-2026").teams.length, 0);
+const hugoNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p6" && notice.type === "Expulsion");
+assert.equal(hugoNotice.remainingMatches, 1);
+assert.equal(hugoNotice.returnRound, 3);
 
-store = addTeam(store, league.id, { name: "Club Prueba", coach: "Responsable" });
+store = addTeam(store, league.id, {
+  name: "Club Prueba",
+  coach: "Responsable",
+  assistantCoach: "Auxiliar Prueba",
+  address: "Cancha Norte",
+  colors: "#abcdef",
+  logoUrl: "data:image/png;base64,ESCUDO1"
+});
 league = getCurrentLeague(store);
 assert.equal(league.teams.at(-1).name, "CLUB PRUEBA");
+assert.equal(league.teams.at(-1).competitionId, league.currentCompetitionId);
+assert.equal(league.teams.at(-1).assistantCoach, "AUXILIAR PRUEBA");
+assert.equal(league.teams.at(-1).address, "CANCHA NORTE");
+assert.equal(league.teams.at(-1).colors, "#abcdef");
+assert.equal(league.teams.at(-1).logoUrl, "data:image/png;base64,ESCUDO1");
 
 const createdTeamId = league.teams.at(-1).id;
-store = updateTeam(store, league.id, createdTeamId, { name: "Club Prueba Editado", coach: "Responsable Dos", colors: "#123456" });
+store = updateTeam(store, league.id, createdTeamId, {
+  name: "Club Prueba Editado",
+  coach: "Responsable Dos",
+  assistantCoach: "",
+  address: "Cancha Sur",
+  colors: "#123456",
+  logoUrl: ""
+});
 league = getCurrentLeague(store);
 assert.equal(league.teams.find((team) => team.id === createdTeamId).name, "CLUB PRUEBA EDITADO");
+assert.equal(league.teams.find((team) => team.id === createdTeamId).assistantCoach, "");
+assert.equal(league.teams.find((team) => team.id === createdTeamId).address, "CANCHA SUR");
+assert.equal(league.teams.find((team) => team.id === createdTeamId).logoUrl, "");
 
 store = updateTeam(store, league.id, "real", {
   name: "Real Alameda",
@@ -53,15 +98,222 @@ assert.equal(league.teams.find((team) => team.id === "real").status, "withdrawn"
 assert.equal(league.matches.find((match) => match.id === "m3").status, "walkover");
 assert.equal(league.matches.find((match) => match.id === "m3").awayGoals, 3);
 
+store = updateTeam(store, league.id, "real", {
+  name: "Real Alameda",
+  coach: "Carlos Vega",
+  colors: "#7c2d12",
+  status: "active",
+  withdrawnRound: "",
+  withdrawnReason: ""
+});
+league = getCurrentLeague(store);
+assert.equal(league.teams.find((team) => team.id === "real").status, "active");
+assert.equal(league.matches.find((match) => match.id === "m3").status, "scheduled");
+assert.equal(league.matches.find((match) => match.id === "m3").homeGoals, null);
+assert.equal(league.matches.find((match) => match.id === "m3").awayGoals, null);
+
+store = addAnnouncement(store, league.id, {
+  title: "Cambio de sede",
+  body: "La jornada se jugara en la unidad norte",
+  status: "active",
+  date: "2026-06-12"
+});
+league = getCurrentLeague(store);
+const announcementId = league.announcements.at(-1).id;
+assert.equal(league.announcements.at(-1).title, "CAMBIO DE SEDE");
+store = updateAnnouncement(store, league.id, announcementId, {
+  title: "Cambio de sede",
+  body: "La jornada se jugara en la unidad sur",
+  status: "archived",
+  date: "2026-06-12"
+});
+league = getCurrentLeague(store);
+assert.equal(league.announcements.find((announcement) => announcement.id === announcementId).status, "archived");
+store = deleteAnnouncement(store, league.id, announcementId);
+league = getCurrentLeague(store);
+assert.equal(league.announcements.some((announcement) => announcement.id === announcementId), false);
+
+store = addSponsor(store, league.id, {
+  name: "Panaderia Local",
+  placement: "home_banner",
+  status: "active",
+  imageUrl: "data:image/png;base64,AAAA",
+  linkUrl: "https://patrocinador.test",
+  sortOrder: 2,
+  notes: "Pago mensual"
+});
+league = getCurrentLeague(store);
+const sponsorId = league.sponsors.at(-1).id;
+assert.equal(league.sponsors.at(-1).name, "PANADERIA LOCAL");
+assert.equal(league.sponsors.at(-1).sortOrder, 2);
+assert.equal(sanitizeExternalUrl("javascript:alert(1)"), "");
+assert.equal(sanitizeImageUrl("data:text/html;base64,PHNjcmlwdA=="), "");
+store = updateSponsor(store, league.id, sponsorId, {
+  name: "Panaderia Local Centro",
+  placement: "home_banner",
+  status: "inactive",
+  imageUrl: "data:image/png;base64,BBBB",
+  linkUrl: "",
+  sortOrder: 1,
+  notes: "Pausa temporal"
+});
+league = getCurrentLeague(store);
+assert.equal(league.sponsors.find((sponsor) => sponsor.id === sponsorId).status, "inactive");
+assert.equal(league.sponsors.find((sponsor) => sponsor.id === sponsorId).imageUrl, "data:image/png;base64,BBBB");
+store = deleteSponsor(store, league.id, sponsorId);
+league = getCurrentLeague(store);
+assert.equal(league.sponsors.some((sponsor) => sponsor.id === sponsorId), false);
+
+store = addCompetition(store, league.id, {
+  name: "Liga Femenil",
+  type: "liga",
+  season: "Apertura 2026",
+  status: "active",
+  activeRound: "",
+  startsAt: "",
+  endsAt: ""
+});
+league = getCurrentLeague(store);
+const femenilCompetitionId = league.competitions.find((competition) => competition.name === "LIGA FEMENIL").id;
+store = addTeam(store, league.id, { competitionId: femenilCompetitionId, name: "Femenil Norte", coach: "Responsable Femenil" });
+league = getCurrentLeague(store);
+assert.equal(scopeLeagueToCompetition(league, femenilCompetitionId).teams.length, 1);
+assert.equal(scopeLeagueToCompetition(league, league.currentCompetitionId).teams.some((team) => team.name === "FEMENIL NORTE"), false);
+
+const regularBeforePlayoff = regularMatches(league).length;
+store = addMatch(store, league.id, {
+  competitionId: league.currentCompetitionId,
+  stage: "playoff",
+  round: "0",
+  playoffRound: "Semifinal",
+  playoffLeg: "Ida",
+  date: "2026-07-01",
+  time: "18:00",
+  venue: "Cancha Municipal",
+  homeTeamId: "halcones",
+  awayTeamId: "union",
+  aggregateHome: "",
+  aggregateAway: ""
+});
+league = getCurrentLeague(store);
+assert.equal(regularMatches(league).length, regularBeforePlayoff);
+assert.equal(playoffMatches(league).at(-1).playoffRound, "SEMIFINAL");
+assert.equal(playoffMatches(league).at(-1).round, 0);
+const playoffCountBeforeAuto = playoffMatches(league).length;
+store = generatePlayoffBracket(store, league.id, {
+  competitionId: league.currentCompetitionId,
+  phase: "semifinal",
+  legMode: "two_legs",
+  startDate: "2026-07-08"
+});
+league = getCurrentLeague(store);
+assert.equal(regularMatches(league).length, regularBeforePlayoff);
+assert.equal(playoffMatches(league).length, playoffCountBeforeAuto + 4);
+assert.equal(playoffMatches(league).at(-1).playoffRound, "SEMIFINAL");
+assert.equal(playoffMatches(league).at(-1).playoffLeg, "VUELTA");
+store = deletePlayoffMatches(store, league.id, { competitionId: league.currentCompetitionId });
+league = getCurrentLeague(store);
+assert.equal(playoffMatches(league).length, 0);
+assert.equal(regularMatches(league).length, regularBeforePlayoff);
+
+const seededPlayoffStore = normalizeStore({
+  currentLeagueId: "liga-siembra",
+  leagues: [
+    {
+      id: "liga-siembra",
+      name: "Liga Siembra",
+      city: "Ciudad Prueba",
+      season: "2026",
+      currentCompetitionId: "comp-siembra",
+      competitions: [
+        { id: "comp-siembra", name: "Liga", type: "liga", season: "2026", status: "active" },
+        { id: "comp-otra-categoria", name: "Copa", type: "copa", season: "2026", status: "active" }
+      ],
+      status: "active",
+      plan: "Sin limite",
+      ownerEmail: "siembra@demo.com",
+      renewalDate: "",
+      adBanner: "",
+      identity: {},
+      highlights: [],
+      announcements: [],
+      teams: Array.from({ length: 32 }, (_, index) => ({
+        id: `seed-team-${String(index + 1).padStart(2, "0")}`,
+        competitionId: "comp-siembra",
+        name: `Equipo ${String(index + 1).padStart(2, "0")}`,
+        coach: "",
+        colors: "#123456",
+        status: "active"
+      })).concat([
+        { id: "otra-categoria-1", competitionId: "comp-otra-categoria", name: "Otra Categoria 1", coach: "", colors: "#111111", status: "active" },
+        { id: "otra-categoria-2", competitionId: "comp-otra-categoria", name: "Otra Categoria 2", coach: "", colors: "#222222", status: "active" }
+      ]),
+      players: [],
+      matches: [],
+      sanctions: [],
+      injuries: []
+    },
+    {
+      id: "liga-externa",
+      name: "Liga Externa",
+      city: "Otra Ciudad",
+      season: "2026",
+      currentCompetitionId: "comp-externa",
+      competitions: [{ id: "comp-externa", name: "Liga Externa", type: "liga", season: "2026", status: "active" }],
+      status: "active",
+      plan: "Sin limite",
+      ownerEmail: "externa@demo.com",
+      renewalDate: "",
+      adBanner: "",
+      identity: {},
+      highlights: [],
+      announcements: [],
+      teams: [
+        { id: "externa-1", competitionId: "comp-externa", name: "Externa 1", coach: "", colors: "#333333", status: "active" },
+        { id: "externa-2", competitionId: "comp-externa", name: "Externa 2", coach: "", colors: "#444444", status: "active" }
+      ],
+      players: [],
+      matches: [],
+      sanctions: [],
+      injuries: []
+    }
+  ]
+});
+const seededRound16Store = generatePlayoffBracket(seededPlayoffStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  phase: "round16",
+  legMode: "single",
+  startDate: "2026-08-01"
+});
+const seededRound16League = seededRound16Store.leagues.find((item) => item.id === "liga-siembra");
+const seededRound16Matches = playoffMatches(scopeLeagueToCompetition(seededRound16League, "comp-siembra"));
+assert.equal(seededRound16Matches.length, 8);
+assert.equal(seededRound16Matches[0].homeTeamId, "seed-team-01");
+assert.equal(seededRound16Matches[0].awayTeamId, "seed-team-16");
+assert.equal(playoffMatches(scopeLeagueToCompetition(seededRound16League, "comp-otra-categoria")).length, 0);
+assert.equal(playoffMatches(seededRound16Store.leagues.find((item) => item.id === "liga-externa")).length, 0);
+
+const seededRound32Store = generatePlayoffBracket(seededPlayoffStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  phase: "round32",
+  legMode: "single",
+  startDate: "2026-08-01"
+});
+const seededRound32League = seededRound32Store.leagues.find((item) => item.id === "liga-siembra");
+const seededRound32Matches = playoffMatches(scopeLeagueToCompetition(seededRound32League, "comp-siembra"));
+assert.equal(seededRound32Matches.length, 16);
+assert.equal(seededRound32Matches[0].homeTeamId, "seed-team-01");
+assert.equal(seededRound32Matches[0].awayTeamId, "seed-team-32");
+
 store = updateLeagueMembership(store, league.id, {
-  plan: "Membresia Premium",
+  plan: "Sin limite",
   status: "suspended",
   ownerEmail: "admin.tinguindin@demo.com",
   renewalDate: "2026-08-01",
   membershipNotes: "Pago pendiente"
 });
 league = getCurrentLeague(store);
-assert.equal(league.plan, "Membresia Premium");
+assert.equal(league.plan, "Sin limite");
 assert.equal(league.status, "suspended");
 assert.equal(league.membershipNotes, "PAGO PENDIENTE");
 
@@ -72,11 +324,13 @@ store = updateLeagueRules(store, league.id, {
   forfeitGoalsAgainst: 1,
   yellowSuspensionLimit: 1,
   defaultRedSuspensionMatches: 2,
+  playoffQualifiers: 4,
   notes: "Regla de prueba"
 });
 league = getCurrentLeague(store);
 assert.equal(league.rules.forfeitGoalsFor, 4);
 assert.equal(league.rules.defaultRedSuspensionMatches, 2);
+assert.equal(league.rules.playoffQualifiers, 4);
 
 store = saveResult(store, league.id, {
   matchId: "m3",
@@ -156,11 +410,206 @@ const diegoNotice = calculateSuspensionNotices(league).find((notice) => notice.p
 assert.equal(diegoNotice.status, "available");
 assert.equal(diegoNotice.remainingMatches, 0);
 
+const yellowCycleLeague = normalizeStore({
+  currentLeagueId: "liga-amarillas",
+  leagues: [
+    {
+      id: "liga-amarillas",
+      name: "Liga Amarillas",
+      city: "Ciudad Prueba",
+      season: "2026",
+      currentCompetitionId: "comp-amarillas",
+      competitions: [{ id: "comp-amarillas", name: "Liga", type: "liga", season: "2026", status: "active" }],
+      status: "active",
+      plan: "Sin limite",
+      ownerEmail: "amarillas@demo.com",
+      renewalDate: "",
+      adBanner: "",
+      identity: {},
+      rules: {
+        withdrawalPolicy: "award_walkover",
+        forfeitPoints: 3,
+        forfeitGoalsFor: 3,
+        forfeitGoalsAgainst: 0,
+        yellowSuspensionLimit: 3,
+        defaultRedSuspensionMatches: 1,
+        notes: ""
+      },
+      highlights: [],
+      announcements: [],
+      teams: [
+        { id: "team-a", competitionId: "comp-amarillas", name: "Equipo A", coach: "", colors: "#111111", status: "active" },
+        { id: "team-b", competitionId: "comp-amarillas", name: "Equipo B", coach: "", colors: "#222222", status: "active" }
+      ],
+      players: [
+        { id: "player-a", teamId: "team-a", competitionId: "comp-amarillas", name: "Jugador A", number: 10, position: "Medio" }
+      ],
+      matches: [
+        { id: "yc-1", competitionId: "comp-amarillas", round: 1, date: "2026-01-01", time: "", venue: "", homeTeamId: "team-a", awayTeamId: "team-b", status: "finished", homeGoals: 0, awayGoals: 0, events: [{ type: "yellow", playerId: "player-a", teamId: "team-a", minute: 20 }] },
+        { id: "yc-2", competitionId: "comp-amarillas", round: 2, date: "2026-01-08", time: "", venue: "", homeTeamId: "team-b", awayTeamId: "team-a", status: "finished", homeGoals: 0, awayGoals: 0, events: [{ type: "yellow", playerId: "player-a", teamId: "team-a", minute: 30 }] },
+        { id: "yc-3", competitionId: "comp-amarillas", round: 3, date: "2026-01-15", time: "", venue: "", homeTeamId: "team-a", awayTeamId: "team-b", status: "finished", homeGoals: 0, awayGoals: 0, events: [{ type: "yellow", playerId: "player-a", teamId: "team-a", minute: 40 }] },
+        { id: "yc-4", competitionId: "comp-amarillas", round: 4, date: "2026-01-22", time: "", venue: "", homeTeamId: "team-b", awayTeamId: "team-a", status: "scheduled", homeGoals: null, awayGoals: null, events: [] }
+      ],
+      sanctions: [],
+      injuries: []
+    }
+  ]
+}).leagues[0];
+const activeYellowDiscipline = calculateYellowCardDiscipline(yellowCycleLeague);
+assert.equal(activeYellowDiscipline.length, 1);
+assert.equal(activeYellowDiscipline[0].status, "suspended");
+assert.equal(activeYellowDiscipline[0].yellowCards, 3);
+assert.equal(calculateSuspensionNotices(yellowCycleLeague).find((notice) => notice.type === "Acumulacion").status, "active");
+
+const servedYellowCycleLeague = {
+  ...yellowCycleLeague,
+  matches: yellowCycleLeague.matches.map((match) => (
+    match.id === "yc-4"
+      ? { ...match, status: "finished", homeGoals: 0, awayGoals: 0, events: [] }
+      : match
+  ))
+};
+assert.equal(calculateYellowCardDiscipline(servedYellowCycleLeague).length, 0);
+
+const restartedYellowCycleLeague = {
+  ...servedYellowCycleLeague,
+  matches: [
+    ...servedYellowCycleLeague.matches,
+    { id: "yc-5", competitionId: "comp-amarillas", round: 5, date: "2026-01-29", time: "", venue: "", homeTeamId: "team-a", awayTeamId: "team-b", status: "finished", homeGoals: 0, awayGoals: 0, events: [{ type: "yellow", playerId: "player-a", teamId: "team-a", minute: 10 }] }
+  ]
+};
+const restartedYellowDiscipline = calculateYellowCardDiscipline(restartedYellowCycleLeague);
+assert.equal(restartedYellowDiscipline.length, 1);
+assert.equal(restartedYellowDiscipline[0].yellowCards, 1);
+assert.equal(restartedYellowDiscipline[0].remainingToSuspension, 2);
+
+const fiveGoalHighlights = buildSmartHighlights(normalizeStore({
+  currentLeagueId: "liga-goles",
+  leagues: [
+    {
+      id: "liga-goles",
+      name: "Liga Goles",
+      city: "Ciudad Prueba",
+      season: "2026",
+      currentCompetitionId: "comp-goles",
+      competitions: [{ id: "comp-goles", name: "Liga", type: "liga", season: "2026", status: "active" }],
+      status: "active",
+      plan: "Sin limite",
+      ownerEmail: "goles@demo.com",
+      renewalDate: "",
+      adBanner: "",
+      identity: {},
+      highlights: [],
+      announcements: [],
+      teams: [
+        { id: "goles-a", competitionId: "comp-goles", name: "Equipo Goles", coach: "", colors: "#111111", status: "active" },
+        { id: "goles-b", competitionId: "comp-goles", name: "Rival", coach: "", colors: "#222222", status: "active" }
+      ],
+      players: [
+        { id: "goleador-5", teamId: "goles-a", competitionId: "comp-goles", name: "Goleador Cinco", number: 9, position: "Delantero" }
+      ],
+      matches: [
+        {
+          id: "goles-m1",
+          competitionId: "comp-goles",
+          round: 2,
+          date: "2026-02-01",
+          time: "",
+          venue: "",
+          homeTeamId: "goles-a",
+          awayTeamId: "goles-b",
+          status: "finished",
+          homeGoals: 5,
+          awayGoals: 0,
+          events: Array.from({ length: 5 }, () => ({ type: "goal", playerId: "goleador-5", teamId: "goles-a", minute: 0 }))
+        }
+      ],
+      sanctions: [],
+      injuries: []
+    }
+  ]
+}).leagues[0]);
+assert.equal(fiveGoalHighlights.some((highlight) => highlight.toLowerCase().includes("5 goles")), true);
+assert.equal(fiveGoalHighlights.some((highlight) => /hattrick/i.test(highlight)), false);
+
+const scheduleStoreBefore = store;
+const scheduleLeagueBefore = getCurrentLeague(scheduleStoreBefore);
+const scheduleCompetitionId = scheduleLeagueBefore.currentCompetitionId;
+const scheduleTeamCount = scheduleLeagueBefore.teams.filter((team) => (team.competitionId || scheduleCompetitionId) === scheduleCompetitionId && team.status !== "withdrawn").length;
+const singleTurnRounds = scheduleTeamCount % 2 === 0 ? scheduleTeamCount - 1 : scheduleTeamCount;
+const scheduleStartRound = 40;
+store = generateSchedule(store, scheduleLeagueBefore.id, {
+  competitionId: scheduleCompetitionId,
+  mode: "full",
+  startRound: scheduleStartRound,
+  startDate: "2026-07-01",
+  intervalDays: 7,
+  randomize: "",
+  roundTrip: "on",
+  replaceScheduled: ""
+});
+league = getCurrentLeague(store);
+const roundTripMatches = league.matches.filter((match) => (
+  match.competitionId === scheduleCompetitionId &&
+  (match.stage || "regular") === "regular" &&
+  Number(match.round) >= scheduleStartRound
+));
+assert.equal(new Set(roundTripMatches.map((match) => match.round)).size, singleTurnRounds * 2);
+const firstTurnMatch = roundTripMatches.find((match) => Number(match.round) === scheduleStartRound);
+const secondTurnMatch = roundTripMatches.find((match) => (
+  Number(match.round) === scheduleStartRound + singleTurnRounds &&
+  match.homeTeamId === firstTurnMatch.awayTeamId &&
+  match.awayTeamId === firstTurnMatch.homeTeamId
+));
+assert.ok(secondTurnMatch);
+
 const passwordHash = hashPassword("admin123");
 assert.equal(verifyPassword("admin123", passwordHash), true);
 assert.equal(verifyPassword("mal-password", passwordHash), false);
 assert.equal(validatePlayerFullName("JUAN PEREZ").valid, true);
 assert.equal(validatePlayerFullName("JUAN").valid, false);
+const duplicateValidationLeague = {
+  ...league,
+  players: [...league.players, { id: "player-duplicate-test", name: "JOSE PEREZ", teamId: "halcones" }]
+};
+assert.equal(findDuplicatePlayer(duplicateValidationLeague, { name: "  José   Pérez  " })?.name, "JOSE PEREZ");
+assert.equal(findDuplicatePlayer(duplicateValidationLeague, { name: "JOSE PEREZ" }, "player-duplicate-test")?.id, undefined);
+
+const sheetEvent = {
+  id: "event-test",
+  type: "goal",
+  teamId: "halcones",
+  playerId: "p1",
+  minute: "",
+  suspensionMatches: 0,
+  reason: ""
+};
+const playerChangedEvent = updateMatchSheetEventItem(sheetEvent, "playerId", "p2");
+assert.equal(playerChangedEvent.playerId, "p2");
+const teamChangedEvent = updateMatchSheetEventItem(sheetEvent, "teamId", "union", {
+  getPlayersForTeam: (teamId) => teamId === "union" ? [{ id: "p3" }] : []
+});
+assert.equal(teamChangedEvent.teamId, "union");
+assert.equal(teamChangedEvent.playerId, "p3");
+const lockedGoalTeamEvent = updateMatchSheetEventItem(sheetEvent, "teamId", "union", {
+  getPlayersForTeam: (teamId) => teamId === "union" ? [{ id: "p3" }] : [],
+  lockGoalTeam: true
+});
+assert.equal(lockedGoalTeamEvent.teamId, "halcones");
+assert.equal(lockedGoalTeamEvent.playerId, "p1");
+const lockedCardEvent = updateMatchSheetEventItem({ ...sheetEvent, type: "yellow", lockedTeamId: "halcones" }, "teamId", "union", {
+  getPlayersForTeam: (teamId) => teamId === "union" ? [{ id: "p3" }] : []
+});
+assert.equal(lockedCardEvent.teamId, "halcones");
+assert.equal(lockedCardEvent.playerId, "p1");
+const redChangedEvent = updateMatchSheetEventItem(sheetEvent, "type", "red", {
+  defaultRedSuspensionMatches: 2
+});
+assert.equal(redChangedEvent.suspensionMatches, 2);
+const redReasonChangedEvent = updateMatchSheetEventItem(redChangedEvent, "reason", "Conducta violenta");
+assert.equal(redReasonChangedEvent.reason, "Conducta violenta");
+const redSuspensionChangedEvent = updateMatchSheetEventItem(redReasonChangedEvent, "suspensionMatches", "3");
+assert.equal(redSuspensionChangedEvent.suspensionMatches, "3");
 
 const multiLeagueStore = normalizeStore({
   ...structuredClone(seedData),
@@ -205,6 +654,7 @@ store = saveMatchSheet(store, league.id, {
   matchId: "m4",
   homeGoals: 2,
   awayGoals: 0,
+  observations: "Arbitro reporta incidentes al final del partido",
   events: [
     { type: "goal", playerId: "p3", minute: 12 },
     { type: "goal", playerId: "p4", minute: 55 },
@@ -215,7 +665,25 @@ league = getCurrentLeague(store);
 const acta = league.matches.find((match) => match.id === "m4");
 assert.equal(acta.status, "finished");
 assert.equal(acta.events.length, 3);
+assert.equal(acta.observations, "ARBITRO REPORTA INCIDENTES AL FINAL DEL PARTIDO");
 assert.equal(acta.events.find((event) => event.type === "red").suspensionMatches, 2);
+
+store = saveMatchSheet(store, league.id, {
+  matchId: "m3",
+  homeGoals: 0,
+  awayGoals: 5,
+  status: "walkover",
+  resolutionType: "no_show",
+  resolutionNote: "Default administrativo 5-0 por inasistencia.",
+  events: []
+});
+league = getCurrentLeague(store);
+const defaultActa = league.matches.find((match) => match.id === "m3");
+assert.equal(defaultActa.status, "walkover");
+assert.equal(defaultActa.homeGoals, 0);
+assert.equal(defaultActa.awayGoals, 5);
+assert.equal(defaultActa.events.length, 0);
+assert.equal(defaultActa.resolutionType, "no_show");
 
 store = deletePlayerInjury(store, league.id, marioInjury.id);
 league = getCurrentLeague(store);

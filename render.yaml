@@ -1,31 +1,46 @@
 services:
   - type: web
-    name: liga-futbol-api
+    name: ligatec-web
     runtime: node
-    plan: free
-    buildCommand: npm ci
-    startCommand: npm run start:api:postgres
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
     healthCheckPath: /api/health
+    autoDeploy: false
     envVars:
       - key: NODE_ENV
         value: production
+      - key: SERVE_STATIC
+        value: "true"
       - key: API_HOST
         value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "true"
       - key: DATABASE_PROVIDER
         value: postgres
       - key: DATABASE_SSL
         value: "true"
+      - key: IMAGE_STORAGE_PROVIDER
+        value: supabase
+      - key: IMAGE_UPLOAD_MAX_BYTES
+        value: "1800000"
+      - key: SUPABASE_STORAGE_BUCKET
+        value: ligatec-images
       - key: SHOW_RECOVERY_CODE_IN_RESPONSE
         value: "false"
-      - key: TOKEN_TTL_HOURS
-        value: "8"
-      - key: LOGIN_MAX_ATTEMPTS
+      - key: SEED_DEMO_USERS
+        value: "false"
+      - key: VITE_API_BASE_URL
+        value: /api
+      - key: PUBLIC_CACHE_SECONDS
         value: "5"
-      - key: LOGIN_LOCK_MINUTES
-        value: "15"
       - key: AUTH_SECRET
         sync: false
       - key: DATABASE_URL
         sync: false
       - key: CORS_ORIGIN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false

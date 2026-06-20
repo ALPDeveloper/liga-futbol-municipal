@@ -46,7 +46,7 @@ export const seedData = {
         }
       ],
       status: "active",
-      plan: "Membresia Pro",
+      plan: "Sin limite",
       ownerEmail: "admin.tinguindin@demo.com",
       renewalDate: "2026-07-15",
       adBanner: "Espacio disponible para patrocinador local",
@@ -63,6 +63,7 @@ export const seedData = {
         "Halcones FC mantiene la mejor defensa del torneo.",
         "Jornada 4 se disputara en la Unidad Deportiva Norte."
       ],
+      announcements: [],
       teams: [
         { id: "halcones", name: "Halcones FC", coach: "Marco Ruiz", colors: "#136f63" },
         { id: "union", name: "Union Municipal", coach: "Luis Mora", colors: "#d9480f" },
@@ -166,7 +167,7 @@ export const seedData = {
         }
       ],
       status: "suspended",
-      plan: "Membresia Basica",
+      plan: "Sin limite",
       ownerEmail: "pendiente@demo.com",
       renewalDate: "2026-06-01",
       adBanner: "Liga suspendida temporalmente",
@@ -178,7 +179,8 @@ export const seedData = {
         accentColor: "#b8d84c",
         secondaryColor: "#0f6b4f"
       },
-      highlights: ["Informacion no disponible mientras la membresia este suspendida."],
+      highlights: ["Informacion no disponible mientras la liga este suspendida."],
+      announcements: [],
       teams: [],
       players: [],
       matches: []

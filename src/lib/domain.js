@@ -1,6 +1,38 @@
 import { DEFAULT_IDENTITY, seedData } from "../data/seedData.js";
 
 export const YELLOW_SUSPENSION_LIMIT = 3;
+export const MAX_IMAGE_DATA_URL_LENGTH = 1_800_000;
+
+const ALLOWED_IMAGE_DATA_URL_PATTERN = /^data:image\/(png|jpe?g|webp|gif);base64,[a-z0-9+/=\s]+$/i;
+
+export function sanitizeExternalUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  try {
+    const url = new URL(text);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+export function sanitizeImageUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  if (text.startsWith("data:")) {
+    if (text.length > MAX_IMAGE_DATA_URL_LENGTH) return "";
+    return ALLOWED_IMAGE_DATA_URL_PATTERN.test(text) ? text.replace(/\s+/g, "") : "";
+  }
+
+  try {
+    const url = new URL(text);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
 
 export function upperText(value) {
   return String(value || "")
@@ -12,6 +44,34 @@ export function upperText(value) {
 
 function upperLines(items = []) {
   return items.map((item) => upperText(item)).filter(Boolean);
+}
+
+function venueIdFromName(name) {
+  const slug = upperText(name)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `venue-${slug || "cancha"}`;
+}
+
+function deriveVenuesFromMatches(matches = []) {
+  const venues = new Map();
+
+  for (const match of matches) {
+    const name = upperText(match.venue || "");
+    if (!name || venues.has(name)) continue;
+    venues.set(name, {
+      id: venueIdFromName(name),
+      name,
+      address: "",
+      notes: "CREADA DESDE PARTIDOS YA PROGRAMADOS.",
+      status: "active"
+    });
+  }
+
+  return [...venues.values()];
 }
 
 export function defaultCompetitionForLeague(league) {
@@ -42,6 +102,20 @@ export function normalizeStore(data) {
       const currentCompetitionId = competitions.some((competition) => competition.id === league.currentCompetitionId)
         ? league.currentCompetitionId
         : competitions.find((competition) => competition.status === "active")?.id || competitions[0]?.id || fallbackCompetition.id;
+      const normalizedTeams = (league.teams || []).map((team) => ({
+        ...team,
+        competitionId: team.competitionId || currentCompetitionId,
+        name: upperText(team.name),
+        coach: upperText(team.coach),
+        assistantCoach: upperText(team.assistantCoach),
+        address: upperText(team.address),
+        logoUrl: sanitizeImageUrl(team.logoUrl),
+        status: team.status || "active",
+        withdrawnRound: team.withdrawnRound || null,
+        withdrawnReason: team.withdrawnReason ? upperText(team.withdrawnReason) : null
+      }));
+      const teamCompetitionIds = new Map(normalizedTeams.map((team) => [team.id, team.competitionId || currentCompetitionId]));
+      const sourceVenues = league.venues?.length ? league.venues : deriveVenuesFromMatches(league.matches || []);
 
       return {
         ...league,
@@ -65,24 +139,46 @@ export function normalizeStore(data) {
           forfeitGoalsAgainst: 0,
           yellowSuspensionLimit: YELLOW_SUSPENSION_LIMIT,
           defaultRedSuspensionMatches: 1,
+          playoffQualifiers: 8,
           notes: "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.",
           ...(league.rules || {}),
           notes: upperText(league.rules?.notes || "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.")
         },
         membershipNotes: upperText(league.membershipNotes),
-        highlights: upperLines(league.highlights || []),
-        teams: (league.teams || []).map((team) => ({
-          ...team,
-          name: upperText(team.name),
-          coach: upperText(team.coach),
-          status: team.status || "active",
-          withdrawnRound: team.withdrawnRound || null,
-          withdrawnReason: team.withdrawnReason ? upperText(team.withdrawnReason) : null
+        sponsors: (league.sponsors || []).map((sponsor) => ({
+          ...sponsor,
+          name: upperText(sponsor.name),
+          placement: sponsor.placement || "home_banner",
+          status: sponsor.status || "active",
+          sortOrder: Number(sponsor.sortOrder || 0),
+          linkUrl: sanitizeExternalUrl(sponsor.linkUrl),
+          imageUrl: sanitizeImageUrl(sponsor.imageUrl),
+          notes: upperText(sponsor.notes || "")
         })),
+        venues: sourceVenues.map((venue) => ({
+          ...venue,
+          id: venue.id || venueIdFromName(venue.name),
+          name: upperText(venue.name || "Cancha"),
+          address: upperText(venue.address || ""),
+          notes: upperText(venue.notes || ""),
+          status: venue.status || "active"
+        })).filter((venue) => venue.name),
+        highlights: upperLines(league.highlights || []),
+        announcements: (league.announcements || []).map((announcement) => ({
+          ...announcement,
+          title: upperText(announcement.title || "Aviso"),
+          body: upperText(announcement.body || ""),
+          status: announcement.status || "active",
+          date: announcement.date || ""
+        })).filter((announcement) => announcement.body),
+        teams: normalizedTeams,
         players: (league.players || []).map((player) => ({
           ...player,
+          competitionId: player.competitionId || teamCompetitionIds.get(player.teamId) || currentCompetitionId,
           name: upperText(player.name),
-          position: upperText(player.position || "Jugador")
+          position: upperText(player.position || "Jugador"),
+          photoUrl: sanitizeImageUrl(player.photoUrl),
+          photoAuthorized: player.photoAuthorized === true
         })),
         sanctions: (league.sanctions || []).map((sanction) => ({
           ...sanction,
@@ -114,6 +210,7 @@ export function normalizeStore(data) {
           venue: upperText(match.venue),
           aggregateHome: match.aggregateHome ?? null,
           aggregateAway: match.aggregateAway ?? null,
+          observations: upperText(match.observations || ""),
           resolutionType: match.resolutionType || "normal",
           resolutionNote: match.resolutionNote ? upperText(match.resolutionNote) : null,
           events: (match.events || []).map((event) => ({
@@ -152,10 +249,17 @@ export function getCompetition(league, competitionId) {
 
 export function scopeLeagueToCompetition(league, competitionId = getDefaultCompetitionId(league)) {
   const targetCompetitionId = competitionId || getDefaultCompetitionId(league);
+  const teams = league.teams.filter((team) => (team.competitionId || targetCompetitionId) === targetCompetitionId);
+  const teamIds = new Set(teams.map((team) => team.id));
 
   return {
     ...league,
     currentCompetitionId: targetCompetitionId,
+    teams,
+    players: league.players.filter((player) => (
+      (player.competitionId || targetCompetitionId) === targetCompetitionId ||
+      teamIds.has(player.teamId)
+    )),
     matches: league.matches.filter((match) => match.competitionId === targetCompetitionId),
     sanctions: (league.sanctions || []).filter((sanction) => !sanction.competitionId || sanction.competitionId === targetCompetitionId),
     injuries: (league.injuries || []).filter((injury) => !injury.competitionId || injury.competitionId === targetCompetitionId)
@@ -172,6 +276,16 @@ export function regularMatches(league) {
 
 export function playoffMatches(league) {
   return league.matches.filter((match) => (match.stage || "regular") === "playoff");
+}
+
+export function getPlayoffPhaseLabel(qualifiers) {
+  const total = Number(qualifiers || 0);
+  if (total === 32) return "16vos de final";
+  if (total === 16) return "8vos de final";
+  if (total === 8) return "Cuartos de final";
+  if (total === 4) return "Semifinal";
+  if (total === 2) return "Final";
+  return total > 0 ? "Liguilla" : "";
 }
 
 export function calculateStandings(league) {
@@ -287,6 +401,74 @@ export function calculatePlayerStats(league) {
   return [...stats.values()];
 }
 
+export function calculateYellowCardDiscipline(league) {
+  const yellowLimit = Number(league.rules?.yellowSuspensionLimit || YELLOW_SUSPENSION_LIMIT);
+  const states = new Map();
+
+  function getState(playerId) {
+    if (!states.has(playerId)) {
+      states.set(playerId, {
+        playerId,
+        yellowCards: 0,
+        suspensionOrigin: null
+      });
+    }
+    return states.get(playerId);
+  }
+
+  for (const match of sortMatches(finishedMatches(league))) {
+    for (const state of states.values()) {
+      if (!state.suspensionOrigin) continue;
+      const player = getPlayer(league, state.playerId);
+      if (player && involvesTeam(match, player.teamId) && isAfterOrigin(match, state.suspensionOrigin)) {
+        state.yellowCards = 0;
+        state.suspensionOrigin = null;
+      }
+    }
+
+    for (const event of match.events || []) {
+      if (event.type !== "yellow") continue;
+      const player = getPlayer(league, event.playerId);
+      if (!player || !involvesTeam(match, player.teamId)) continue;
+
+      const state = getState(event.playerId);
+      if (state.suspensionOrigin) continue;
+
+      state.yellowCards += 1;
+      if (state.yellowCards >= yellowLimit) {
+        state.yellowCards = yellowLimit;
+        state.suspensionOrigin = { date: match.date, round: match.round, matchId: match.id };
+      }
+    }
+  }
+
+  return [...states.values()]
+    .map((state) => {
+      const player = getPlayer(league, state.playerId);
+      if (!player || !state.yellowCards) return null;
+      const team = getTeam(league, player.teamId);
+      const isSuspended = Boolean(state.suspensionOrigin);
+
+      return {
+        player,
+        team,
+        yellowCards: state.yellowCards,
+        yellowLimit,
+        remainingToSuspension: Math.max(yellowLimit - state.yellowCards, 0),
+        status: isSuspended ? "suspended" : state.yellowCards >= yellowLimit - 1 ? "warning" : "tracking",
+        message: isSuspended
+          ? `Suspendido 1 partido por acumulacion de ${yellowLimit} amarillas.`
+          : `${Math.max(yellowLimit - state.yellowCards, 0)} amarilla(s) para suspension.`
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (
+      (a.status === "suspended" ? 0 : 1) - (b.status === "suspended" ? 0 : 1) ||
+      b.yellowCards - a.yellowCards ||
+      a.player.name.localeCompare(b.player.name)
+    ));
+}
+
 function sortMatches(matches) {
   return [...matches].sort((a, b) => (
     String(a.date).localeCompare(String(b.date)) ||
@@ -315,6 +497,12 @@ function getNextScheduledMatch(league, teamId) {
   return sortMatches(league.matches.filter((match) => match.status === "scheduled" && involvesTeam(match, teamId)))[0] || null;
 }
 
+function getReturnMatch(league, teamId, remainingMatches, origin) {
+  const scheduled = sortMatches(league.matches.filter((match) => match.status === "scheduled" && involvesTeam(match, teamId) && isAfterOrigin(match, origin)));
+  if (remainingMatches > 0) return scheduled[remainingMatches] || null;
+  return scheduled[0] || null;
+}
+
 function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, origin }) {
   const player = getPlayer(league, playerId);
   if (!player) return null;
@@ -327,9 +515,11 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
   const served = Math.min(servedMatches.length, total);
   const remaining = Math.max(total - served, 0);
   const nextMatch = getNextScheduledMatch(league, player.teamId);
+  const returnMatch = getReturnMatch(league, player.teamId, remaining, origin);
   const status = remaining > 0 ? "active" : "available";
+  const fallbackReturnRound = origin?.round ? Number(origin.round) + total + 1 : null;
 
-  if (status === "available" && servedMatches.length !== total) return null;
+  if (status === "available" && servedMatches.length < total) return null;
 
   return {
     id: `${type}-${origin?.matchId || origin?.sanctionId || player.id}-${player.id}`,
@@ -341,7 +531,9 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
     servedMatches: served,
     remainingMatches: remaining,
     status,
-    nextMatch
+    nextMatch,
+    returnMatch,
+    returnRound: returnMatch?.round || fallbackReturnRound || ""
   };
 }
 
@@ -445,7 +637,12 @@ export function buildSmartHighlights(league) {
       const player = getPlayer(league, playerId);
       const team = player ? getTeam(league, player.teamId) : null;
       if (!player) continue;
-      highlights.push(`${player.name}${team ? ` de ${team.name}` : ""} hizo ${goals >= 3 ? "hattrick" : "doblete"} en la jornada ${latestRound}.`);
+      const goalLabel = goals === 2
+        ? "doblete"
+        : goals === 3
+          ? "hattrick"
+          : `${goals} goles`;
+      highlights.push(`${player.name}${team ? ` de ${team.name}` : ""} hizo ${goalLabel} en la jornada ${latestRound}.`);
     }
   }
 

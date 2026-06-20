@@ -8,6 +8,8 @@ export function hashPassword(password, salt = crypto.randomBytes(16).toString("h
 export function verifyPassword(password, storedHash) {
   if (!storedHash) return false;
   const [salt, originalHash] = storedHash.split(":");
+  if (!salt || !originalHash || !/^[a-f0-9]+$/i.test(originalHash)) return false;
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  if (hash.length !== originalHash.length) return false;
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(originalHash, "hex"));
 }

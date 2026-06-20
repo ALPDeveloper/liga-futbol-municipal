@@ -7,6 +7,7 @@ import { seedData } from "../src/data/seedData.js";
 import { defaultCompetitionForLeague, normalizeStore } from "../src/lib/domain.js";
 import { hashPassword } from "./password.js";
 import { ROOT_DIR } from "./env.js";
+import { runtimeConfig } from "./runtimeConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const configuredDbPath = process.env.DB_PATH || "data/liga-futbol.sqlite";
@@ -54,6 +55,23 @@ function runMigrations() {
   if (!ruleColumns.includes("default_red_suspension_matches")) {
     db.prepare("ALTER TABLE league_rules ADD COLUMN default_red_suspension_matches INTEGER NOT NULL DEFAULT 1").run();
   }
+  if (!ruleColumns.includes("playoff_qualifiers")) {
+    db.prepare("ALTER TABLE league_rules ADD COLUMN playoff_qualifiers INTEGER NOT NULL DEFAULT 8").run();
+  }
+
+  const sponsorColumns = db.prepare("PRAGMA table_info(sponsors)").all().map((column) => column.name);
+  if (!sponsorColumns.includes("image_url")) {
+    db.prepare("ALTER TABLE sponsors ADD COLUMN image_url TEXT").run();
+  }
+  if (!sponsorColumns.includes("link_url")) {
+    db.prepare("ALTER TABLE sponsors ADD COLUMN link_url TEXT").run();
+  }
+  if (!sponsorColumns.includes("sort_order")) {
+    db.prepare("ALTER TABLE sponsors ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0").run();
+  }
+  if (!sponsorColumns.includes("notes")) {
+    db.prepare("ALTER TABLE sponsors ADD COLUMN notes TEXT").run();
+  }
 
   const matchColumns = db.prepare("PRAGMA table_info(matches)").all().map((column) => column.name);
   if (!matchColumns.includes("competition_id")) {
@@ -73,6 +91,34 @@ function runMigrations() {
   }
   if (!matchColumns.includes("aggregate_away")) {
     db.prepare("ALTER TABLE matches ADD COLUMN aggregate_away INTEGER").run();
+  }
+  if (!matchColumns.includes("observations")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN observations TEXT").run();
+  }
+
+  const teamColumns = db.prepare("PRAGMA table_info(teams)").all().map((column) => column.name);
+  if (teamColumns.length && !teamColumns.includes("competition_id")) {
+    db.prepare("ALTER TABLE teams ADD COLUMN competition_id TEXT").run();
+  }
+  if (teamColumns.length && !teamColumns.includes("assistant_coach")) {
+    db.prepare("ALTER TABLE teams ADD COLUMN assistant_coach TEXT").run();
+  }
+  if (teamColumns.length && !teamColumns.includes("address")) {
+    db.prepare("ALTER TABLE teams ADD COLUMN address TEXT").run();
+  }
+  if (teamColumns.length && !teamColumns.includes("logo_url")) {
+    db.prepare("ALTER TABLE teams ADD COLUMN logo_url TEXT").run();
+  }
+
+  const playerColumns = db.prepare("PRAGMA table_info(players)").all().map((column) => column.name);
+  if (playerColumns.length && !playerColumns.includes("competition_id")) {
+    db.prepare("ALTER TABLE players ADD COLUMN competition_id TEXT").run();
+  }
+  if (playerColumns.length && !playerColumns.includes("photo_url")) {
+    db.prepare("ALTER TABLE players ADD COLUMN photo_url TEXT").run();
+  }
+  if (playerColumns.length && !playerColumns.includes("photo_authorized")) {
+    db.prepare("ALTER TABLE players ADD COLUMN photo_authorized INTEGER NOT NULL DEFAULT 0").run();
   }
 
   const sanctionColumns = db.prepare("PRAGMA table_info(player_sanctions)").all().map((column) => column.name);
@@ -178,6 +224,8 @@ function seedMissingCompetitions() {
 
     const currentCompetitionId = league.current_competition_id || competition.id;
     db.prepare("UPDATE leagues SET current_competition_id = ? WHERE id = ?").run(currentCompetitionId, league.id);
+    db.prepare("UPDATE teams SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
+    db.prepare("UPDATE players SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
     db.prepare("UPDATE matches SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
     db.prepare("UPDATE player_sanctions SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
     db.prepare("UPDATE player_injuries SET competition_id = ? WHERE league_id = ? AND competition_id IS NULL").run(currentCompetitionId, league.id);
@@ -185,6 +233,8 @@ function seedMissingCompetitions() {
 }
 
 function seedUsers() {
+  if (!runtimeConfig.seedDemoUsers) return;
+
   const users = [
     {
       id: "user-super-admin",
@@ -220,6 +270,13 @@ export function getStore() {
     const identity = db.prepare("SELECT * FROM league_identities WHERE league_id = ?").get(leagueRow.id) || {};
     const rules = db.prepare("SELECT * FROM league_rules WHERE league_id = ?").get(leagueRow.id) || {};
     const highlights = db.prepare("SELECT body FROM league_highlights WHERE league_id = ? ORDER BY sort_order, id").all(leagueRow.id).map((row) => row.body);
+    const announcements = db.prepare("SELECT * FROM league_announcements WHERE league_id = ? ORDER BY date DESC, title").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      title: row.title,
+      body: row.body,
+      status: row.status,
+      date: row.date
+    }));
     const competitions = db.prepare("SELECT * FROM competitions WHERE league_id = ? ORDER BY status, season DESC, name").all(leagueRow.id).map((row) => ({
       id: row.id,
       name: row.name,
@@ -232,19 +289,26 @@ export function getStore() {
     }));
     const teams = db.prepare("SELECT * FROM teams WHERE league_id = ? ORDER BY name").all(leagueRow.id).map((row) => ({
       id: row.id,
+      competitionId: row.competition_id,
       name: row.name,
       coach: row.coach,
+      assistantCoach: row.assistant_coach,
+      address: row.address,
       colors: row.colors,
+      logoUrl: row.logo_url,
       status: row.status,
       withdrawnRound: row.withdrawn_round,
       withdrawnReason: row.withdrawn_reason
     }));
     const players = db.prepare("SELECT * FROM players WHERE league_id = ? ORDER BY team_id, number, name").all(leagueRow.id).map((row) => ({
       id: row.id,
+      competitionId: row.competition_id,
       teamId: row.team_id,
       name: row.name,
       number: row.number,
       position: row.position,
+      photoUrl: row.photo_url || "",
+      photoAuthorized: Boolean(row.photo_authorized),
       status: row.status
     }));
     const sanctions = db.prepare("SELECT * FROM player_sanctions WHERE league_id = ? ORDER BY date DESC, id DESC").all(leagueRow.id).map((row) => ({
@@ -271,6 +335,16 @@ export function getStore() {
       status: row.status,
       notes: row.notes
     }));
+    const sponsors = db.prepare("SELECT * FROM sponsors WHERE league_id = ? ORDER BY sort_order, name").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      name: row.name,
+      placement: row.placement,
+      status: row.status,
+      imageUrl: row.image_url,
+      linkUrl: row.link_url,
+      sortOrder: row.sort_order,
+      notes: row.notes
+    }));
     const matches = db.prepare("SELECT * FROM matches WHERE league_id = ? ORDER BY round, date, time").all(leagueRow.id).map((row) => ({
       id: row.id,
       competitionId: row.competition_id,
@@ -288,6 +362,7 @@ export function getStore() {
       status: row.status,
       homeGoals: row.home_goals,
       awayGoals: row.away_goals,
+      observations: row.observations,
       resolutionType: row.resolution_type,
       resolutionNote: row.resolution_note,
       events: db.prepare("SELECT * FROM match_events WHERE match_id = ? ORDER BY id").all(row.id).map((event) => ({
@@ -328,13 +403,16 @@ export function getStore() {
         forfeitGoalsAgainst: rules.forfeit_goals_against,
         yellowSuspensionLimit: rules.yellow_suspension_limit,
         defaultRedSuspensionMatches: rules.default_red_suspension_matches,
+        playoffQualifiers: rules.playoff_qualifiers,
         notes: rules.notes
       },
       highlights,
+      announcements,
       teams,
       players,
       sanctions,
       injuries,
+      sponsors,
       matches
     };
   });
@@ -368,6 +446,7 @@ export function importStore(store) {
       DELETE FROM players;
       DELETE FROM teams;
       DELETE FROM competitions;
+      DELETE FROM league_announcements;
       DELETE FROM league_highlights;
       DELETE FROM league_rules;
       DELETE FROM league_identities;
@@ -425,8 +504,8 @@ export function importStore(store) {
       );
 
       db.prepare(`
-        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, playoff_qualifiers, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         league.id,
         league.rules?.withdrawalPolicy || "award_walkover",
@@ -435,6 +514,7 @@ export function importStore(store) {
         Number(league.rules?.forfeitGoalsAgainst ?? 0),
         Number(league.rules?.yellowSuspensionLimit ?? 3),
         Number(league.rules?.defaultRedSuspensionMatches ?? 1),
+        Number(league.rules?.playoffQualifiers ?? 8),
         league.rules?.notes || "Si un equipo se da de baja, la liga puede otorgar triunfo por default segun sus estatutos."
       );
 
@@ -442,16 +522,51 @@ export function importStore(store) {
         db.prepare("INSERT INTO league_highlights (league_id, body, sort_order) VALUES (?, ?, ?)").run(league.id, highlight, index);
       });
 
+      for (const announcement of league.announcements || []) {
+        db.prepare(`
+          INSERT INTO league_announcements (id, league_id, title, body, status, date)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          announcement.id,
+          league.id,
+          announcement.title,
+          announcement.body,
+          announcement.status || "active",
+          announcement.date || ""
+        );
+      }
+
+      for (const sponsor of league.sponsors || []) {
+        db.prepare(`
+          INSERT INTO sponsors (id, league_id, name, placement, status, image_url, link_url, sort_order, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          sponsor.id,
+          league.id,
+          sponsor.name,
+          sponsor.placement || "home_banner",
+          sponsor.status || "active",
+          sponsor.imageUrl || "",
+          sponsor.linkUrl || "",
+          Number(sponsor.sortOrder || 0),
+          sponsor.notes || ""
+        );
+      }
+
       for (const team of league.teams) {
         db.prepare(`
-          INSERT INTO teams (id, league_id, name, coach, colors, status, withdrawn_round, withdrawn_reason)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO teams (id, league_id, competition_id, name, coach, assistant_coach, address, colors, logo_url, status, withdrawn_round, withdrawn_reason)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           team.id,
           league.id,
+          team.competitionId || league.currentCompetitionId,
           team.name,
           team.coach,
+          team.assistantCoach || "",
+          team.address || "",
           team.colors,
+          team.logoUrl || "",
           team.status || "active",
           team.withdrawnRound || null,
           team.withdrawnReason || null
@@ -460,9 +575,9 @@ export function importStore(store) {
 
       for (const player of league.players) {
         db.prepare(`
-          INSERT INTO players (id, league_id, team_id, name, number, position, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(player.id, league.id, player.teamId, player.name, player.number, player.position, player.status || "active");
+          INSERT INTO players (id, league_id, competition_id, team_id, name, number, position, photo_url, photo_authorized, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(player.id, league.id, player.competitionId || league.teams.find((team) => team.id === player.teamId)?.competitionId || league.currentCompetitionId, player.teamId, player.name, player.number, player.position, player.photoUrl || "", player.photoAuthorized ? 1 : 0, player.status || "active");
       }
 
       for (const sanction of league.sanctions || []) {
@@ -505,8 +620,8 @@ export function importStore(store) {
 
       for (const match of league.matches) {
         db.prepare(`
-          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, round, date, time, venue, home_team_id, away_team_id, status, home_goals, away_goals, resolution_type, resolution_note)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, round, date, time, venue, home_team_id, away_team_id, status, home_goals, away_goals, observations, resolution_type, resolution_note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           match.id,
           league.id,
@@ -525,6 +640,7 @@ export function importStore(store) {
           match.status,
           match.homeGoals,
           match.awayGoals,
+          match.observations || "",
           match.resolutionType || "normal",
           match.resolutionNote || null
         );

@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import "../server/env.js";
 import { DB_PATH, db } from "../server/database.js";
+import { initializePostgresDatabase, postgresPool } from "../server/postgresDatabase.js";
 import { ROOT_DIR } from "../server/env.js";
+
+const DATABASE_PROVIDER = process.env.DATABASE_PROVIDER === "postgres" ? "postgres" : "sqlite";
 
 const TABLES = [
   "leagues",
@@ -9,6 +13,7 @@ const TABLES = [
   "league_identities",
   "league_rules",
   "league_highlights",
+  "league_announcements",
   "teams",
   "players",
   "matches",
@@ -54,11 +59,21 @@ function sqlValue(column, value) {
   if (DATE_COLUMNS.has(column) && String(value).trim() === "") return "NULL";
   if (BOOLEAN_COLUMNS.has(column)) return Number(value) ? "TRUE" : "FALSE";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
+  if (value instanceof Date) return `'${value.toISOString().replaceAll("'", "''")}'`;
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function insertStatements(table) {
-  const rows = db.prepare(`SELECT * FROM ${sqlIdentifier(table)}`).all();
+async function selectRows(table) {
+  if (DATABASE_PROVIDER === "postgres") {
+    const result = await postgresPool.query(`SELECT * FROM ${sqlIdentifier(table)}`);
+    return result.rows;
+  }
+
+  return db.prepare(`SELECT * FROM ${sqlIdentifier(table)}`).all();
+}
+
+async function insertStatements(table) {
+  const rows = await selectRows(table);
   if (!rows.length) return [`-- ${table}: sin registros`];
 
   return rows.map((row) => {
@@ -69,11 +84,21 @@ function insertStatements(table) {
   });
 }
 
-function sequenceResetStatement({ table, sequence }) {
-  const row = db.prepare(`SELECT MAX(id) AS maxId FROM ${sqlIdentifier(table)}`).get();
+async function sequenceResetStatement({ table, sequence }) {
+  const row = DATABASE_PROVIDER === "postgres"
+    ? (await postgresPool.query(`SELECT MAX(id) AS "maxId" FROM ${sqlIdentifier(table)}`)).rows[0]
+    : db.prepare(`SELECT MAX(id) AS maxId FROM ${sqlIdentifier(table)}`).get();
   const maxId = Number(row?.maxId || 0);
   if (!maxId) return null;
   return `SELECT setval('${sequence}', ${maxId}, TRUE);`;
+}
+
+if (DATABASE_PROVIDER === "postgres") {
+  if (!process.env.DATABASE_URL) {
+    console.error("DATABASE_URL no esta configurado.");
+    process.exit(1);
+  }
+  await initializePostgresDatabase();
 }
 
 const configuredBackupDir = process.env.BACKUP_DIR || "backups";
@@ -85,8 +110,8 @@ const outputPath = path.join(outputDir, `supabase-seed-${timestamp()}.sql`);
 fs.mkdirSync(outputDir, { recursive: true });
 
 const lines = [
-  "-- Seed generado desde SQLite para Supabase/Postgres.",
-  `-- Origen: ${DB_PATH}`,
+  `-- Seed generado desde ${DATABASE_PROVIDER} para Supabase/Postgres.`,
+  `-- Origen: ${DATABASE_PROVIDER === "postgres" ? "DATABASE_URL configurada" : DB_PATH}`,
   `-- Fecha: ${new Date().toISOString()}`,
   "-- Contiene usuarios y hashes de contraseña. Tratar como archivo sensible.",
   "",
@@ -99,12 +124,12 @@ const lines = [
 
 for (const table of TABLES) {
   lines.push(`-- ${table}`);
-  lines.push(...insertStatements(table));
+  lines.push(...await insertStatements(table));
   lines.push("");
 }
 
 for (const item of IDENTITY_TABLES) {
-  const statement = sequenceResetStatement(item);
+  const statement = await sequenceResetStatement(item);
   if (statement) lines.push(statement);
 }
 
@@ -114,3 +139,5 @@ fs.writeFileSync(outputPath, lines.join("\n"), "utf8");
 
 console.log(`SQL Supabase generado: ${outputPath}`);
 console.log("Este archivo contiene usuarios y hashes de contraseña. No lo compartas publicamente.");
+
+await postgresPool?.end();

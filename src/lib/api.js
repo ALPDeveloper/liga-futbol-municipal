@@ -1,8 +1,19 @@
 import { API_BASE_URL } from "./apiBase.js";
 
-export async function fetchStoreFromApi() {
-  const response = await fetch(`${API_BASE_URL}/store`);
-  if (!response.ok) throw new Error("No se pudo cargar la API local");
+async function getApiErrorMessage(response, fallback) {
+  try {
+    const body = await response.json();
+    return body.error || body.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function fetchStoreFromApi(token = "") {
+  const response = await fetch(`${API_BASE_URL}/store`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+  if (!response.ok) throw new Error(await getApiErrorMessage(response, "No se pudo cargar la API local"));
   return response.json();
 }
 
@@ -16,7 +27,7 @@ export async function persistStoreToApi(store, token) {
     body: JSON.stringify(store)
   });
 
-  if (!response.ok) throw new Error("No se pudo guardar en la API local");
+  if (!response.ok) throw new Error(await getApiErrorMessage(response, "No se pudo guardar en la API local"));
   return response.json();
 }
 
@@ -27,7 +38,7 @@ export async function loginWithApi(email, password) {
     body: JSON.stringify({ email, password })
   });
 
-  if (!response.ok) throw new Error("Correo o contraseña incorrectos");
+  if (!response.ok) throw new Error(await getApiErrorMessage(response, "Correo o contraseña incorrectos"));
   return response.json();
 }
 
@@ -36,6 +47,6 @@ export async function fetchSessionFromApi(token) {
     headers: { Authorization: `Bearer ${token}` }
   });
 
-  if (!response.ok) throw new Error("Sesion invalida");
+  if (!response.ok) throw new Error(await getApiErrorMessage(response, "Sesion invalida"));
   return response.json();
 }

@@ -2,6 +2,9 @@ import "./env.js";
 import cors from "cors";
 import express from "express";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { ROOT_DIR } from "./env.js";
 import { listAuditLogs, logAudit } from "./audit.js";
 import { createToken, getAuthUser, requireAuth, requireSuperAdmin, toPublicUser } from "./auth.js";
 import {
@@ -28,6 +31,18 @@ import {
 } from "./dataLayer.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { runtimeConfig, validateRuntimeConfig } from "./runtimeConfig.js";
+import { getLocalUploadDir, uploadImageDataUrl } from "./imageStorage.js";
+import { postgresPool } from "./postgresDatabase.js";
+import {
+  applySecurityHeaders,
+  createRateLimiter,
+  requireStrongPassword,
+  scopeStoreForUser,
+  validateEmail,
+  validateStorePayload,
+  validateUserRole,
+  validateUserStatus
+} from "./security.js";
 
 validateRuntimeConfig();
 await initializeData();
@@ -38,18 +53,72 @@ const HOST = runtimeConfig.host;
 const LOGIN_MAX_ATTEMPTS = runtimeConfig.loginMaxAttempts;
 const LOGIN_LOCK_MINUTES = runtimeConfig.loginLockMinutes;
 const SHOW_RECOVERY_CODE_IN_RESPONSE = runtimeConfig.showRecoveryCodeInResponse;
+const DIST_DIR = path.join(ROOT_DIR, "dist");
+const DIST_INDEX = path.join(DIST_DIR, "index.html");
+let publicStoreCache = null;
+let publicStoreCacheUntil = 0;
 
 app.disable("x-powered-by");
-app.use((_request, response, next) => {
-  response.setHeader("X-Content-Type-Options", "nosniff");
-  response.setHeader("Referrer-Policy", "same-origin");
-  next();
+app.set("trust proxy", runtimeConfig.trustProxy);
+app.use(applySecurityHeaders);
+app.use(cors({
+  origin: runtimeConfig.corsOrigin,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  maxAge: 600
+}));
+app.use(express.json({ limit: runtimeConfig.jsonBodyLimit }));
+app.use("/uploads", express.static(getLocalUploadDir(), {
+  fallthrough: false,
+  immutable: true,
+  maxAge: "365d"
+}));
+
+const loginIpLimiter = createRateLimiter({
+  windowMs: runtimeConfig.loginIpWindowMinutes * 60 * 1000,
+  max: runtimeConfig.loginIpMaxAttempts,
+  keyGenerator: (request) => `login:${request.ip}`
 });
-app.use(cors({ origin: runtimeConfig.corsOrigin }));
-app.use(express.json({ limit: "5mb" }));
+
+const passwordResetLimiter = createRateLimiter({
+  windowMs: runtimeConfig.passwordResetWindowMinutes * 60 * 1000,
+  max: runtimeConfig.passwordResetMaxRequests,
+  keyGenerator: (request) => `reset:${request.ip}:${String(request.body?.email || "").trim().toLowerCase()}`
+});
+
+const passwordResetCompleteLimiter = createRateLimiter({
+  windowMs: runtimeConfig.passwordResetWindowMinutes * 60 * 1000,
+  max: runtimeConfig.passwordResetMaxRequests,
+  keyGenerator: (request) => `reset-complete:${request.ip}:${String(request.body?.email || "").trim().toLowerCase()}`
+});
 
 function canManageLeague(user, leagueId) {
   return user.role === "super_admin" || (user.role === "league_admin" && user.leagueId === leagueId);
+}
+
+function clearPublicCache() {
+  publicStoreCache = null;
+  publicStoreCacheUntil = 0;
+}
+
+async function getPublicStoreCached() {
+  const now = Date.now();
+  if (runtimeConfig.publicCacheSeconds > 0 && publicStoreCache && publicStoreCacheUntil > now) {
+    return publicStoreCache;
+  }
+
+  const publicStore = scopeStoreForUser(await getStoreData(), null);
+  publicStoreCache = publicStore;
+  publicStoreCacheUntil = now + runtimeConfig.publicCacheSeconds * 1000;
+  return publicStore;
+}
+
+function setPublicCacheHeaders(response) {
+  if (runtimeConfig.publicCacheSeconds > 0) {
+    response.setHeader("Cache-Control", `public, max-age=${runtimeConfig.publicCacheSeconds}, stale-while-revalidate=15`);
+  } else {
+    response.setHeader("Cache-Control", "no-cache");
+  }
 }
 
 function isUserLocked(user) {
@@ -103,9 +172,12 @@ app.get("/api/health", (_request, response) => {
   });
 });
 
-app.post("/api/auth/login", async (request, response) => {
+app.post("/api/auth/login", loginIpLimiter, async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
   const password = String(request.body.password || "");
+  if (!validateEmail(email)) {
+    return response.status(401).json({ error: "Correo o contraseña incorrectos" });
+  }
   const user = await getActiveUserByEmail(email);
 
   if (user && isUserLocked(user)) {
@@ -148,8 +220,38 @@ app.get("/api/auth/me", async (request, response) => {
   response.json({ user });
 });
 
-app.post("/api/auth/request-password-reset", async (request, response) => {
+app.post("/api/uploads/images", requireAuth, async (request, response) => {
+  const leagueId = String(request.body.leagueId || request.user.leagueId || "").trim();
+  if (leagueId && !canManageLeague(request.user, leagueId)) {
+    return response.status(403).json({ error: "No puedes subir imagenes para esta liga" });
+  }
+
+  const url = await uploadImageDataUrl({
+    dataUrl: request.body.dataUrl,
+    leagueId,
+    scope: request.body.scope,
+    user: request.user
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "image_upload",
+    entityType: "upload",
+    detail: `Subio imagen ${request.body.scope || "general"}`
+  });
+
+  response.status(201).json({
+    provider: runtimeConfig.imageStorageProvider,
+    url
+  });
+});
+
+app.post("/api/auth/request-password-reset", passwordResetLimiter, async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
+  if (!validateEmail(email)) {
+    return response.json({ message: "Si el correo existe, se genero una solicitud de recuperacion." });
+  }
   const user = await getActiveUserByEmail(email);
   if (!user) {
     return response.json({ message: "Si el correo existe, se genero una solicitud de recuperacion." });
@@ -180,12 +282,13 @@ app.post("/api/auth/request-password-reset", async (request, response) => {
   response.json(payload);
 });
 
-app.post("/api/auth/reset-password", async (request, response) => {
+app.post("/api/auth/reset-password", passwordResetCompleteLimiter, async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
   const code = String(request.body.code || "").trim().toUpperCase();
   const password = String(request.body.password || "");
-  if (!email || !code || password.length < 6) {
-    return response.status(400).json({ error: "Correo, codigo y contraseña de al menos 6 caracteres son requeridos" });
+  const passwordError = requireStrongPassword(password);
+  if (!validateEmail(email) || !code || passwordError) {
+    return response.status(400).json({ error: passwordError || "Correo y codigo son requeridos" });
   }
 
   const user = await getActiveUserByEmail(email);
@@ -211,13 +314,24 @@ app.post("/api/auth/reset-password", async (request, response) => {
   response.json({ message: "Contraseña actualizada. Ya puedes iniciar sesion." });
 });
 
-app.get("/api/store", async (_request, response) => {
-  response.json(await getStoreData());
+app.get("/api/store", async (request, response) => {
+  const user = await getAuthUser(request);
+  if (!user) {
+    setPublicCacheHeaders(response);
+    return response.json(await getPublicStoreCached());
+  }
+  response.setHeader("Cache-Control", "no-store");
+  response.json(scopeStoreForUser(await getStoreData(), user));
 });
 
 app.put("/api/store", requireAuth, async (request, response) => {
+  if (!validateStorePayload(request.body)) {
+    return response.status(400).json({ error: "Estado invalido o incompleto" });
+  }
+
   if (request.user.role === "super_admin") {
     const nextStore = await importStoreData(request.body);
+    clearPublicCache();
     await logAudit({
       user: request.user,
       action: "store_save",
@@ -240,13 +354,24 @@ app.put("/api/store", requireAuth, async (request, response) => {
   const incomingLeague = request.body.leagues?.find((league) => league.id === request.user.leagueId);
   if (!incomingLeague) return response.status(400).json({ error: "No se encontro la liga asignada en la solicitud" });
 
+  const protectedLeague = {
+    ...incomingLeague,
+    status: currentLeague.status,
+    ownerEmail: currentLeague.ownerEmail || "",
+    renewalDate: currentLeague.renewalDate || "",
+    membershipNotes: currentLeague.membershipNotes || "",
+    plan: currentLeague.plan || "",
+    sponsors: currentLeague.sponsors || []
+  };
+
   const mergedStore = {
     ...currentStore,
     currentLeagueId: request.user.leagueId,
-    leagues: currentStore.leagues.map((league) => (league.id === request.user.leagueId ? incomingLeague : league))
+    leagues: currentStore.leagues.map((league) => (league.id === request.user.leagueId ? protectedLeague : league))
   };
 
   const nextStore = await importStoreData(mergedStore);
+  clearPublicCache();
   await logAudit({
     user: request.user,
     leagueId: request.user.leagueId,
@@ -258,8 +383,14 @@ app.put("/api/store", requireAuth, async (request, response) => {
   response.json(nextStore);
 });
 
-app.get("/api/leagues", async (_request, response) => {
-  response.json((await getStoreData()).leagues);
+app.get("/api/leagues", async (request, response) => {
+  const user = await getAuthUser(request);
+  if (!user) {
+    setPublicCacheHeaders(response);
+    return response.json((await getPublicStoreCached()).leagues);
+  }
+  response.setHeader("Cache-Control", "no-store");
+  response.json(scopeStoreForUser(await getStoreData(), user).leagues);
 });
 
 app.delete("/api/leagues/:leagueId", requireSuperAdmin, async (request, response) => {
@@ -275,6 +406,7 @@ app.delete("/api/leagues/:leagueId", requireSuperAdmin, async (request, response
     currentLeagueId: currentStore.leagues.find((item) => item.id !== league.id)?.id,
     leagues: currentStore.leagues.filter((item) => item.id !== league.id)
   });
+  clearPublicCache();
 
   await logAudit({
     user: request.user,
@@ -300,9 +432,17 @@ app.get("/api/audit-logs", requireSuperAdmin, async (request, response) => {
 app.post("/api/users", requireSuperAdmin, async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
   const password = String(request.body.password || "");
+  const passwordError = requireStrongPassword(password);
   if (!email || !password || !request.body.name || !request.body.role) {
     return response.status(400).json({ error: "Nombre, correo, rol y contraseña son requeridos" });
   }
+  if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido" });
+  if (!validateUserRole(request.body.role)) return response.status(400).json({ error: "Rol invalido" });
+  if (request.body.status && !validateUserStatus(request.body.status)) return response.status(400).json({ error: "Estado invalido" });
+  if (request.body.role === "league_admin" && !request.body.leagueId) {
+    return response.status(400).json({ error: "Un admin de liga debe estar asignado a una liga" });
+  }
+  if (passwordError) return response.status(400).json({ error: passwordError });
 
   const id = `user-${crypto.randomUUID()}`;
   const user = await createUserData({
@@ -336,6 +476,12 @@ app.patch("/api/users/:userId", requireSuperAdmin, async (request, response) => 
     role: request.body.role ?? current.role,
     status: request.body.status ?? current.status
   };
+  if (!validateEmail(next.email)) return response.status(400).json({ error: "Correo invalido" });
+  if (!validateUserRole(next.role)) return response.status(400).json({ error: "Rol invalido" });
+  if (!validateUserStatus(next.status)) return response.status(400).json({ error: "Estado invalido" });
+  if (next.role === "league_admin" && !next.leagueId) {
+    return response.status(400).json({ error: "Un admin de liga debe estar asignado a una liga" });
+  }
 
   if (current.id === request.user.id && (next.role !== "super_admin" || next.status !== "active")) {
     return response.status(400).json({ error: "No puedes quitarte permisos de super admin ni deshabilitar tu propia sesion" });
@@ -346,9 +492,13 @@ app.patch("/api/users/:userId", requireSuperAdmin, async (request, response) => 
     return response.status(400).json({ error: "Debe quedar al menos un super admin activo" });
   }
 
+  const nextPassword = request.body.password ? String(request.body.password) : "";
+  const passwordError = nextPassword ? requireStrongPassword(nextPassword) : "";
+  if (passwordError) return response.status(400).json({ error: passwordError });
+
   const user = await updateUserData(current.id, {
     ...next,
-    passwordHash: request.body.password ? hashPassword(String(request.body.password)) : null
+    passwordHash: nextPassword ? hashPassword(nextPassword) : null
   });
   await logAudit({
     user: request.user,
@@ -420,6 +570,7 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
     forfeitGoalsAgainst: Number(request.body.forfeitGoalsAgainst ?? current.forfeitGoalsAgainst),
     yellowSuspensionLimit: Number(request.body.yellowSuspensionLimit ?? current.yellowSuspensionLimit),
     defaultRedSuspensionMatches: Number(request.body.defaultRedSuspensionMatches ?? current.defaultRedSuspensionMatches ?? 1),
+    playoffQualifiers: Number(request.body.playoffQualifiers ?? current.playoffQualifiers ?? 8),
     notes: request.body.notes ?? current.notes
   };
 
@@ -429,6 +580,7 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
       league.id === request.params.leagueId ? { ...league, rules: { ...current, ...next } } : league
     ))
   });
+  clearPublicCache();
 
   await logAudit({
     user: request.user,
@@ -436,7 +588,7 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
     action: "rules_update",
     entityType: "league_rules",
     entityId: request.params.leagueId,
-    detail: `Actualizo reglas: default ${next.forfeitGoalsFor}-${next.forfeitGoalsAgainst}, amarillas ${next.yellowSuspensionLimit}, roja ${next.defaultRedSuspensionMatches}`
+    detail: `Actualizo reglas: default ${next.forfeitGoalsFor}-${next.forfeitGoalsAgainst}, amarillas ${next.yellowSuspensionLimit}, roja ${next.defaultRedSuspensionMatches}, liguilla ${next.playoffQualifiers}`
   });
 
   response.json(nextStore);
@@ -484,6 +636,7 @@ app.post("/api/leagues/:leagueId/teams/:teamId/withdraw", requireAuth, async (re
     ...store,
     leagues: store.leagues.map((item) => (item.id === leagueId ? nextLeague : item))
   });
+  clearPublicCache();
 
   await logAudit({
     user: request.user,
@@ -532,6 +685,7 @@ app.post("/api/matches/:matchId/walkover", requireAuth, async (request, response
     ...store,
     leagues: store.leagues.map((item) => (item.id === league.id ? nextLeague : item))
   });
+  clearPublicCache();
 
   await logAudit({
     user: request.user,
@@ -544,6 +698,31 @@ app.post("/api/matches/:matchId/walkover", requireAuth, async (request, response
 
   response.json(nextStore);
 });
+
+if (runtimeConfig.serveStatic) {
+  if (!fs.existsSync(DIST_INDEX)) {
+    throw new Error("SERVE_STATIC esta activo, pero no existe dist/index.html. Ejecuta npm run build antes de iniciar produccion.");
+  }
+
+  app.use(express.static(DIST_DIR, {
+    index: false,
+    immutable: runtimeConfig.isProduction,
+    maxAge: runtimeConfig.isProduction ? "1y" : 0,
+    setHeaders: (response, filePath) => {
+      if (path.basename(filePath) === "index.html") {
+        response.setHeader("Cache-Control", "no-cache");
+      }
+    }
+  }));
+
+  app.use((request, response, next) => {
+    if (!["GET", "HEAD"].includes(request.method)) return next();
+    if (request.path.startsWith("/api/")) return next();
+    if (!request.accepts("html")) return next();
+    response.setHeader("Cache-Control", "no-cache");
+    return response.sendFile(DIST_INDEX);
+  });
+}
 
 app.use((_request, response) => {
   response.status(404).json({ error: "Ruta no encontrada" });
@@ -565,3 +744,24 @@ server.on("error", (error) => {
   console.error("No se pudo iniciar la API:", error.message);
   process.exitCode = 1;
 });
+
+async function shutdown(signal) {
+  console.log(`Recibido ${signal}. Cerrando servidor...`);
+  server.close(async () => {
+    try {
+      await postgresPool?.end();
+    } catch (error) {
+      console.error("No se pudo cerrar Postgres:", error.message);
+    } finally {
+      process.exit(0);
+    }
+  });
+
+  setTimeout(() => {
+    console.error("Cierre forzado por timeout.");
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

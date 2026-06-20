@@ -1,5 +1,5 @@
 import { DEFAULT_IDENTITY } from "../data/seedData.js";
-import { getDefaultCompetitionId, getPlayer, makeId, upperText } from "./domain.js";
+import { calculateStandings, getDefaultCompetitionId, getPlayer, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
 
 function updateLeague(store, leagueId, updater) {
   return {
@@ -15,9 +15,13 @@ export function addTeam(store, leagueId, payload) {
       ...league.teams,
       {
         id: makeId("team"),
+        competitionId: payload.competitionId || getDefaultCompetitionId(league),
         name: upperText(payload.name),
         coach: upperText(payload.coach),
-        colors: "#0f766e"
+        assistantCoach: upperText(payload.assistantCoach),
+        address: upperText(payload.address),
+        colors: payload.colors || "#0f766e",
+        logoUrl: sanitizeImageUrl(payload.logoUrl)
       }
     ]
   }));
@@ -31,9 +35,13 @@ export function updateTeam(store, leagueId, teamId, payload) {
 
       return {
         ...team,
+        competitionId: payload.competitionId || team.competitionId || getDefaultCompetitionId(league),
         name: upperText(payload.name),
         coach: upperText(payload.coach),
+        assistantCoach: upperText(payload.assistantCoach),
+        address: upperText(payload.address),
         colors: payload.colors || team.colors,
+        logoUrl: payload.logoUrl === undefined ? sanitizeImageUrl(team.logoUrl) : sanitizeImageUrl(payload.logoUrl),
         status: payload.status || team.status || "active",
         withdrawnRound: payload.status === "withdrawn" ? Number(payload.withdrawnRound || 0) || null : null,
         withdrawnReason: payload.status === "withdrawn" ? upperText(payload.withdrawnReason || "Baja a medio torneo") : null
@@ -41,7 +49,7 @@ export function updateTeam(store, leagueId, teamId, payload) {
     }),
     matches: payload.status === "withdrawn"
       ? applyWithdrawalWalkovers(league, teamId, payload)
-      : league.matches
+      : restoreWithdrawalWalkovers(league.matches, teamId)
   }));
 }
 
@@ -66,6 +74,25 @@ function applyWithdrawalWalkovers(league, teamId, payload) {
       resolutionNote: reason,
       homeGoals: withdrawnIsHome ? goalsAgainst : goalsFor,
       awayGoals: withdrawnIsHome ? goalsFor : goalsAgainst,
+      events: []
+    };
+  });
+}
+
+function restoreWithdrawalWalkovers(matches, teamId) {
+  return matches.map((match) => {
+    const wasWithdrawalWalkover = match.status === "walkover" &&
+      match.resolutionType === "team_withdrawal" &&
+      (match.homeTeamId === teamId || match.awayTeamId === teamId);
+    if (!wasWithdrawalWalkover) return match;
+
+    return {
+      ...match,
+      status: "scheduled",
+      resolutionType: "",
+      resolutionNote: "",
+      homeGoals: null,
+      awayGoals: null,
       events: []
     };
   });
@@ -96,9 +123,12 @@ export function addPlayer(store, leagueId, payload) {
       {
         id: makeId("player"),
         teamId: payload.teamId,
+        competitionId: payload.competitionId || league.teams.find((team) => team.id === payload.teamId)?.competitionId || getDefaultCompetitionId(league),
         name: upperText(payload.name),
         number: Number(payload.number || 0),
-        position: upperText(payload.position || "Jugador")
+        position: upperText(payload.position || "Jugador"),
+        photoUrl: sanitizeImageUrl(payload.photoUrl),
+        photoAuthorized: checkboxValue(payload.photoAuthorized)
       }
     ]
   }));
@@ -107,17 +137,21 @@ export function addPlayer(store, leagueId, payload) {
 export function updatePlayer(store, leagueId, playerId, payload) {
   return updateLeague(store, leagueId, (league) => ({
     ...league,
-    players: league.players.map((player) => (
-      player.id === playerId
-        ? {
-            ...player,
-            teamId: payload.teamId,
-            name: upperText(payload.name),
-            number: Number(payload.number || 0),
-            position: upperText(payload.position || "Jugador")
-          }
-        : player
-    ))
+    players: league.players.map((player) => {
+      if (player.id !== playerId) return player;
+      const team = league.teams.find((item) => item.id === payload.teamId);
+
+      return {
+        ...player,
+        teamId: payload.teamId,
+        competitionId: payload.competitionId || team?.competitionId || player.competitionId || getDefaultCompetitionId(league),
+        name: upperText(payload.name),
+        number: Number(payload.number || 0),
+        position: upperText(payload.position || "Jugador"),
+        photoUrl: payload.photoUrl === undefined ? sanitizeImageUrl(player.photoUrl) : sanitizeImageUrl(payload.photoUrl),
+        photoAuthorized: checkboxValue(payload.photoAuthorized)
+      };
+    })
   }));
 }
 
@@ -187,6 +221,132 @@ export function addPlayerInjury(store, leagueId, payload) {
   }));
 }
 
+export function addAnnouncement(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    announcements: [
+      ...(league.announcements || []),
+      {
+        id: makeId("announcement"),
+        title: upperText(payload.title || "Aviso"),
+        body: upperText(payload.body || ""),
+        status: payload.status || "active",
+        date: payload.date || new Date().toISOString().slice(0, 10)
+      }
+    ]
+  }));
+}
+
+export function updateAnnouncement(store, leagueId, announcementId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    announcements: (league.announcements || []).map((announcement) => (
+      announcement.id === announcementId
+        ? {
+            ...announcement,
+            title: upperText(payload.title || "Aviso"),
+            body: upperText(payload.body || ""),
+            status: payload.status || announcement.status || "active",
+            date: payload.date || ""
+          }
+        : announcement
+    ))
+  }));
+}
+
+export function deleteAnnouncement(store, leagueId, announcementId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    announcements: (league.announcements || []).filter((announcement) => announcement.id !== announcementId)
+  }));
+}
+
+export function addSponsor(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    sponsors: [
+      ...(league.sponsors || []),
+      {
+        id: makeId("sponsor"),
+        name: upperText(payload.name),
+        placement: payload.placement || "home_banner",
+        status: payload.status || "active",
+        sortOrder: Number(payload.sortOrder || 0),
+        imageUrl: sanitizeImageUrl(payload.imageUrl),
+        linkUrl: sanitizeExternalUrl(payload.linkUrl),
+        notes: upperText(payload.notes || "")
+      }
+    ]
+  }));
+}
+
+export function updateSponsor(store, leagueId, sponsorId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    sponsors: (league.sponsors || []).map((sponsor) => (
+      sponsor.id === sponsorId
+        ? {
+            ...sponsor,
+            name: upperText(payload.name || sponsor.name),
+            placement: payload.placement || sponsor.placement || "home_banner",
+            status: payload.status || sponsor.status || "active",
+            sortOrder: Number(payload.sortOrder || 0),
+            imageUrl: payload.imageUrl === undefined ? sanitizeImageUrl(sponsor.imageUrl) : sanitizeImageUrl(payload.imageUrl),
+            linkUrl: payload.linkUrl === undefined ? sanitizeExternalUrl(sponsor.linkUrl) : sanitizeExternalUrl(payload.linkUrl),
+            notes: upperText(payload.notes || "")
+          }
+        : sponsor
+    ))
+  }));
+}
+
+export function deleteSponsor(store, leagueId, sponsorId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    sponsors: (league.sponsors || []).filter((sponsor) => sponsor.id !== sponsorId)
+  }));
+}
+
+export function addVenue(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    venues: [
+      ...(league.venues || []),
+      {
+        id: makeId("venue"),
+        name: upperText(payload.name || "Cancha"),
+        address: upperText(payload.address || ""),
+        status: payload.status || "active",
+        notes: upperText(payload.notes || "")
+      }
+    ]
+  }));
+}
+
+export function updateVenue(store, leagueId, venueId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    venues: (league.venues || []).map((venue) => (
+      venue.id === venueId
+        ? {
+            ...venue,
+            name: upperText(payload.name || venue.name),
+            address: upperText(payload.address || ""),
+            status: payload.status || venue.status || "active",
+            notes: upperText(payload.notes || "")
+          }
+        : venue
+    ))
+  }));
+}
+
+export function deleteVenue(store, leagueId, venueId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    venues: (league.venues || []).filter((venue) => venue.id !== venueId)
+  }));
+}
+
 export function updatePlayerInjury(store, leagueId, injuryId, payload) {
   return updateLeague(store, leagueId, (league) => ({
     ...league,
@@ -218,6 +378,7 @@ export function deletePlayerInjury(store, leagueId, injuryId) {
 }
 
 export function addMatch(store, leagueId, payload) {
+  const stage = payload.stage || "regular";
   return updateLeague(store, leagueId, (league) => ({
     ...league,
     matches: [
@@ -225,12 +386,12 @@ export function addMatch(store, leagueId, payload) {
       {
         id: makeId("match"),
         competitionId: payload.competitionId || getDefaultCompetitionId(league),
-        stage: payload.stage || "regular",
+        stage,
         playoffRound: upperText(payload.playoffRound || ""),
         playoffLeg: upperText(payload.playoffLeg || ""),
         aggregateHome: payload.aggregateHome === "" || payload.aggregateHome === undefined ? null : Number(payload.aggregateHome),
         aggregateAway: payload.aggregateAway === "" || payload.aggregateAway === undefined ? null : Number(payload.aggregateAway),
-        round: Number(payload.round),
+        round: stage === "playoff" ? Number(payload.round || 0) : Number(payload.round),
         date: payload.date,
         time: payload.time || "",
         venue: upperText(payload.venue || ""),
@@ -239,6 +400,7 @@ export function addMatch(store, leagueId, payload) {
         status: "scheduled",
         homeGoals: null,
         awayGoals: null,
+        observations: "",
         events: []
       }
     ]
@@ -334,7 +496,9 @@ function buildLateTeamRounds(allTeamIds, newTeamIds) {
   return rounds;
 }
 
-function makeScheduleMatches({ competitionId, rounds, startRound, startDate, intervalDays }) {
+function makeScheduleMatches({ competitionId, rounds, startRound, startDate, intervalDays, venue }) {
+  const defaultVenue = upperText(venue || "");
+
   return rounds.flatMap((roundMatches, roundIndex) => {
     const round = Number(startRound) + roundIndex;
     const date = addDays(startDate, roundIndex * Number(intervalDays || 7));
@@ -350,21 +514,108 @@ function makeScheduleMatches({ competitionId, rounds, startRound, startDate, int
       round,
       date,
       time: "",
-      venue: "",
+      venue: defaultVenue,
       homeTeamId: match.homeTeamId,
       awayTeamId: match.awayTeamId,
       status: "scheduled",
       homeGoals: null,
       awayGoals: null,
+      observations: "",
       events: []
     }));
+  });
+}
+
+function buildRoundTripRounds(rounds) {
+  return [
+    ...rounds,
+    ...rounds.map((roundMatches) => (
+      roundMatches.map((match) => ({
+        homeTeamId: match.awayTeamId,
+        awayTeamId: match.homeTeamId
+      }))
+    ))
+  ];
+}
+
+const PLAYOFF_PHASES = {
+  round32: { label: "16vos de final", teams: 32 },
+  round16: { label: "8vos de final", teams: 16 },
+  quarterfinal: { label: "Cuartos de final", teams: 8 },
+  semifinal: { label: "Semifinal", teams: 4 },
+  final: { label: "Final", teams: 2 }
+};
+
+function makePlayoffPairs(teamIds) {
+  const pairs = [];
+  for (let index = 0; index < teamIds.length / 2; index += 1) {
+    pairs.push({
+      homeTeamId: teamIds[index],
+      awayTeamId: teamIds[teamIds.length - 1 - index]
+    });
+  }
+  return pairs;
+}
+
+function makePlayoffMatches({ competitionId, pairs, phaseLabel, legMode, startDate, venue }) {
+  const isTwoLegs = legMode === "two_legs";
+  const defaultVenue = upperText(venue || "");
+
+  return pairs.flatMap((pair, pairIndex) => {
+    const baseMatch = {
+      competitionId,
+      stage: "playoff",
+      playoffRound: upperText(phaseLabel),
+      aggregateHome: null,
+      aggregateAway: null,
+      round: 0,
+      time: "",
+      venue: defaultVenue,
+      status: "scheduled",
+      homeGoals: null,
+      awayGoals: null,
+      observations: "",
+      events: []
+    };
+
+    if (!isTwoLegs) {
+      return [{
+        ...baseMatch,
+        id: makeId("match"),
+        playoffLeg: "",
+        date: startDate,
+        homeTeamId: pair.homeTeamId,
+        awayTeamId: pair.awayTeamId
+      }];
+    }
+
+    return [
+      {
+        ...baseMatch,
+        id: makeId("match"),
+        playoffLeg: "IDA",
+        date: startDate,
+        homeTeamId: pair.awayTeamId,
+        awayTeamId: pair.homeTeamId
+      },
+      {
+        ...baseMatch,
+        id: makeId("match"),
+        playoffLeg: "VUELTA",
+        date: addDays(startDate, 7),
+        homeTeamId: pair.homeTeamId,
+        awayTeamId: pair.awayTeamId
+      }
+    ].map((match, index) => ({ ...match, id: `${match.id}-${pairIndex}-${index}` }));
   });
 }
 
 export function generateSchedule(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => {
     const competitionId = payload.competitionId || getDefaultCompetitionId(league);
-    const activeTeamIds = league.teams.filter((team) => team.status !== "withdrawn").map((team) => team.id);
+    const activeTeamIds = league.teams
+      .filter((team) => (team.competitionId || competitionId) === competitionId && team.status !== "withdrawn")
+      .map((team) => team.id);
     if (activeTeamIds.length < 2) return league;
 
     const existingCompetitionMatches = league.matches.filter((match) => match.competitionId === competitionId && (match.stage || "regular") === "regular");
@@ -374,6 +625,7 @@ export function generateSchedule(store, leagueId, payload) {
     const intervalDays = Number(payload.intervalDays || 7);
     const shouldShuffle = payload.randomize === "on";
     const replaceScheduled = payload.replaceScheduled === "on";
+    const isRoundTrip = payload.roundTrip === "on" && mode === "full";
 
     let rounds = [];
     if (mode === "late") {
@@ -382,6 +634,7 @@ export function generateSchedule(store, leagueId, payload) {
       rounds = newTeamIds.length ? buildLateTeamRounds(activeTeamIds, shouldShuffle ? shuffle(newTeamIds) : newTeamIds) : [];
     } else {
       rounds = buildRoundRobinRounds(activeTeamIds, shouldShuffle);
+      if (isRoundTrip) rounds = buildRoundTripRounds(rounds);
     }
 
     const generatedMatches = makeScheduleMatches({
@@ -389,7 +642,8 @@ export function generateSchedule(store, leagueId, payload) {
       rounds,
       startRound,
       startDate,
-      intervalDays
+      intervalDays,
+      venue: payload.venue
     });
 
     const matches = replaceScheduled && mode === "full"
@@ -407,20 +661,61 @@ export function generateSchedule(store, leagueId, payload) {
   });
 }
 
+export function generatePlayoffBracket(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => {
+    const competitionId = payload.competitionId || getDefaultCompetitionId(league);
+    const phase = PLAYOFF_PHASES[payload.phase] || PLAYOFF_PHASES.quarterfinal;
+    const competitionLeague = scopeLeagueToCompetition(league, competitionId);
+    const standings = calculateStandings(competitionLeague)
+      .filter((row) => row.team.status !== "withdrawn")
+      .slice(0, phase.teams);
+
+    if (standings.length < phase.teams) return league;
+
+    const teamIds = standings.map((row) => row.team.id);
+    const pairs = makePlayoffPairs(teamIds);
+    const generatedMatches = makePlayoffMatches({
+      competitionId,
+      pairs,
+      phaseLabel: phase.label,
+      legMode: payload.legMode || "single",
+      startDate: payload.startDate || new Date().toISOString().slice(0, 10),
+      venue: payload.venue
+    });
+    const shouldReplace = payload.replacePlayoffs === "on";
+    const targetPhase = upperText(phase.label);
+    const matches = shouldReplace
+      ? league.matches.filter((match) => (
+          match.competitionId !== competitionId ||
+          (match.stage || "regular") !== "playoff" ||
+          match.playoffRound !== targetPhase ||
+          match.status !== "scheduled"
+        ))
+      : league.matches;
+
+    return {
+      ...league,
+      matches: [...matches, ...generatedMatches]
+    };
+  });
+}
+
 export function updateMatch(store, leagueId, matchId, payload) {
   return updateLeague(store, leagueId, (league) => ({
     ...league,
     matches: league.matches.map((match) => (
       match.id === matchId
-        ? {
+        ? (() => {
+          const stage = payload.stage || match.stage || "regular";
+          return {
             ...match,
             competitionId: payload.competitionId || match.competitionId || getDefaultCompetitionId(league),
-            stage: payload.stage || match.stage || "regular",
+            stage,
             playoffRound: upperText(payload.playoffRound || ""),
             playoffLeg: upperText(payload.playoffLeg || ""),
             aggregateHome: payload.aggregateHome === "" || payload.aggregateHome === undefined ? null : Number(payload.aggregateHome),
             aggregateAway: payload.aggregateAway === "" || payload.aggregateAway === undefined ? null : Number(payload.aggregateAway),
-            round: Number(payload.round),
+            round: stage === "playoff" ? Number(payload.round || 0) : Number(payload.round),
             date: payload.date,
             time: payload.time || "",
             venue: upperText(payload.venue || ""),
@@ -428,8 +723,10 @@ export function updateMatch(store, leagueId, matchId, payload) {
             awayTeamId: payload.awayTeamId,
             status: payload.status || match.status || "scheduled",
             homeGoals: payload.homeGoals === "" || payload.homeGoals === undefined ? null : Number(payload.homeGoals),
-            awayGoals: payload.awayGoals === "" || payload.awayGoals === undefined ? null : Number(payload.awayGoals)
-          }
+            awayGoals: payload.awayGoals === "" || payload.awayGoals === undefined ? null : Number(payload.awayGoals),
+            observations: payload.observations === undefined ? match.observations || "" : upperText(payload.observations || "")
+          };
+        })()
         : match
     ))
   }));
@@ -440,6 +737,19 @@ export function deleteMatch(store, leagueId, matchId) {
     ...league,
     matches: league.matches.filter((match) => match.id !== matchId)
   }));
+}
+
+export function deletePlayoffMatches(store, leagueId, payload = {}) {
+  return updateLeague(store, leagueId, (league) => {
+    const competitionId = payload.competitionId || getDefaultCompetitionId(league);
+    return {
+      ...league,
+      matches: league.matches.filter((match) => (
+        match.competitionId !== competitionId ||
+        (match.stage || "regular") !== "playoff"
+      ))
+    };
+  });
 }
 
 export function saveIdentity(store, leagueId, payload) {
@@ -478,6 +788,7 @@ export function updateLeagueRules(store, leagueId, payload) {
       forfeitGoalsAgainst: Number(payload.forfeitGoalsAgainst ?? league.rules?.forfeitGoalsAgainst ?? 0),
       yellowSuspensionLimit: Number(payload.yellowSuspensionLimit ?? league.rules?.yellowSuspensionLimit ?? 3),
       defaultRedSuspensionMatches: Number(payload.defaultRedSuspensionMatches ?? league.rules?.defaultRedSuspensionMatches ?? 1),
+      playoffQualifiers: Number(payload.playoffQualifiers ?? league.rules?.playoffQualifiers ?? 8),
       notes: upperText(payload.notes || "")
     }
   }));
@@ -490,8 +801,11 @@ function parseNumberList(value) {
     .filter(Boolean);
 }
 
-function findPlayerByNumber(league, number) {
-  return league.players.find((player) => Number(player.number) === Number(number));
+function findPlayerByNumber(league, number, teamIds = []) {
+  return league.players.find((player) => (
+    Number(player.number) === Number(number) &&
+    (!teamIds.length || teamIds.includes(player.teamId))
+  ));
 }
 
 export function saveResult(store, leagueId, payload) {
@@ -502,19 +816,19 @@ export function saveResult(store, leagueId, payload) {
 
       const events = [];
       for (const number of parseNumberList(payload.goals)) {
-        const player = findPlayerByNumber(league, number);
+        const player = findPlayerByNumber(league, number, [match.homeTeamId, match.awayTeamId]);
         if (player) events.push({ type: "goal", playerId: player.id, teamId: player.teamId, minute: 0 });
       }
 
       for (const number of parseNumberList(payload.yellows)) {
-        const player = findPlayerByNumber(league, number);
+        const player = findPlayerByNumber(league, number, [match.homeTeamId, match.awayTeamId]);
         if (player) events.push({ type: "yellow", playerId: player.id, teamId: player.teamId, minute: 0 });
       }
 
       const redRows = String(payload.reds || "").split(",").map((row) => row.trim()).filter(Boolean);
       for (const row of redRows) {
         const [number, suspensionMatches = "1", reason = "Tarjeta roja"] = row.split(":");
-        const player = findPlayerByNumber(league, Number(number));
+        const player = findPlayerByNumber(league, Number(number), [match.homeTeamId, match.awayTeamId]);
         if (player) {
           events.push({
             type: "red",
@@ -547,6 +861,25 @@ export function saveMatchSheet(store, leagueId, payload) {
       const awayGoals = Number(payload.awayGoals);
       if (!Number.isInteger(homeGoals) || !Number.isInteger(awayGoals) || homeGoals < 0 || awayGoals < 0) {
         throw new Error("El marcador del acta no es valido.");
+      }
+      const isWalkover = payload.status === "walkover";
+      if (isWalkover) {
+        const maxGoals = Math.max(homeGoals, awayGoals);
+        const minGoals = Math.min(homeGoals, awayGoals);
+        if (![3, 5].includes(maxGoals) || minGoals !== 0) {
+          throw new Error("El default solo puede guardarse como 3-0 o 5-0.");
+        }
+
+        return {
+          ...match,
+          homeGoals,
+          awayGoals,
+          status: "walkover",
+          resolutionType: payload.resolutionType || "no_show",
+          resolutionNote: upperText(payload.resolutionNote || `Default administrativo ${maxGoals}-0`),
+          observations: upperText(payload.observations || ""),
+          events: []
+        };
       }
 
       const events = payload.events
@@ -589,6 +922,9 @@ export function saveMatchSheet(store, leagueId, payload) {
         homeGoals,
         awayGoals,
         status: "finished",
+        resolutionType: "normal",
+        resolutionNote: "",
+        observations: upperText(payload.observations || ""),
         events
       };
     })
@@ -621,13 +957,15 @@ export function addLeague(store, payload) {
           }
         ],
         status: "active",
-        plan: "Membresia Basica",
+        plan: "Sin limite",
         ownerEmail: payload.ownerEmail,
         renewalDate: "",
         membershipNotes: "",
         adBanner: "ESPACIO DISPONIBLE PARA PATROCINADOR",
         identity: { ...DEFAULT_IDENTITY },
-        highlights: ["LIGA CREADA. AGREGA EQUIPOS, JUGADORES Y CALENDARIO."],
+        highlights: [],
+        announcements: [],
+        sponsors: [],
         teams: [],
         players: [],
         matches: []

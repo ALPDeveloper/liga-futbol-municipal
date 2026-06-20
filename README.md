@@ -61,7 +61,7 @@ Para crear un respaldo manual de SQLite:
 npm run backup:db
 ```
 
-Los respaldos se guardan en `backups/` salvo que `BACKUP_DIR` indique otra ruta.
+Los respaldos se guardan en `backups/` salvo que `BACKUP_DIR` indique otra ruta. Si `DATABASE_PROVIDER=postgres`, el comando genera un respaldo logico JSON desde Postgres.
 
 Para exportar todo el estado actual a JSON antes de migrar o subir piloto:
 
@@ -145,7 +145,7 @@ El panel privado vive en `/admin`. No se muestra en la portada publica.
 - Vista publica sin login para tabla, calendario, goleadores, disciplina, destacados y patrocinador.
 - Login local con roles de super admin y admin de liga.
 - Panel de super admin para crear, suspender, reactivar y eliminar ligas.
-- Panel comercial de membresias: plan, estado, renovacion, admin asignado y notas.
+- Panel operativo de ligas: estado, URL publica, admin asignado y notas internas.
 - Panel de usuarios administradores por liga: crear, editar, asignar liga, cambiar contraseña y deshabilitar.
 - Panel de admin de liga para crear, editar y eliminar equipos, jugadores y partidos.
 - Acta de partido guiada para capturar marcador, goles, amarillas, rojas y sanciones por jugador.
@@ -195,26 +195,20 @@ Para piloto con Supabase/Vercel, revisar `docs/piloto-supabase.md`.
 
 Para piloto gratuito completo, revisar `docs/entorno-gratuito.md`.
 
+Antes de capturar datos reales que deben sobrevivir a produccion, revisar `docs/captura-produccion.md` y ejecutar:
+
+```bash
+npm run check:capture
+```
+
 ## Roles
 
 - `super_admin`: controla ligas, membresias, suspension y usuarios.
 - `league_admin`: administra una liga asignada.
 - `public`: consulta informacion sin cuenta.
 
-## Planes de membresia
+## Control operativo de ligas
 
-El catalogo editable vive en `src/lib/plans.js`.
+La plataforma opera sin limites comerciales de equipos, torneos o jugadores. El super admin puede crear ligas, revisar su URL publica, asignar correo administrativo, guardar notas internas y suspender o reactivar una liga cuando sea necesario.
 
-Primera configuracion operativa:
-
-- `Membresia Basica`: hasta 12 equipos, 1 torneo activo, sin liguilla.
-- `Membresia Pro`: hasta 24 equipos, 3 torneos activos, liguilla y banner publicitario.
-- `Membresia Premium`: hasta 60 equipos, 8 torneos activos, liguilla y banner publicitario.
-
-El sistema ya bloquea inicialmente:
-
-- Crear equipos si la liga alcanzo el limite del plan.
-- Crear torneos activos si la liga alcanzo el limite del plan.
-- Crear partidos de liguilla si el plan no la incluye.
-
-La logica actual de calculo esta en `src/lib/domain.js` para que pueda moverse despues a servicios compartidos por web, iOS y Android.
+Si una liga queda `suspended`, el admin de liga no puede entrar a editar; solo el super admin puede reactivarla. La logica actual de calculo deportivo esta en `src/lib/domain.js` para que pueda moverse despues a servicios compartidos por web, iOS y Android.

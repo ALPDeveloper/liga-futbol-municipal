@@ -20,17 +20,21 @@ export function createToken(user) {
 }
 
 export async function verifyToken(token) {
-  if (!token || !token.includes(".")) return null;
-  const [body, signature] = token.split(".");
-  const expected = crypto.createHmac("sha256", TOKEN_SECRET).update(body).digest("base64url");
-  if (signature.length !== expected.length) return null;
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    if (!token || !token.includes(".")) return null;
+    const [body, signature] = token.split(".");
+    const expected = crypto.createHmac("sha256", TOKEN_SECRET).update(body).digest("base64url");
+    if (!signature || signature.length !== expected.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
 
-  const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-  if (payload.exp < Date.now()) return null;
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    if (!payload?.id || payload.exp < Date.now()) return null;
 
-  const user = await getUserById(payload.id, { activeOnly: true });
-  return user ? toPublicUser(user) : null;
+    const user = await getUserById(payload.id, { activeOnly: true });
+    return user ? toPublicUser(user) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getAuthUser(request) {

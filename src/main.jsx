@@ -1,47 +1,17 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import heroImage from "../assets/league-hero.png";
+import alpLogo from "../assets/alp-logo.png";
+import heroImage from "../assets/league-hero.webp";
 import { seedData } from "./data/seedData.js";
-import {
-  addLeague,
-  addCompetition,
-  addMatch,
-  addPlayer,
-  addPlayerInjury,
-  addPlayerSanction,
-  addTeam,
-  deleteMatch,
-  deleteLeague,
-  deletePlayer,
-  deletePlayerInjury,
-  deletePlayerSanction,
-  deleteTeam,
-  generateSchedule,
-  saveIdentity,
-  saveMatchSheet,
-  saveResult,
-  toggleLeagueStatus,
-  updateLeagueRules,
-  updateLeagueMembership,
-  updateCompetition,
-  updateMatch,
-  updatePlayer,
-  updatePlayerInjury,
-  updateTeam
-} from "./lib/actions.js";
 import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
 import { loadStore, saveStore } from "./lib/storage.js";
 import { clearAuth, loadAuth, saveAuth } from "./lib/authStorage.js";
 import { fetchSessionFromApi, fetchStoreFromApi, loginWithApi, persistStoreToApi } from "./lib/api.js";
-import { deleteLeagueFromApi } from "./lib/leagueApi.js";
-import { updateLeagueRulesInApi } from "./lib/rulesApi.js";
-import { createUser } from "./lib/userApi.js";
-import { canAddCompetitionByPlan, canAddTeamByPlan, canUsePlayoffsByPlan } from "./lib/plans.js";
-import { validatePlayerFullName } from "./lib/playerValidation.js";
-import { AdminView } from "./components/AdminView.jsx";
-import { AuthPanel } from "./components/AuthPanel.jsx";
-import { PublicView } from "./components/PublicView.jsx";
 import "./styles.css";
+
+const LazyAdminRoute = React.lazy(() => import("./components/AdminRoute.jsx").then((module) => ({ default: module.AdminRoute })));
+const LazyAuthPanel = React.lazy(() => import("./components/AuthPanel.jsx").then((module) => ({ default: module.AuthPanel })));
+const LazyPublicView = React.lazy(() => import("./components/PublicView.jsx").then((module) => ({ default: module.PublicView })));
 
 const cachedStore = loadStore();
 const initialStore = cachedStore || normalizeStore(seedData);
@@ -56,6 +26,40 @@ function getPublicLeaguePath(leagueId) {
   return `/liga/${encodeURIComponent(leagueId)}`;
 }
 
+const LAST_PUBLIC_LEAGUE_KEY = "ligatec:lastPublicLeagueId";
+
+function loadLastPublicLeagueId() {
+  try {
+    return localStorage.getItem(LAST_PUBLIC_LEAGUE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function saveLastPublicLeagueId(leagueId) {
+  try {
+    if (leagueId) localStorage.setItem(LAST_PUBLIC_LEAGUE_KEY, leagueId);
+  } catch {
+    // Navegacion publica: si localStorage no esta disponible, seguimos sin recordar.
+  }
+}
+
+function RouteFallback({ label = "Cargando" }) {
+  return (
+    <main className="startup-screen">
+      <div className="startup-card">
+        <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
+        <strong>{label}</strong>
+        <small>Preparando la experiencia de LIGATEC.</small>
+      </div>
+    </main>
+  );
+}
+
+function InlineFallback({ label = "Cargando" }) {
+  return <div className="inline-loading">{label}</div>;
+}
+
 function App() {
   const [store, setStore] = useState(initialStore);
   const [routePath, setRoutePath] = useState(window.location.pathname);
@@ -64,6 +68,8 @@ function App() {
   const [initialApiLoaded, setInitialApiLoaded] = useState(Boolean(cachedStore));
   const [auth, setAuth] = useState(initialAuth);
   const [userListRefreshKey, setUserListRefreshKey] = useState(0);
+  const pendingPersistRef = useRef(null);
+  const persistRunningRef = useRef(false);
   const isAdminRoute = routePath.startsWith("/admin");
   const publicLeagueId = !isAdminRoute ? getPublicLeagueIdFromPath(routePath) : "";
   const league = useMemo(() => {
@@ -90,10 +96,13 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    fetchStoreFromApi()
+    fetchStoreFromApi(initialAuth.token)
       .then((apiStore) => {
         if (cancelled) return;
-        const normalized = normalizeStore(apiStore);
+        const rememberedLeagueId = loadLastPublicLeagueId();
+        const preferredLeagueId = publicLeagueId ||
+          (apiStore.leagues?.some((item) => item.id === rememberedLeagueId) ? rememberedLeagueId : apiStore.currentLeagueId);
+        const normalized = normalizeStore({ ...apiStore, currentLeagueId: preferredLeagueId });
         setStore(normalized);
         saveStore(normalized);
         setApiStatus("connected");
@@ -130,118 +139,74 @@ function App() {
     if (adminPanel === "super" && !canUseSuperAdmin) setAdminPanel("league");
   }, [adminPanel, canUseSuperAdmin]);
 
+  async function flushPersistQueue() {
+    if (persistRunningRef.current || !auth.token) return;
+    persistRunningRef.current = true;
+
+    try {
+      while (pendingPersistRef.current) {
+        const nextStore = pendingPersistRef.current;
+        pendingPersistRef.current = null;
+        try {
+          await persistStoreToApi(nextStore, auth.token);
+          setApiStatus("connected");
+        } catch {
+          setApiStatus("local");
+        }
+      }
+    } finally {
+      persistRunningRef.current = false;
+      if (pendingPersistRef.current) flushPersistQueue();
+    }
+  }
+
+  function queuePersist(nextStore) {
+    if (!auth.token) {
+      setApiStatus("local");
+      return;
+    }
+    pendingPersistRef.current = nextStore;
+    flushPersistQueue();
+  }
+
   function commit(nextStore) {
     const normalized = normalizeStore(nextStore);
     setStore(normalized);
     saveStore(normalized);
-    persistStoreToApi(normalized, auth.token)
-      .then(() => setApiStatus("connected"))
-      .catch(() => setApiStatus("local"));
+    queuePersist(normalized);
+  }
+
+  function applyApiStore(apiStore) {
+    const normalized = normalizeStore(apiStore);
+    setStore(normalized);
+    saveStore(normalized);
   }
 
   function selectLeague(leagueId) {
+    saveLastPublicLeagueId(leagueId);
     const normalized = normalizeStore({ ...store, currentLeagueId: leagueId });
     setStore(normalized);
     saveStore(normalized);
     if (!isAdminRoute) navigateTo(getPublicLeaguePath(leagueId));
   }
 
-  function resetDemo() {
-    const nextStore = normalizeStore(seedData);
-    setAdminPanel("league");
-    commit(nextStore);
-  }
-
-  async function createLeagueWithAdmin(payload) {
-    const nextStore = addLeague(store, { ...payload, ownerEmail: payload.adminEmail || payload.ownerEmail });
-    const newLeagueId = nextStore.currentLeagueId;
-    setAdminPanel("league");
-    commit(nextStore);
-
-    if (payload.adminEmail && payload.adminPassword && auth.token) {
-      try {
-        await createUser(auth.token, {
-          name: payload.adminName || `Admin ${payload.name}`,
-          email: payload.adminEmail,
-          password: payload.adminPassword,
-          role: "league_admin",
-          leagueId: newLeagueId,
-          status: "active"
-        });
-        setApiStatus("connected");
-      } catch (userError) {
-        window.alert(`La liga se creo, pero no se pudo crear el usuario admin: ${userError.message}`);
-      }
-    }
-  }
-
-  async function deleteLeagueWithCleanup(leagueId) {
-    if (store.leagues.length <= 1) {
-      window.alert("No se puede eliminar la unica liga registrada.");
-      return;
-    }
-
-    if (auth.token && canUseSuperAdmin) {
-      try {
-        const response = await deleteLeagueFromApi(auth.token, leagueId);
-        const normalized = normalizeStore(response.store);
-        setStore(normalized);
-        saveStore(normalized);
-        setApiStatus("connected");
-        setUserListRefreshKey((value) => value + 1);
-        window.alert(`Liga eliminada. Tambien se eliminaron ${response.removedAdmins} usuario(s) administrador(es) de esa liga.`);
-        return;
-      } catch (deleteError) {
-        window.alert(`No se pudo eliminar la liga: ${deleteError.message}`);
-        return;
-      }
-    }
-
-    commit(deleteLeague(store, leagueId));
-    setUserListRefreshKey((value) => value + 1);
-  }
-
-  function guardPlanAccess(result) {
-    if (result.allowed) return true;
-    window.alert(result.message);
-    return false;
-  }
-
-  function guardPlayerName(payload) {
-    const result = validatePlayerFullName(payload.name);
-    if (result.valid) return true;
-    window.alert(result.message);
-    return false;
-  }
-
-  async function saveRules(payload) {
-    const localStore = updateLeagueRules(store, league.id, payload);
-
-    if (!auth.token) {
-      commit(localStore);
-      return;
-    }
-
-    try {
-      const apiStore = await updateLeagueRulesInApi(auth.token, league.id, payload);
-      const normalized = normalizeStore(apiStore);
-      setStore(normalized);
-      saveStore(normalized);
-      setApiStatus("connected");
-    } catch {
-      commit(localStore);
-    }
-  }
+  useEffect(() => {
+    if (!isAdminRoute && league?.id) saveLastPublicLeagueId(league.id);
+  }, [isAdminRoute, league?.id]);
 
   async function login(email, password) {
     const nextAuth = await loginWithApi(email, password);
+    const apiStore = await fetchStoreFromApi(nextAuth.token);
+    const preferredLeagueId = nextAuth.user.role === "league_admin" && nextAuth.user.leagueId
+      ? nextAuth.user.leagueId
+      : apiStore.currentLeagueId;
+    const normalizedStore = normalizeStore({ ...apiStore, currentLeagueId: preferredLeagueId });
     setAuth(nextAuth);
     saveAuth(nextAuth);
+    setStore(normalizedStore);
+    saveStore(normalizedStore);
     setApiStatus("connected");
     if (!isAdminRoute) navigateTo("/admin");
-    if (nextAuth.user.role === "league_admin" && nextAuth.user.leagueId) {
-      selectLeague(nextAuth.user.leagueId);
-    }
   }
 
   function logout() {
@@ -262,7 +227,7 @@ function App() {
     return (
       <main className="startup-screen">
         <div className="startup-card">
-          <span className="brand-mark">LF</span>
+          <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
           <strong>Cargando liga</strong>
           <small>Preparando calendario, tabla y estadisticas.</small>
         </div>
@@ -277,10 +242,10 @@ function App() {
           event.preventDefault();
           navigateTo(isAdminRoute ? "/admin" : publicLeaguePath);
         }}>
-          <span className="brand-mark">LF</span>
+          <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
           <span>
-            <strong>Liga Futbol</strong>
-            <small>Plataforma municipal</small>
+            <strong>LIGA FUTBOL</strong>
+            <small>PLATAFORMA DEPORTIVA</small>
           </span>
         </a>
         <div className="topbar-actions">
@@ -312,7 +277,11 @@ function App() {
               <span className={`api-pill ${apiStatus}`}>
                 {apiStatus === "connected" ? "API local" : apiStatus === "local" ? "Modo local" : "Conectando"}
               </span>
-              {currentUser && <AuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />}
+              {currentUser && (
+                <Suspense fallback={<span className="auth-loading">Sesion activa</span>}>
+                  <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
+                </Suspense>
+              )}
             </>
           )}
         </div>
@@ -324,7 +293,9 @@ function App() {
             <span className="eyebrow">Acceso privado</span>
             <h1>Panel administrativo</h1>
             <p>Ingresa con el usuario asignado para administrar la liga o con una cuenta de super administrador.</p>
-            <AuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
+            <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
+              <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
+            </Suspense>
             <a href="/" onClick={(event) => {
               event.preventDefault();
               navigateTo("/");
@@ -346,63 +317,27 @@ function App() {
           </section>
         </main>
       ) : isAdminRoute ? (
-        <AdminView
-          adminPanel={adminPanel}
-          canUseSuperAdmin={canUseSuperAdmin}
-          currentUser={currentUser}
-          authToken={auth.token}
-          heroImage={heroImage}
-          league={league}
-          onAddCompetition={(payload) => {
-            if (!guardPlanAccess(canAddCompetitionByPlan(league, payload))) return false;
-            commit(addCompetition(store, league.id, payload));
-          }}
-          onAddLeague={createLeagueWithAdmin}
-          onAddMatch={(payload) => {
-            if (payload.stage === "playoff" && !guardPlanAccess(canUsePlayoffsByPlan(league))) return false;
-            commit(addMatch(store, league.id, payload));
-          }}
-          onAddPlayer={(payload) => {
-            if (!guardPlayerName(payload)) return false;
-            commit(addPlayer(store, league.id, payload));
-          }}
-          onAddPlayerInjury={(payload) => commit(addPlayerInjury(store, league.id, payload))}
-          onAddTeam={(payload) => {
-            if (!guardPlanAccess(canAddTeamByPlan(league))) return false;
-            commit(addTeam(store, league.id, payload));
-          }}
-          onDeleteMatch={(matchId) => commit(deleteMatch(store, league.id, matchId))}
-          onDeleteLeague={deleteLeagueWithCleanup}
-          onDeletePlayer={(playerId) => commit(deletePlayer(store, league.id, playerId))}
-          onDeletePlayerInjury={(injuryId) => commit(deletePlayerInjury(store, league.id, injuryId))}
-          onDeletePlayerSanction={(sanctionId) => commit(deletePlayerSanction(store, league.id, sanctionId))}
-          onDeleteTeam={(teamId) => commit(deleteTeam(store, league.id, teamId))}
-          onResetDemo={resetDemo}
-          onAddPlayerSanction={(payload) => commit(addPlayerSanction(store, league.id, payload))}
-          onGenerateSchedule={(payload) => commit(generateSchedule(store, league.id, payload))}
-          onSaveIdentity={(payload) => commit(saveIdentity(store, league.id, payload))}
-          onSaveMatchSheet={(payload) => commit(saveMatchSheet(store, league.id, payload))}
-          onSaveRules={saveRules}
-          onSaveResult={(payload) => commit(saveResult(store, league.id, payload))}
-          onSetAdminPanel={setAdminPanel}
-          onToggleLeague={(leagueId) => commit(toggleLeagueStatus(store, leagueId))}
-          onUpdateCompetition={(competitionId, payload) => commit(updateCompetition(store, league.id, competitionId, payload))}
-          onUpdateLeagueMembership={(leagueId, payload) => commit(updateLeagueMembership(store, leagueId, payload))}
-          onUpdateMatch={(matchId, payload) => {
-            if (payload.stage === "playoff" && !guardPlanAccess(canUsePlayoffsByPlan(league))) return;
-            commit(updateMatch(store, league.id, matchId, payload));
-          }}
-          onUpdatePlayerInjury={(injuryId, payload) => commit(updatePlayerInjury(store, league.id, injuryId, payload))}
-          onUpdatePlayer={(playerId, payload) => {
-            if (!guardPlayerName(payload)) return;
-            commit(updatePlayer(store, league.id, playerId, payload));
-          }}
-          onUpdateTeam={(teamId, payload) => commit(updateTeam(store, league.id, teamId, payload))}
-          store={store}
-          userListRefreshKey={userListRefreshKey}
-        />
+        <Suspense fallback={<RouteFallback label="Cargando administracion" />}>
+          <LazyAdminRoute
+            adminPanel={adminPanel}
+            applyApiStore={applyApiStore}
+            authToken={auth.token}
+            canUseSuperAdmin={canUseSuperAdmin}
+            commit={commit}
+            currentUser={currentUser}
+            heroImage={heroImage}
+            league={league}
+            setAdminPanel={setAdminPanel}
+            setApiStatus={setApiStatus}
+            setUserListRefreshKey={setUserListRefreshKey}
+            store={store}
+            userListRefreshKey={userListRefreshKey}
+          />
+        </Suspense>
       ) : (
-        <PublicView heroImage={heroImage} league={league} />
+        <Suspense fallback={<RouteFallback label="Cargando liga" />}>
+          <LazyPublicView heroImage={heroImage} league={league} />
+        </Suspense>
       )}
     </div>
   );

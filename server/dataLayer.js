@@ -4,6 +4,7 @@ import { getPostgresStore, importPostgresStore, initializePostgresDatabase, post
 
 export const DATABASE_PROVIDER = process.env.DATABASE_PROVIDER === "postgres" ? "postgres" : "sqlite";
 export const DATABASE_LABEL = DATABASE_PROVIDER === "postgres" ? "postgres" : DB_PATH;
+let importQueue = Promise.resolve();
 
 function isPostgres() {
   return DATABASE_PROVIDER === "postgres";
@@ -44,7 +45,9 @@ export async function getStoreData() {
 }
 
 export async function importStoreData(store) {
-  return isPostgres() ? importPostgresStore(store) : importSqliteStore(store);
+  const importTask = async () => (isPostgres() ? importPostgresStore(store) : importSqliteStore(store));
+  importQueue = importQueue.catch(() => null).then(importTask);
+  return importQueue;
 }
 
 export async function getActiveUserByEmail(email) {

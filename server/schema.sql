@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS league_rules (
   forfeit_goals_against INTEGER NOT NULL DEFAULT 0,
   yellow_suspension_limit INTEGER NOT NULL DEFAULT 3,
   default_red_suspension_matches INTEGER NOT NULL DEFAULT 1,
+  playoff_qualifiers INTEGER NOT NULL DEFAULT 8,
   notes TEXT
 );
 
@@ -54,12 +55,25 @@ CREATE TABLE IF NOT EXISTS league_highlights (
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS league_announcements (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  date TEXT
+);
+
 CREATE TABLE IF NOT EXISTS teams (
   id TEXT PRIMARY KEY,
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   coach TEXT,
+  assistant_coach TEXT,
+  address TEXT,
   colors TEXT,
+  logo_url TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   withdrawn_round INTEGER,
   withdrawn_reason TEXT
@@ -68,10 +82,13 @@ CREATE TABLE IF NOT EXISTS teams (
 CREATE TABLE IF NOT EXISTS players (
   id TEXT PRIMARY KEY,
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
   team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   number INTEGER,
   position TEXT,
+  photo_url TEXT,
+  photo_authorized INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active'
 );
 
@@ -93,6 +110,7 @@ CREATE TABLE IF NOT EXISTS matches (
   status TEXT NOT NULL DEFAULT 'scheduled',
   home_goals INTEGER,
   away_goals INTEGER,
+  observations TEXT,
   resolution_type TEXT NOT NULL DEFAULT 'normal',
   resolution_note TEXT
 );
@@ -162,7 +180,11 @@ CREATE TABLE IF NOT EXISTS sponsors (
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   placement TEXT NOT NULL DEFAULT 'home_banner',
-  status TEXT NOT NULL DEFAULT 'active'
+  status TEXT NOT NULL DEFAULT 'active',
+  image_url TEXT,
+  link_url TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  notes TEXT
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (
