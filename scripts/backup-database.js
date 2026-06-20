@@ -15,6 +15,38 @@ const backupDir = path.isAbsolute(configuredBackupDir)
   ? configuredBackupDir
   : path.join(ROOT_DIR, configuredBackupDir);
 const backupPath = path.join(backupDir, `liga-futbol-${timestamp()}.sqlite`);
+const backupStorageBucket = String(process.env.BACKUP_STORAGE_BUCKET || "").trim();
+
+async function uploadBackupToSupabaseStorage(filePath) {
+  if (!backupStorageBucket) return null;
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY son obligatorios para subir backups.");
+  }
+
+  const baseUrl = process.env.SUPABASE_URL.replace(/\/+$/, "");
+  const filename = path.basename(filePath);
+  const objectPath = `database/${new Date().toISOString().slice(0, 10)}/${filename}`;
+  const endpoint = `${baseUrl}/storage/v1/object/${backupStorageBucket}/${objectPath}`;
+  const fileBuffer = fs.readFileSync(filePath);
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      "Content-Type": "application/json",
+      "Cache-Control": "private, max-age=0, no-store",
+      "x-upsert": "false"
+    },
+    body: fileBuffer
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`No se pudo subir el backup a Supabase Storage. ${detail}`.trim());
+  }
+
+  return objectPath;
+}
 
 fs.mkdirSync(backupDir, { recursive: true });
 
@@ -23,7 +55,11 @@ if (DATABASE_PROVIDER === "postgres") {
   const store = await getStoreData();
   const jsonPath = path.join(backupDir, `postgres-store-backup-${timestamp()}.json`);
   fs.writeFileSync(jsonPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  const uploadedPath = await uploadBackupToSupabaseStorage(jsonPath);
   console.log(`Respaldo logico creado: ${jsonPath}`);
+  if (uploadedPath) {
+    console.log(`Respaldo subido a Supabase Storage: ${backupStorageBucket}/${uploadedPath}`);
+  }
   console.log(`Base origen: ${DATABASE_LABEL}`);
   console.log("Nota: este respaldo contiene datos operativos de ligas, equipos, jugadores y partidos. Para respaldo fisico completo de Supabase/Postgres usa tambien el backup del proveedor.");
   await postgresPool?.end();

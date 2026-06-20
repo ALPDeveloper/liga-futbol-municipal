@@ -25,10 +25,13 @@ Este documento sirve para preparar una primera salida real de la Liga Municipal 
 - Verificar que `CORS_ORIGIN` use `https://` en produccion.
 - Verificar que `VITE_API_BASE_URL` sea `/api` o una URL publica `https://`.
 - Si web y API viven en el mismo dominio, definir `SERVE_STATIC=true` y `VITE_API_BASE_URL=/api`.
+- Fijar `NODE_VERSION=20.20.2` en Render o respetar `engines.node`.
 - Crear bucket `ligatec-images` en Supabase Storage o definir `SUPABASE_STORAGE_BUCKET`.
 - Revisar `docs/supabase-storage.md`.
 - Definir `IMAGE_STORAGE_PROVIDER=supabase`.
 - Definir `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` solo en la API, nunca en el frontend.
+- Crear bucket privado `ligatec-backups` con `npm run setup:backup-storage`.
+- Definir `BACKUP_STORAGE_BUCKET=ligatec-backups` para respaldos automaticos.
 - Definir `IMAGE_UPLOAD_MAX_BYTES` con un limite razonable para celular.
 - Confirmar que `/admin` no se muestra desde la portada publica.
 - Crear el super admin real.
@@ -101,7 +104,19 @@ npm run verify:backup -- backups/postgres-store-backup-FECHA.json
 ```
 
 - Programar respaldo diario en el servidor.
+- Si se usa Render, crear Cron Job diario que ejecute `BACKUP_STORAGE_BUCKET=ligatec-backups npm run backup:db`.
+- Confirmar que el backup automatico se sube al bucket privado `ligatec-backups`.
 - Probar restauracion en una copia antes del lanzamiento.
+
+## Dominio propio
+
+- Agregar el dominio en Render desde `Settings > Custom Domains`.
+- Copiar los DNS indicados por Render en el proveedor del dominio.
+- Quitar registros `AAAA` si existen.
+- Esperar verificacion y certificado HTTPS activo.
+- Actualizar `CORS_ORIGIN` al dominio final exacto.
+- Redeployar despues del cambio de `CORS_ORIGIN`.
+- Probar `https://dominio.com`, `https://dominio.com/admin` y `https://dominio.com/api/health`.
 
 ## Pendientes recomendados
 

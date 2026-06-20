@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0 <22.0.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:lan": "vite --host 0.0.0.0",
@@ -23,6 +26,7 @@
     "export:supabase-sql": "node scripts/export-supabase-sql.js",
     "setup:postgres-schema": "node scripts/apply-postgres-schema.js",
     "setup:storage": "node scripts/setup-supabase-storage.js",
+    "setup:backup-storage": "node scripts/setup-supabase-backups.js",
     "prepare:production-users": "node scripts/prepare-production-users.js",
     "check:postgres": "node scripts/check-postgres.js",
     "check:production-config": "NODE_ENV=production node scripts/check-production-config.js",

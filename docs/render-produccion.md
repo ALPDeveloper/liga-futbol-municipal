@@ -40,12 +40,13 @@ Render pedira las variables marcadas como secretas.
 No las subas a GitHub.
 
 ```env
-AUTH_SECRET=una-clave-nueva-larga-y-privada
 DATABASE_URL=postgresql://...
 CORS_ORIGIN=https://tu-dominio.com
 SUPABASE_URL=https://piwuxmasustltejzhwso.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=service-role-key-rotada
 ```
+
+`AUTH_SECRET` se genera automaticamente desde `render.yaml`.
 
 Importante: antes de lanzamiento final, rota/regenera `SUPABASE_SERVICE_ROLE_KEY` en Supabase porque se compartio durante configuracion.
 
@@ -53,6 +54,7 @@ Importante: antes de lanzamiento final, rota/regenera `SUPABASE_SERVICE_ROLE_KEY
 
 ```env
 NODE_ENV=production
+NODE_VERSION=20.20.2
 SERVE_STATIC=true
 API_HOST=0.0.0.0
 TRUST_PROXY=true
@@ -65,6 +67,7 @@ SHOW_RECOVERY_CODE_IN_RESPONSE=false
 SEED_DEMO_USERS=false
 VITE_API_BASE_URL=/api
 PUBLIC_CACHE_SECONDS=5
+BACKUP_STORAGE_BUCKET=ligatec-backups
 ```
 
 No definas `API_PORT` en Render. Render entrega `PORT` automaticamente y la app ya lo respeta.
@@ -74,7 +77,7 @@ No definas `API_PORT` en Render. Render entrega `PORT` automaticamente y la app 
 Build command:
 
 ```bash
-npm ci && npm run build
+npm ci --include=dev && npm run build
 ```
 
 Start command:
@@ -94,17 +97,68 @@ Health check:
 Cuando el servicio ya responda:
 
 1. En Render, abre el servicio.
-2. Ve a `Settings` o `Custom Domains`.
-3. Agrega tu dominio o subdominio.
-4. Render mostrara los registros DNS.
-5. Copia esos registros en tu proveedor de dominio.
-6. Espera a que Render marque HTTPS activo.
-7. Actualiza `CORS_ORIGIN` con el dominio final exacto.
+2. Ve a `Settings`.
+3. Busca `Custom Domains`.
+4. Clic en `+ Add Custom Domain`.
+5. Agrega el dominio final, por ejemplo `ligatec.mx` o `www.ligatec.mx`.
+6. Render mostrara los registros DNS.
+7. Copia esos registros en tu proveedor de dominio.
+8. Quita registros `AAAA` del dominio si existen.
+9. Espera a que Render marque el dominio como verificado y HTTPS activo.
+10. Actualiza `CORS_ORIGIN` con el dominio final exacto.
+
+Render conserva el subdominio `onrender.com` aunque agregues dominio propio. Si quieres que solo funcione el dominio oficial, puedes deshabilitar el subdominio de Render despues de confirmar que el dominio propio ya carga bien.
 
 Ejemplo:
 
 ```env
 CORS_ORIGIN=https://ligatec.mx
+```
+
+Si usas `www`, debe quedar exactamente igual:
+
+```env
+CORS_ORIGIN=https://www.ligatec.mx
+```
+
+Despues de cambiar `CORS_ORIGIN`, redeploya el servicio.
+
+## Backup automatico en Render
+
+La app incluye un respaldo logico JSON:
+
+```bash
+npm run backup:db
+```
+
+Para produccion, primero configura el bucket privado:
+
+```bash
+BACKUP_STORAGE_BUCKET=ligatec-backups npm run setup:backup-storage
+```
+
+Luego crea en Render un Cron Job diario con:
+
+```bash
+BACKUP_STORAGE_BUCKET=ligatec-backups npm run backup:db
+```
+
+Ese Cron Job debe tener estas variables:
+
+```env
+NODE_VERSION=20.20.2
+DATABASE_PROVIDER=postgres
+DATABASE_SSL=true
+DATABASE_URL=postgresql://...
+SUPABASE_URL=https://...
+SUPABASE_SERVICE_ROLE_KEY=...
+BACKUP_STORAGE_BUCKET=ligatec-backups
+```
+
+El respaldo se sube a Supabase Storage en:
+
+```txt
+ligatec-backups/database/AAAA-MM-DD/
 ```
 
 ## Prueba final despues del deploy
