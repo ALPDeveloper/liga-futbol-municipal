@@ -2,7 +2,7 @@ import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import alpLogo from "../assets/alp-logo.png";
 import heroImage from "../assets/league-hero.webp";
-import { seedData } from "./data/seedData.js";
+import { DEFAULT_IDENTITY } from "./data/seedData.js";
 import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
 import { loadStore, saveStore } from "./lib/storage.js";
 import { clearAuth, loadAuth, saveAuth } from "./lib/authStorage.js";
@@ -13,8 +13,10 @@ const LazyAdminRoute = React.lazy(() => import("./components/AdminRoute.jsx").th
 const LazyAuthPanel = React.lazy(() => import("./components/AuthPanel.jsx").then((module) => ({ default: module.AuthPanel })));
 const LazyPublicView = React.lazy(() => import("./components/PublicView.jsx").then((module) => ({ default: module.PublicView })));
 
-const cachedStore = loadStore();
-const initialStore = cachedStore || normalizeStore(seedData);
+const initialIsAdminRoute = window.location.pathname.startsWith("/admin");
+const cachedStore = initialIsAdminRoute ? loadStore() : null;
+const emptyStore = normalizeStore({ currentLeagueId: "", leagues: [] });
+const initialStore = cachedStore || emptyStore;
 const initialAuth = loadAuth();
 
 function getPublicLeagueIdFromPath(path) {
@@ -65,7 +67,7 @@ function App() {
   const [routePath, setRoutePath] = useState(window.location.pathname);
   const [adminPanel, setAdminPanel] = useState("league");
   const [apiStatus, setApiStatus] = useState("checking");
-  const [initialApiLoaded, setInitialApiLoaded] = useState(Boolean(cachedStore));
+  const [initialApiLoaded, setInitialApiLoaded] = useState(false);
   const [auth, setAuth] = useState(initialAuth);
   const [userListRefreshKey, setUserListRefreshKey] = useState(0);
   const pendingPersistRef = useRef(null);
@@ -73,14 +75,15 @@ function App() {
   const isAdminRoute = routePath.startsWith("/admin");
   const publicLeagueId = !isAdminRoute ? getPublicLeagueIdFromPath(routePath) : "";
   const league = useMemo(() => {
+    if (!store.leagues.length) return null;
     if (publicLeagueId) return store.leagues.find((item) => item.id === publicLeagueId) || getCurrentLeague(store);
     return getCurrentLeague(store);
   }, [publicLeagueId, store]);
   const currentUser = auth.user;
   const canUseSuperAdmin = currentUser?.role === "super_admin";
-  const canUseLeagueAdmin = currentUser?.role === "league_admin" && currentUser.leagueId === league.id && league.status === "active";
+  const canUseLeagueAdmin = currentUser?.role === "league_admin" && currentUser.leagueId === league?.id && league?.status === "active";
   const canUseAdmin = canUseSuperAdmin || canUseLeagueAdmin;
-  const publicLeaguePath = getPublicLeaguePath(league.id);
+  const publicLeaguePath = league?.id ? getPublicLeaguePath(league.id) : "/";
 
   function navigateTo(path) {
     window.history.pushState({}, "", path);
@@ -110,7 +113,7 @@ function App() {
       })
       .catch(() => {
         if (!cancelled) {
-          setApiStatus("local");
+          setApiStatus("offline");
           setInitialApiLoaded(true);
         }
       });
@@ -183,6 +186,7 @@ function App() {
   }
 
   function selectLeague(leagueId) {
+    if (!leagueId) return;
     saveLastPublicLeagueId(leagueId);
     const normalized = normalizeStore({ ...store, currentLeagueId: leagueId });
     setStore(normalized);
@@ -216,11 +220,12 @@ function App() {
     setAdminPanel("league");
   }
 
+  const identity = league?.identity || DEFAULT_IDENTITY;
   const themeStyle = {
-    "--field": league.identity.primaryColor,
-    "--field-dark": league.identity.primaryColor,
-    "--lime": league.identity.accentColor,
-    "--blue": league.identity.secondaryColor
+    "--field": identity.primaryColor,
+    "--field-dark": identity.primaryColor,
+    "--lime": identity.accentColor,
+    "--blue": identity.secondaryColor
   };
 
   if (!initialApiLoaded && !isAdminRoute) {
@@ -233,6 +238,22 @@ function App() {
         </div>
       </main>
     );
+  }
+
+  if (!league && !isAdminRoute) {
+    return (
+      <main className="startup-screen">
+        <div className="startup-card">
+          <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
+          <strong>No se pudieron cargar datos reales</strong>
+          <small>Revisa tu conexion e intenta actualizar la pagina.</small>
+        </div>
+      </main>
+    );
+  }
+
+  if (!league && isAdminRoute && canUseAdmin) {
+    return <RouteFallback label="Cargando datos reales" />;
   }
 
   return (
@@ -252,7 +273,7 @@ function App() {
           {isAdminRoute ? (
             <label className="league-switcher">
               <span>Liga</span>
-              <select value={league.id} onChange={(event) => selectLeague(event.target.value)}>
+              <select value={league?.id || ""} onChange={(event) => selectLeague(event.target.value)} disabled={!store.leagues.length}>
                 {store.leagues.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
@@ -263,7 +284,7 @@ function App() {
           ) : (
             <div className="public-league-badge">
               <span>Liga</span>
-              <strong>{league.name}</strong>
+              <strong>{league?.name || "Cargando"}</strong>
             </div>
           )}
           {isAdminRoute && (

@@ -1690,8 +1690,20 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     return eligiblePlayers.filter((player) => player.teamId === teamId);
   }
 
+  function getOpponentTeamId(teamId) {
+    if (teamId === selectedMatch?.homeTeamId) return selectedMatch.awayTeamId;
+    if (teamId === selectedMatch?.awayTeamId) return selectedMatch.homeTeamId;
+    return "";
+  }
+
+  function getPlayersForEvent(type, teamId) {
+    return type === "own_goal"
+      ? getPlayersForTeam(getOpponentTeamId(teamId))
+      : getPlayersForTeam(teamId);
+  }
+
   function addEvent(type, teamId = selectedMatch?.homeTeamId) {
-    const players = getPlayersForTeam(teamId);
+    const players = getPlayersForEvent(type, teamId);
     setEvents((current) => [
       ...current,
       {
@@ -1712,7 +1724,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     if (!players.length) return [];
 
     const expected = teamId === selectedMatch.homeTeamId ? expectedHomeGoals : expectedAwayGoals;
-    const currentGoals = currentEvents.filter((item) => item.type === "goal" && item.teamId === teamId && item.playerId).length;
+    const currentGoals = currentEvents.filter((item) => ["goal", "own_goal"].includes(item.type) && item.teamId === teamId && item.playerId).length;
     const missing = Math.max(0, expected - currentGoals);
     if (!missing) return [];
 
@@ -1751,6 +1763,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       event.id === eventId
         ? updateMatchSheetEventItem(event, field, value, {
             getPlayersForTeam,
+            getPlayersForEvent,
             defaultRedSuspensionMatches: league.rules?.defaultRedSuspensionMatches,
             lockGoalTeam: true
           })
@@ -1804,9 +1817,9 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   }
 
   const cleanEvents = events.filter((item) => item.playerId);
-  const goalEvents = cleanEvents.filter((item) => item.type === "goal");
-  const homeGoalEvents = goalEvents.filter((item) => getPlayer(league, item.playerId)?.teamId === selectedMatch.homeTeamId).length;
-  const awayGoalEvents = goalEvents.filter((item) => getPlayer(league, item.playerId)?.teamId === selectedMatch.awayTeamId).length;
+  const goalEvents = cleanEvents.filter((item) => item.type === "goal" || item.type === "own_goal");
+  const homeGoalEvents = goalEvents.filter((item) => item.teamId === selectedMatch.homeTeamId).length;
+  const awayGoalEvents = goalEvents.filter((item) => item.teamId === selectedMatch.awayTeamId).length;
   const expectedHomeGoals = Number(homeGoals || 0);
   const expectedAwayGoals = Number(awayGoals || 0);
   const isDefaultSheet = sheetMode !== "played";
@@ -1825,8 +1838,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       if (![3, 5].includes(maxGoals) || minGoals !== 0) return "El default solo puede guardarse como 3-0 o 5-0.";
       return "";
     }
-    if ((expectedHomeGoals > 0 && !getPlayersForTeam(selectedMatch.homeTeamId).length) || (expectedAwayGoals > 0 && !getPlayersForTeam(selectedMatch.awayTeamId).length)) {
-      return "Para guardar goles, ambos equipos con goles deben tener jugadores registrados.";
+    const canAssignHomeGoals = getPlayersForTeam(selectedMatch.homeTeamId).length || getPlayersForTeam(selectedMatch.awayTeamId).length;
+    const canAssignAwayGoals = getPlayersForTeam(selectedMatch.awayTeamId).length || getPlayersForTeam(selectedMatch.homeTeamId).length;
+    if ((expectedHomeGoals > 0 && !canAssignHomeGoals) || (expectedAwayGoals > 0 && !canAssignAwayGoals)) {
+      return "Para guardar goles o autogoles, el partido debe tener jugadores registrados.";
     }
 
     if (expectedHomeGoals > 0 && homeGoalEvents !== expectedHomeGoals) {
@@ -1850,7 +1865,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
 
     const eventWithWrongTeam = cleanEvents.find((item) => {
       const player = getPlayer(league, item.playerId);
-      return !player || player.teamId !== item.teamId || ![selectedMatch.homeTeamId, selectedMatch.awayTeamId].includes(item.teamId);
+      if (!["goal", "own_goal", "yellow", "red"].includes(item.type)) return true;
+      if (!player || ![selectedMatch.homeTeamId, selectedMatch.awayTeamId].includes(item.teamId)) return true;
+      if (item.type === "own_goal") return player.teamId !== getOpponentTeamId(item.teamId);
+      return player.teamId !== item.teamId;
     });
     if (eventWithWrongTeam) return "Hay eventos con jugador o equipo que no corresponde al partido.";
 
@@ -2010,6 +2028,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
 
       <div className="event-toolbar">
         <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Completar goles del marcador</button>
+        <button type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.awayTeamId).length}>Autogol para local</button>
+        <button type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.homeTeamId).length}>Autogol para visitante</button>
         <button type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.homeTeamId).length}>Amarilla local</button>
         <button type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.awayTeamId).length}>Amarilla visitante</button>
         <button type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.homeTeamId).length}>Roja local</button>
@@ -2020,27 +2040,30 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         {events.map((eventItem) => {
           const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
           const eventTeam = getTeam(league, eventTeamId);
+          const eventPlayers = getPlayersForEvent(eventItem.type, eventTeamId);
           const isLockedTeamEvent = Boolean(eventItem.lockedTeamId);
+          const eventTeamLabel = eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento";
 
           return (
             <article className="event-row" key={eventItem.id}>
               <select value={eventItem.type} onChange={(event) => updateEvent(eventItem.id, "type", event.target.value)} aria-label="Tipo de evento">
                 <option value="goal">Gol</option>
+                <option value="own_goal">Autogol</option>
                 <option value="yellow">Amarilla</option>
                 <option value="red">Roja</option>
               </select>
               <select
                 disabled={isLockedTeamEvent}
-                title={isLockedTeamEvent ? "El equipo queda fijo segun el boton local/visitante seleccionado." : "Equipo del evento"}
+                title={isLockedTeamEvent ? "El equipo queda fijo segun el boton local/visitante seleccionado." : eventTeamLabel}
                 value={eventTeamId}
                 onChange={(event) => updateEvent(eventItem.id, "teamId", event.target.value)}
-                aria-label="Equipo del evento"
+                aria-label={eventTeamLabel}
               >
                 <option value={selectedMatch.homeTeamId}>{getTeam(league, selectedMatch.homeTeamId)?.name || "Local"}</option>
                 <option value={selectedMatch.awayTeamId}>{getTeam(league, selectedMatch.awayTeamId)?.name || "Visitante"}</option>
               </select>
-              <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label={`Jugador de ${eventTeam?.name || "equipo"}`}>
-                {getPlayersForTeam(eventTeamId).map((player) => (
+              <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label={eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : `Jugador de ${eventTeam?.name || "equipo"}`}>
+                {eventPlayers.map((player) => (
                   <option key={player.id} value={player.id}>
                     #{player.number} {player.name}
                   </option>
@@ -2053,7 +2076,13 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                   <input value={eventItem.reason} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Motivo" aria-label="Motivo de sancion" required />
                 </>
               ) : (
-                <span className="event-hint">{eventItem.type === "goal" ? `Gol de ${eventTeam?.name || "equipo asignado"}` : `Amonestacion de ${eventTeam?.name || "equipo asignado"}`}</span>
+                <span className="event-hint">
+                  {eventItem.type === "goal"
+                    ? `Gol de ${eventTeam?.name || "equipo asignado"}`
+                    : eventItem.type === "own_goal"
+                    ? `Autogol a favor de ${eventTeam?.name || "equipo asignado"}`
+                    : `Amonestacion de ${eventTeam?.name || "equipo asignado"}`}
+                </span>
               )}
               <button className="danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
             </article>

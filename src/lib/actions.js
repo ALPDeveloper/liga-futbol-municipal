@@ -887,8 +887,13 @@ export function saveMatchSheet(store, leagueId, payload) {
           const player = getPlayer(league, event.playerId);
           if (!player) return null;
           if (![match.homeTeamId, match.awayTeamId].includes(player.teamId)) return null;
-          if (event.teamId && event.teamId !== player.teamId) return null;
-          if (!["goal", "yellow", "red"].includes(event.type)) return null;
+          if (!["goal", "own_goal", "yellow", "red"].includes(event.type)) return null;
+          const eventTeamId = event.type === "own_goal"
+            ? event.teamId || (player.teamId === match.homeTeamId ? match.awayTeamId : match.homeTeamId)
+            : player.teamId;
+          if (![match.homeTeamId, match.awayTeamId].includes(eventTeamId)) return null;
+          if (event.type === "own_goal" && eventTeamId === player.teamId) return null;
+          if (event.type !== "own_goal" && event.teamId && event.teamId !== player.teamId) return null;
           const minute = Number(event.minute || 0);
           if (minute < 0 || minute > 130) throw new Error("Los minutos del acta deben estar entre 0 y 130.");
           if (event.type === "red" && !String(event.reason || "").trim()) {
@@ -901,7 +906,7 @@ export function saveMatchSheet(store, leagueId, payload) {
           return {
             type: event.type,
             playerId: player.id,
-            teamId: player.teamId,
+            teamId: eventTeamId,
             minute,
             suspensionMatches: event.type === "red"
               ? Number(event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1)
@@ -910,7 +915,7 @@ export function saveMatchSheet(store, leagueId, payload) {
           };
         })
         .filter(Boolean);
-      const goals = events.filter((event) => event.type === "goal");
+      const goals = events.filter((event) => event.type === "goal" || event.type === "own_goal");
       const homeGoalEvents = goals.filter((event) => event.teamId === match.homeTeamId).length;
       const awayGoalEvents = goals.filter((event) => event.teamId === match.awayTeamId).length;
       if (homeGoalEvents !== homeGoals || awayGoalEvents !== awayGoals) {

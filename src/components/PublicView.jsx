@@ -2061,7 +2061,7 @@ function hasEventMinute(event) {
 
 function sortMatchEvents(events) {
   const indexedEvents = events
-    .filter((event) => ["goal", "yellow", "red"].includes(event.type))
+    .filter((event) => ["goal", "own_goal", "yellow", "red"].includes(event.type))
     .map((event, index) => ({ event, index }));
   const hasMinutes = indexedEvents.some(({ event }) => hasEventMinute(event));
 
@@ -2090,11 +2090,12 @@ function MatchTeamEvents({ title, events, league }) {
         return (
           <article className={`match-event-row ${event.type}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
             <span className="match-event-minute">{event.minute ? `${event.minute}'` : "--"}</span>
-            <span className="match-event-badge">{event.type === "goal" ? "GOL" : event.type === "yellow" ? "AM" : "ROJA"}</span>
+            <span className="match-event-badge">{event.type === "goal" ? "GOL" : event.type === "own_goal" ? "AG" : event.type === "yellow" ? "AM" : "ROJA"}</span>
             <div>
               <strong>{player?.name || "Jugador"}</strong>
               {event.type === "red" && event.reason && <small>{event.reason}</small>}
               {event.type === "yellow" && <small>Amonestacion</small>}
+              {event.type === "own_goal" && <small>Autogol</small>}
             </div>
           </article>
         );

@@ -610,6 +610,13 @@ const redReasonChangedEvent = updateMatchSheetEventItem(redChangedEvent, "reason
 assert.equal(redReasonChangedEvent.reason, "Conducta violenta");
 const redSuspensionChangedEvent = updateMatchSheetEventItem(redReasonChangedEvent, "suspensionMatches", "3");
 assert.equal(redSuspensionChangedEvent.suspensionMatches, "3");
+const ownGoalChangedEvent = updateMatchSheetEventItem(sheetEvent, "type", "own_goal", {
+  getPlayersForTeam: (teamId) => teamId === "halcones" ? [{ id: "p1" }] : [],
+  getPlayersForEvent: (type, teamId) => type === "own_goal" && teamId === "halcones" ? [{ id: "p3" }] : [{ id: "p1" }],
+  lockGoalTeam: true
+});
+assert.equal(ownGoalChangedEvent.teamId, "halcones");
+assert.equal(ownGoalChangedEvent.playerId, "p3");
 
 const multiLeagueStore = normalizeStore({
   ...structuredClone(seedData),
@@ -657,7 +664,7 @@ store = saveMatchSheet(store, league.id, {
   observations: "Arbitro reporta incidentes al final del partido",
   events: [
     { type: "goal", playerId: "p3", minute: 12 },
-    { type: "goal", playerId: "p4", minute: 55 },
+    { type: "own_goal", playerId: "p5", teamId: "union", minute: 55 },
     { type: "red", playerId: "p5", minute: 70, suspensionMatches: 2, reason: "Conducta violenta" }
   ]
 });
@@ -666,7 +673,9 @@ const acta = league.matches.find((match) => match.id === "m4");
 assert.equal(acta.status, "finished");
 assert.equal(acta.events.length, 3);
 assert.equal(acta.observations, "ARBITRO REPORTA INCIDENTES AL FINAL DEL PARTIDO");
+assert.equal(acta.events.find((event) => event.type === "own_goal").teamId, "union");
 assert.equal(acta.events.find((event) => event.type === "red").suspensionMatches, 2);
+assert.equal(calculatePlayerStats(league).find((row) => row.player.id === "p5").goals, 0);
 
 store = saveMatchSheet(store, league.id, {
   matchId: "m3",

@@ -1885,6 +1885,11 @@ th {
   color: #fff;
 }
 
+.match-event-row.own_goal .match-event-badge {
+  background: #38bdf8;
+  color: #082f49;
+}
+
 .match-event-row div {
   min-width: 0;
 }

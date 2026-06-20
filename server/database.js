@@ -24,7 +24,7 @@ export function initializeDatabase() {
   db.exec(fs.readFileSync(SCHEMA_PATH, "utf8"));
   runMigrations();
   const count = db.prepare("SELECT COUNT(*) AS total FROM leagues").get().total;
-  if (count === 0) importStore(normalizeStore(seedData));
+  if (count === 0 && runtimeConfig.seedDemoData) importStore(normalizeStore(seedData));
   seedUsers();
 }
 

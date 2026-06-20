@@ -51,7 +51,7 @@ export async function initializePostgresDatabase() {
   `);
   await runPostgresMigrations(pool);
   const result = await pool.query("SELECT COUNT(*)::int AS total FROM leagues");
-  if (result.rows[0].total === 0) await importPostgresStore(normalizeStore(seedData));
+  if (result.rows[0].total === 0 && runtimeConfig.seedDemoData) await importPostgresStore(normalizeStore(seedData));
   await seedPostgresUsers();
 }
 

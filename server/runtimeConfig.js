@@ -61,6 +61,7 @@ export const runtimeConfig = {
     process.env.SHOW_RECOVERY_CODE_IN_RESPONSE,
     false
   ),
+  seedDemoData: parseBoolean(process.env.SEED_DEMO_DATA, !IS_PRODUCTION),
   seedDemoUsers: parseBoolean(process.env.SEED_DEMO_USERS, !IS_PRODUCTION),
   tokenSecret: process.env.AUTH_SECRET || DEFAULT_DEV_SECRET,
   tokenTtlMs: 1000 * 60 * 60 * Number(process.env.TOKEN_TTL_HOURS || 8),
@@ -113,6 +114,10 @@ export function validateRuntimeConfig() {
 
   if (runtimeConfig.seedDemoUsers) {
     problems.push("SEED_DEMO_USERS debe ser false en produccion.");
+  }
+
+  if (runtimeConfig.seedDemoData) {
+    problems.push("SEED_DEMO_DATA debe ser false en produccion.");
   }
 
   if (runtimeConfig.databaseProvider === "postgres" && !runtimeConfig.databaseUrl) {
