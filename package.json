@@ -20,6 +20,7 @@
     "start": "NODE_ENV=production SERVE_STATIC=true node server/index.js",
     "check:deployment": "npm run build && npm run check:production-config",
     "backup:db": "node scripts/backup-database.js",
+    "backup:db:cron": "BACKUP_STORAGE_BUCKET=ligatec-backups BACKUP_TIMEOUT_MS=600000 node scripts/backup-database.js",
     "verify:backup": "node scripts/verify-backup-restore.js",
     "pilot:exports": "npm run export:store && npm run export:supabase-sql",
     "export:store": "node scripts/export-store-json.js",

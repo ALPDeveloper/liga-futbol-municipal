@@ -16,6 +16,14 @@ const backupDir = path.isAbsolute(configuredBackupDir)
   : path.join(ROOT_DIR, configuredBackupDir);
 const backupPath = path.join(backupDir, `liga-futbol-${timestamp()}.sqlite`);
 const backupStorageBucket = String(process.env.BACKUP_STORAGE_BUCKET || "").trim();
+const backupTimeoutMs = Math.max(
+  30_000,
+  Number(process.env.BACKUP_TIMEOUT_MS || 10 * 60 * 1000)
+);
+const backupTimeout = setTimeout(() => {
+  console.error(`Backup cancelado: excedio ${Math.round(backupTimeoutMs / 1000)} segundos.`);
+  process.exit(1);
+}, backupTimeoutMs);
 
 async function uploadBackupToSupabaseStorage(filePath) {
   if (!backupStorageBucket) return null;
@@ -63,10 +71,12 @@ if (DATABASE_PROVIDER === "postgres") {
   console.log(`Base origen: ${DATABASE_LABEL}`);
   console.log("Nota: este respaldo contiene datos operativos de ligas, equipos, jugadores y partidos. Para respaldo fisico completo de Supabase/Postgres usa tambien el backup del proveedor.");
   await postgresPool?.end();
+  clearTimeout(backupTimeout);
   process.exit(0);
 }
 
 await db.backup(backupPath);
+clearTimeout(backupTimeout);
 
 console.log(`Respaldo creado: ${backupPath}`);
 console.log(`Base origen: ${DB_PATH}`);

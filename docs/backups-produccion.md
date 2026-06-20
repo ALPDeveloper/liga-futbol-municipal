@@ -61,6 +61,19 @@ Recomendado:
 
 En Render, la forma recomendada es crear un Cron Job diario que ejecute el mismo comando y use las mismas variables secretas que el servicio web. Como Render usa disco efimero, el respaldo automatico debe subir a Supabase Storage o a otro almacenamiento externo.
 
+Configuracion recomendada para LIGATEC en Render:
+
+```txt
+Nombre: ligatec-backup-diario
+Schedule: 0 9 * * *
+Command: npm run backup:db:cron
+Instance type: el mas pequeno disponible
+```
+
+`0 9 * * *` corre una vez al dia a las 09:00 UTC, equivalente aproximadamente a 03:00 AM en Mexico centro cuando aplica UTC-6.
+
+El script `backup:db:cron` fija `BACKUP_TIMEOUT_MS=600000`, por lo que el proceso se cancela si tarda mas de 10 minutos. Esto reduce el riesgo de costo por un proceso colgado. Render cobra los Cron Jobs por tiempo activo y tiene un cargo minimo mensual por cron job, asi que no conviene programarlo con una frecuencia alta.
+
 ## Backups nativos de Supabase
 
 Supabase realiza backups diarios automaticamente en proyectos Pro, Team y Enterprise. En Free, conviene exportar regularmente con Supabase CLI o con el respaldo JSON de esta app y mantener copias fuera del proyecto.
