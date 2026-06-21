@@ -11,6 +11,7 @@ import "./styles.css";
 
 const LazyAdminRoute = React.lazy(() => import("./components/AdminRoute.jsx").then((module) => ({ default: module.AdminRoute })));
 const LazyAuthPanel = React.lazy(() => import("./components/AuthPanel.jsx").then((module) => ({ default: module.AuthPanel })));
+const LazyLegalView = React.lazy(() => import("./components/LegalView.jsx").then((module) => ({ default: module.LegalView })));
 const LazyPublicView = React.lazy(() => import("./components/PublicView.jsx").then((module) => ({ default: module.PublicView })));
 
 const initialIsAdminRoute = window.location.pathname.startsWith("/admin");
@@ -84,6 +85,7 @@ function App() {
   const canUseLeagueAdmin = currentUser?.role === "league_admin" && currentUser.leagueId === league?.id && league?.status === "active";
   const canUseAdmin = canUseSuperAdmin || canUseLeagueAdmin;
   const publicLeaguePath = league?.id ? getPublicLeaguePath(league.id) : "/";
+  const isLegalRoute = routePath === "/legal" || routePath.startsWith("/legal/");
 
   function navigateTo(path) {
     window.history.pushState({}, "", path);
@@ -240,7 +242,7 @@ function App() {
     );
   }
 
-  if (!league && !isAdminRoute) {
+  if (!league && !isAdminRoute && !isLegalRoute) {
     return (
       <main className="startup-screen">
         <div className="startup-card">
@@ -284,8 +286,16 @@ function App() {
           ) : (
             <div className="public-league-badge">
               <span>Liga</span>
-              <strong>{league?.name || "Cargando"}</strong>
+              <strong>{isLegalRoute ? "Aviso legal" : league?.name || "Cargando"}</strong>
             </div>
+          )}
+          {!isAdminRoute && (
+            <a className="admin-public-link" href={isLegalRoute ? publicLeaguePath : "/legal"} onClick={(event) => {
+              event.preventDefault();
+              navigateTo(isLegalRoute ? publicLeaguePath : "/legal");
+            }}>
+              {isLegalRoute ? "Vista liga" : "Legal"}
+            </a>
           )}
           {isAdminRoute && (
             <>
@@ -325,6 +335,10 @@ function App() {
             </a>
           </section>
         </main>
+      ) : isLegalRoute ? (
+        <Suspense fallback={<RouteFallback label="Cargando aviso legal" />}>
+          <LazyLegalView league={league} onNavigate={navigateTo} publicLeaguePath={publicLeaguePath} />
+        </Suspense>
       ) : league.status === "suspended" && !isAdminRoute ? (
         <main className="page">
           <section className="hero compact" style={{ "--hero-image": `url(${heroImage})` }}>
@@ -357,7 +371,7 @@ function App() {
         </Suspense>
       ) : (
         <Suspense fallback={<RouteFallback label="Cargando liga" />}>
-          <LazyPublicView heroImage={heroImage} league={league} />
+          <LazyPublicView heroImage={heroImage} legalPath="/legal" league={league} onNavigate={navigateTo} />
         </Suspense>
       )}
     </div>

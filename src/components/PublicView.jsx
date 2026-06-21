@@ -41,7 +41,7 @@ function saveLastCompetitionId(leagueId, competitionId) {
   }
 }
 
-export function PublicView({ heroImage, league }) {
+export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate }) {
   const [showIntro, setShowIntro] = useState(true);
   const [publicSearch, setPublicSearch] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
@@ -382,7 +382,27 @@ export function PublicView({ heroImage, league }) {
           </section>
         </aside>
       </section>
+
+      <PublicLegalFooter legalPath={legalPath} league={league} onNavigate={onNavigate} />
     </main>
+  );
+}
+
+function PublicLegalFooter({ legalPath, league, onNavigate }) {
+  function handleLegalClick(event) {
+    if (!onNavigate) return;
+    event.preventDefault();
+    onNavigate(legalPath);
+  }
+
+  return (
+    <footer className="public-legal-footer">
+      <div>
+        <strong>{league.name}</strong>
+        <span>Derechos reservados. Informacion sujeta a revision de la liga.</span>
+      </div>
+      <a href={legalPath} onClick={handleLegalClick}>Terminos, privacidad y copyright</a>
+    </footer>
   );
 }
 
