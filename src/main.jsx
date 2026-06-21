@@ -25,8 +25,17 @@ function getPublicLeagueIdFromPath(path) {
   return section === "liga" ? decodeURIComponent(leagueId || "") : "";
 }
 
+function getLegalLeagueIdFromPath(path) {
+  const [, section, leagueId] = path.split("/");
+  return section === "legal" ? decodeURIComponent(leagueId || "") : "";
+}
+
 function getPublicLeaguePath(leagueId) {
   return `/liga/${encodeURIComponent(leagueId)}`;
+}
+
+function getLegalLeaguePath(leagueId) {
+  return `/legal/${encodeURIComponent(leagueId)}`;
 }
 
 const LAST_PUBLIC_LEAGUE_KEY = "ligatec:lastPublicLeagueId";
@@ -75,16 +84,19 @@ function App() {
   const persistRunningRef = useRef(false);
   const isAdminRoute = routePath.startsWith("/admin");
   const publicLeagueId = !isAdminRoute ? getPublicLeagueIdFromPath(routePath) : "";
+  const legalLeagueId = !isAdminRoute ? getLegalLeagueIdFromPath(routePath) : "";
+  const routeLeagueId = publicLeagueId || legalLeagueId;
   const league = useMemo(() => {
     if (!store.leagues.length) return null;
-    if (publicLeagueId) return store.leagues.find((item) => item.id === publicLeagueId) || getCurrentLeague(store);
+    if (routeLeagueId) return store.leagues.find((item) => item.id === routeLeagueId) || getCurrentLeague(store);
     return getCurrentLeague(store);
-  }, [publicLeagueId, store]);
+  }, [routeLeagueId, store]);
   const currentUser = auth.user;
   const canUseSuperAdmin = currentUser?.role === "super_admin";
   const canUseLeagueAdmin = currentUser?.role === "league_admin" && currentUser.leagueId === league?.id && league?.status === "active";
   const canUseAdmin = canUseSuperAdmin || canUseLeagueAdmin;
   const publicLeaguePath = league?.id ? getPublicLeaguePath(league.id) : "/";
+  const legalLeaguePath = league?.id ? getLegalLeaguePath(league.id) : "/legal";
   const isLegalRoute = routePath === "/legal" || routePath.startsWith("/legal/");
 
   function navigateTo(path) {
@@ -105,7 +117,7 @@ function App() {
       .then((apiStore) => {
         if (cancelled) return;
         const rememberedLeagueId = loadLastPublicLeagueId();
-        const preferredLeagueId = publicLeagueId ||
+        const preferredLeagueId = routeLeagueId ||
           (apiStore.leagues?.some((item) => item.id === rememberedLeagueId) ? rememberedLeagueId : apiStore.currentLeagueId);
         const normalized = normalizeStore({ ...apiStore, currentLeagueId: preferredLeagueId });
         setStore(normalized);
@@ -267,7 +279,7 @@ function App() {
         }}>
           <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
           <span>
-            <strong>LIGA FUTBOL</strong>
+            <strong>LIGA TEC</strong>
             <small>PLATAFORMA DEPORTIVA</small>
           </span>
         </a>
@@ -290,9 +302,9 @@ function App() {
             </div>
           )}
           {!isAdminRoute && (
-            <a className="admin-public-link" href={isLegalRoute ? publicLeaguePath : "/legal"} onClick={(event) => {
+            <a className="admin-public-link" href={isLegalRoute ? publicLeaguePath : legalLeaguePath} onClick={(event) => {
               event.preventDefault();
-              navigateTo(isLegalRoute ? publicLeaguePath : "/legal");
+              navigateTo(isLegalRoute ? publicLeaguePath : legalLeaguePath);
             }}>
               {isLegalRoute ? "Vista liga" : "Legal"}
             </a>
@@ -371,7 +383,7 @@ function App() {
         </Suspense>
       ) : (
         <Suspense fallback={<RouteFallback label="Cargando liga" />}>
-          <LazyPublicView heroImage={heroImage} legalPath="/legal" league={league} onNavigate={navigateTo} />
+          <LazyPublicView heroImage={heroImage} legalPath={legalLeaguePath} league={league} onNavigate={navigateTo} />
         </Suspense>
       )}
     </div>
