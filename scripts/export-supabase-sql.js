@@ -20,6 +20,10 @@ const TABLES = [
   "match_events",
   "player_sanctions",
   "player_injuries",
+  "team_affiliations",
+  "discipline_links",
+  "discipline_adjustments",
+  "discipline_resets",
   "users",
   "memberships",
   "sponsors",
@@ -60,6 +64,7 @@ function sqlValue(column, value) {
   if (BOOLEAN_COLUMNS.has(column)) return Number(value) ? "TRUE" : "FALSE";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
   if (value instanceof Date) return `'${value.toISOString().replaceAll("'", "''")}'`;
+  if (typeof value === "object") return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 

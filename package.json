@@ -22,6 +22,8 @@
     "backup:db": "node scripts/backup-database.js",
     "backup:db:cron": "BACKUP_STORAGE_BUCKET=ligatec-backups BACKUP_TIMEOUT_MS=600000 node scripts/backup-database.js",
     "verify:backup": "node scripts/verify-backup-restore.js",
+    "restore:local-sqlite": "DATABASE_PROVIDER=sqlite DB_PATH=data/ligatec-local-test.sqlite SEED_DEMO_DATA=false SEED_DEMO_USERS=true node scripts/restore-local-sqlite.js",
+    "test:local-affiliations": "node scripts/local-affiliation-api-test.js",
     "pilot:exports": "npm run export:store && npm run export:supabase-sql",
     "export:store": "node scripts/export-store-json.js",
     "export:supabase-sql": "node scripts/export-supabase-sql.js",

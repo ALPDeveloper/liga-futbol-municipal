@@ -1,5 +1,5 @@
 import { DEFAULT_IDENTITY } from "../data/seedData.js";
-import { calculateStandings, getDefaultCompetitionId, getPlayer, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
+import { calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, isPlayerEligibleForTeam, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
 
 function updateLeague(store, leagueId, updater) {
   return {
@@ -111,6 +111,9 @@ export function deleteTeam(store, leagueId, teamId) {
       const player = league.players.find((item) => item.id === injury.playerId);
       return player?.teamId !== teamId;
     }),
+    teamAffiliations: (league.teamAffiliations || []).filter((affiliation) => (
+      affiliation.sourceTeamId !== teamId && affiliation.targetTeamId !== teamId
+    )),
     matches: league.matches.filter((match) => match.homeTeamId !== teamId && match.awayTeamId !== teamId)
   }));
 }
@@ -160,6 +163,11 @@ export function deletePlayer(store, leagueId, playerId) {
     ...league,
     players: league.players.filter((player) => player.id !== playerId),
     sanctions: (league.sanctions || []).filter((sanction) => sanction.playerId !== playerId),
+    disciplineLinks: (league.disciplineLinks || [])
+      .map((link) => ({ ...link, playerIds: (link.playerIds || []).filter((item) => item !== playerId) }))
+      .filter((link) => link.playerIds.length > 1),
+    disciplineAdjustments: (league.disciplineAdjustments || []).filter((adjustment) => adjustment.playerId !== playerId),
+    disciplineResets: (league.disciplineResets || []).filter((reset) => reset.playerId !== playerId),
     injuries: (league.injuries || []).filter((injury) => injury.playerId !== playerId),
     matches: league.matches.map((match) => ({
       ...match,
@@ -197,6 +205,225 @@ export function deletePlayerSanction(store, leagueId, sanctionId) {
     ...league,
     sanctions: (league.sanctions || []).filter((sanction) => sanction.id !== sanctionId)
   }));
+}
+
+export function addDisciplineLink(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => {
+    const playerIds = [...new Set([payload.playerId, payload.linkedPlayerId].filter(Boolean))];
+    if (playerIds.length < 2 || playerIds.some((playerId) => !getPlayer(league, playerId))) return league;
+
+    const mergedIds = new Set(playerIds);
+    const remainingLinks = [];
+    for (const link of league.disciplineLinks || []) {
+      const intersects = (link.playerIds || []).some((playerId) => mergedIds.has(playerId));
+      if (intersects) {
+        for (const playerId of link.playerIds || []) mergedIds.add(playerId);
+      } else {
+        remainingLinks.push(link);
+      }
+    }
+
+    return {
+      ...league,
+      disciplineLinks: [
+        ...remainingLinks,
+        {
+          id: makeId("discipline-link"),
+          playerIds: [...mergedIds],
+          notes: upperText(payload.notes || "")
+        }
+      ]
+    };
+  });
+}
+
+export function deleteDisciplineLink(store, leagueId, linkId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    disciplineLinks: (league.disciplineLinks || []).filter((link) => link.id !== linkId)
+  }));
+}
+
+export function addDisciplineAdjustment(store, leagueId, payload) {
+  const value = payload.direction === "subtract" ? -Math.abs(Number(payload.value || 1)) : Math.abs(Number(payload.value || 1));
+
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    disciplineAdjustments: [
+      ...(league.disciplineAdjustments || []),
+      {
+        id: makeId("discipline-adjustment"),
+        competitionId: payload.competitionId || getDefaultCompetitionId(league),
+        playerId: payload.playerId,
+        value,
+        date: payload.date || new Date().toISOString().slice(0, 10),
+        reason: upperText(payload.reason || "Ajuste manual de amarillas"),
+        notes: upperText(payload.notes || ""),
+        status: "active"
+      }
+    ]
+  }));
+}
+
+export function deleteDisciplineAdjustment(store, leagueId, adjustmentId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    disciplineAdjustments: (league.disciplineAdjustments || []).filter((adjustment) => adjustment.id !== adjustmentId)
+  }));
+}
+
+export function addDisciplineReset(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    disciplineResets: [
+      ...(league.disciplineResets || []),
+      {
+        id: makeId("discipline-reset"),
+        playerId: payload.playerId,
+        date: payload.date || new Date().toISOString().slice(0, 10),
+        reason: upperText(payload.reason || "Sancion cumplida"),
+        notes: upperText(payload.notes || ""),
+        status: "active"
+      }
+    ]
+  }));
+}
+
+export function deleteDisciplineReset(store, leagueId, resetId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    disciplineResets: (league.disciplineResets || []).filter((reset) => reset.id !== resetId)
+  }));
+}
+
+export function addTeamAffiliation(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => {
+    const sourceTeamId = payload.sourceTeamId || "";
+    const targetTeamId = payload.targetTeamId || "";
+    const sourceTeam = league.teams.find((team) => team.id === sourceTeamId);
+    const targetTeam = league.teams.find((team) => team.id === targetTeamId);
+    if (!sourceTeam || !targetTeam || sourceTeamId === targetTeamId) return league;
+
+    const exists = (league.teamAffiliations || []).some((affiliation) => (
+      affiliation.status !== "revoked" &&
+      affiliation.sourceTeamId === sourceTeamId &&
+      affiliation.targetTeamId === targetTeamId
+    ));
+    if (exists) return league;
+
+    return {
+      ...league,
+      teamAffiliations: [
+        ...(league.teamAffiliations || []),
+        {
+          id: makeId("team-affiliation"),
+          sourceTeamId,
+          targetTeamId,
+          status: "active",
+          startsAt: payload.startsAt || "",
+          endsAt: payload.endsAt || "",
+          playerNumbers: {},
+          notes: upperText(payload.notes || "")
+        }
+      ]
+    };
+  });
+}
+
+export function deleteTeamAffiliation(store, leagueId, affiliationId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    teamAffiliations: (league.teamAffiliations || []).filter((affiliation) => affiliation.id !== affiliationId)
+  }));
+}
+
+export function updateTeamAffiliationPlayerNumber(store, leagueId, affiliationId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    teamAffiliations: (league.teamAffiliations || []).map((affiliation) => {
+      if (affiliation.id !== affiliationId) return affiliation;
+      const player = getPlayer(league, payload.playerId);
+      if (!player || player.teamId !== affiliation.sourceTeamId) return affiliation;
+      const number = Number(payload.number || 0);
+      return {
+        ...affiliation,
+        playerNumbers: {
+          ...(affiliation.playerNumbers || {}),
+          [player.id]: number
+        }
+      };
+    })
+  }));
+}
+
+export function mergeDuplicatePlayer(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => {
+    const targetPlayer = getPlayer(league, payload.targetPlayerId);
+    const duplicatePlayer = getPlayer(league, payload.duplicatePlayerId);
+    if (!targetPlayer || !duplicatePlayer || targetPlayer.id === duplicatePlayer.id) return league;
+
+    const replacePlayerId = (playerId) => (playerId === duplicatePlayer.id ? targetPlayer.id : playerId);
+    const affiliationForDuplicateTeam = (league.teamAffiliations || []).find((affiliation) => (
+      affiliation.status !== "revoked" &&
+      affiliation.sourceTeamId === targetPlayer.teamId &&
+      affiliation.targetTeamId === duplicatePlayer.teamId
+    ));
+
+    return {
+      ...league,
+      players: league.players
+        .filter((player) => player.id !== duplicatePlayer.id)
+        .map((player) => {
+          if (player.id !== targetPlayer.id) return player;
+          return {
+            ...player,
+            photoUrl: player.photoUrl || duplicatePlayer.photoUrl || "",
+            photoAuthorized: player.photoAuthorized || duplicatePlayer.photoAuthorized === true
+          };
+        }),
+      teamAffiliations: (league.teamAffiliations || []).map((affiliation) => {
+        const playerNumbers = { ...(affiliation.playerNumbers || {}) };
+        if (playerNumbers[duplicatePlayer.id] !== undefined) {
+          playerNumbers[targetPlayer.id] = playerNumbers[duplicatePlayer.id];
+          delete playerNumbers[duplicatePlayer.id];
+        }
+        if (affiliation.id === affiliationForDuplicateTeam?.id && duplicatePlayer.number) {
+          playerNumbers[targetPlayer.id] = Number(duplicatePlayer.number || 0);
+        }
+        return { ...affiliation, playerNumbers };
+      }),
+      sanctions: (league.sanctions || []).map((sanction) => ({
+        ...sanction,
+        playerId: replacePlayerId(sanction.playerId)
+      })),
+      injuries: (league.injuries || []).map((injury) => ({
+        ...injury,
+        playerId: replacePlayerId(injury.playerId)
+      })),
+      disciplineAdjustments: (league.disciplineAdjustments || []).map((adjustment) => ({
+        ...adjustment,
+        playerId: replacePlayerId(adjustment.playerId)
+      })),
+      disciplineResets: (league.disciplineResets || []).map((reset) => ({
+        ...reset,
+        playerId: replacePlayerId(reset.playerId)
+      })),
+      disciplineLinks: (league.disciplineLinks || [])
+        .map((link) => ({
+          ...link,
+          playerIds: [...new Set((link.playerIds || []).map(replacePlayerId))]
+        }))
+        .filter((link) => link.playerIds.length > 1),
+      matches: league.matches.map((match) => ({
+        ...match,
+        events: (match.events || []).map((event) => (
+          event.playerId === duplicatePlayer.id
+            ? { ...event, playerId: targetPlayer.id, teamId: event.teamId || duplicatePlayer.teamId }
+            : event
+        ))
+      }))
+    };
+  });
 }
 
 export function addPlayerInjury(store, leagueId, payload) {
@@ -788,6 +1015,7 @@ export function updateLeagueRules(store, leagueId, payload) {
       forfeitGoalsAgainst: Number(payload.forfeitGoalsAgainst ?? league.rules?.forfeitGoalsAgainst ?? 0),
       yellowSuspensionLimit: Number(payload.yellowSuspensionLimit ?? league.rules?.yellowSuspensionLimit ?? 3),
       defaultRedSuspensionMatches: Number(payload.defaultRedSuspensionMatches ?? league.rules?.defaultRedSuspensionMatches ?? 1),
+      disciplineScope: payload.disciplineScope === "league" ? "league" : "competition",
       playoffQualifiers: Number(payload.playoffQualifiers ?? league.rules?.playoffQualifiers ?? 8),
       notes: upperText(payload.notes || "")
     }
@@ -802,10 +1030,18 @@ function parseNumberList(value) {
 }
 
 function findPlayerByNumber(league, number, teamIds = []) {
-  return league.players.find((player) => (
+  const directPlayer = league.players.find((player) => (
     Number(player.number) === Number(number) &&
     (!teamIds.length || teamIds.includes(player.teamId))
   ));
+  if (directPlayer) return { ...directPlayer, eventTeamId: directPlayer.teamId };
+
+  for (const teamId of teamIds) {
+    const player = getEligiblePlayersForTeam(league, teamId)
+      .find((item) => Number(getPlayerNumberForTeam(league, item.id, teamId)) === Number(number));
+    if (player) return { ...player, eventTeamId: teamId };
+  }
+  return league.players.find((player) => Number(player.number) === Number(number));
 }
 
 export function saveResult(store, leagueId, payload) {
@@ -817,12 +1053,12 @@ export function saveResult(store, leagueId, payload) {
       const events = [];
       for (const number of parseNumberList(payload.goals)) {
         const player = findPlayerByNumber(league, number, [match.homeTeamId, match.awayTeamId]);
-        if (player) events.push({ type: "goal", playerId: player.id, teamId: player.teamId, minute: 0 });
+        if (player) events.push({ type: "goal", playerId: player.id, teamId: player.eventTeamId || player.teamId, minute: 0 });
       }
 
       for (const number of parseNumberList(payload.yellows)) {
         const player = findPlayerByNumber(league, number, [match.homeTeamId, match.awayTeamId]);
-        if (player) events.push({ type: "yellow", playerId: player.id, teamId: player.teamId, minute: 0 });
+        if (player) events.push({ type: "yellow", playerId: player.id, teamId: player.eventTeamId || player.teamId, minute: 0 });
       }
 
       const redRows = String(payload.reds || "").split(",").map((row) => row.trim()).filter(Boolean);
@@ -833,7 +1069,7 @@ export function saveResult(store, leagueId, payload) {
           events.push({
             type: "red",
             playerId: player.id,
-            teamId: player.teamId,
+            teamId: player.eventTeamId || player.teamId,
             minute: 0,
             suspensionMatches: Number(suspensionMatches),
             reason
@@ -886,14 +1122,15 @@ export function saveMatchSheet(store, leagueId, payload) {
         .map((event) => {
           const player = getPlayer(league, event.playerId);
           if (!player) return null;
-          if (![match.homeTeamId, match.awayTeamId].includes(player.teamId)) return null;
           if (!["goal", "own_goal", "yellow", "red"].includes(event.type)) return null;
           const eventTeamId = event.type === "own_goal"
-            ? event.teamId || (player.teamId === match.homeTeamId ? match.awayTeamId : match.homeTeamId)
-            : player.teamId;
+            ? event.teamId
+            : event.teamId || player.teamId;
           if (![match.homeTeamId, match.awayTeamId].includes(eventTeamId)) return null;
-          if (event.type === "own_goal" && eventTeamId === player.teamId) return null;
-          if (event.type !== "own_goal" && event.teamId && event.teamId !== player.teamId) return null;
+          const playerTeamId = event.type === "own_goal"
+            ? eventTeamId === match.homeTeamId ? match.awayTeamId : match.homeTeamId
+            : eventTeamId;
+          if (!isPlayerEligibleForTeam(league, player.id, playerTeamId)) return null;
           const minute = Number(event.minute || 0);
           if (minute < 0 || minute > 130) throw new Error("Los minutos del acta deben estar entre 0 y 130.");
           if (event.type === "red" && !String(event.reason || "").trim()) {

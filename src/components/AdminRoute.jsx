@@ -3,25 +3,34 @@ import {
   addLeague,
   addAnnouncement,
   addCompetition,
+  addDisciplineAdjustment,
+  addDisciplineLink,
+  addDisciplineReset,
   addMatch,
   addPlayer,
   addPlayerInjury,
   addPlayerSanction,
   addSponsor,
   addTeam,
+  addTeamAffiliation,
   addVenue,
   deleteMatch,
   deletePlayoffMatches,
   deleteAnnouncement,
+  deleteDisciplineAdjustment,
+  deleteDisciplineLink,
+  deleteDisciplineReset,
   deleteLeague,
   deletePlayer,
   deletePlayerInjury,
   deletePlayerSanction,
   deleteSponsor,
   deleteTeam,
+  deleteTeamAffiliation,
   deleteVenue,
   generateSchedule,
   generatePlayoffBracket,
+  mergeDuplicatePlayer,
   saveIdentity,
   saveMatchSheet,
   saveResult,
@@ -35,6 +44,7 @@ import {
   updatePlayerInjury,
   updateSponsor,
   updateTeam,
+  updateTeamAffiliationPlayerNumber,
   updateVenue
 } from "../lib/actions.js";
 import { createUser } from "../lib/userApi.js";
@@ -160,6 +170,9 @@ export function AdminRoute({
       onAddCompetition={(payload) => {
         commit(addCompetition(store, league.id, payload));
       }}
+      onAddDisciplineAdjustment={(payload) => commit(addDisciplineAdjustment(store, league.id, payload))}
+      onAddDisciplineLink={(payload) => commit(addDisciplineLink(store, league.id, payload))}
+      onAddDisciplineReset={(payload) => commit(addDisciplineReset(store, league.id, payload))}
       onAddLeague={createLeagueWithAdmin}
       onAddMatch={(payload) => {
         commit(addMatch(store, league.id, payload));
@@ -174,8 +187,12 @@ export function AdminRoute({
       onAddTeam={(payload) => {
         commit(addTeam(store, league.id, payload));
       }}
+      onAddTeamAffiliation={(payload) => commit(addTeamAffiliation(store, league.id, payload))}
       onAddVenue={(payload) => commit(addVenue(store, league.id, payload))}
       onDeleteAnnouncement={(announcementId) => commit(deleteAnnouncement(store, league.id, announcementId))}
+      onDeleteDisciplineAdjustment={(adjustmentId) => commit(deleteDisciplineAdjustment(store, league.id, adjustmentId))}
+      onDeleteDisciplineLink={(linkId) => commit(deleteDisciplineLink(store, league.id, linkId))}
+      onDeleteDisciplineReset={(resetId) => commit(deleteDisciplineReset(store, league.id, resetId))}
       onDeleteMatch={(matchId) => commit(deleteMatch(store, league.id, matchId))}
       onDeletePlayoffMatches={(payload) => commit(deletePlayoffMatches(store, league.id, payload))}
       onDeleteLeague={deleteLeagueWithCleanup}
@@ -184,6 +201,7 @@ export function AdminRoute({
       onDeletePlayerSanction={(sanctionId) => commit(deletePlayerSanction(store, league.id, sanctionId))}
       onDeleteSponsor={(leagueId, sponsorId) => commit(deleteSponsor(store, leagueId, sponsorId))}
       onDeleteTeam={(teamId) => commit(deleteTeam(store, league.id, teamId))}
+      onDeleteTeamAffiliation={(affiliationId) => commit(deleteTeamAffiliation(store, league.id, affiliationId))}
       onDeleteVenue={(venueId) => commit(deleteVenue(store, league.id, venueId))}
       onResetDemo={resetDemo}
       onAddPlayerSanction={(payload) => commit(addPlayerSanction(store, league.id, payload))}
@@ -209,6 +227,8 @@ export function AdminRoute({
         return true;
       }}
       onUpdateTeam={(teamId, payload) => commit(updateTeam(store, league.id, teamId, payload))}
+      onMergeDuplicatePlayer={(payload) => commit(mergeDuplicatePlayer(store, league.id, payload))}
+      onUpdateTeamAffiliationPlayerNumber={(affiliationId, payload) => commit(updateTeamAffiliationPlayerNumber(store, league.id, affiliationId, payload))}
       onUpdateVenue={(venueId, payload) => commit(updateVenue(store, league.id, venueId, payload))}
       store={store}
       userListRefreshKey={userListRefreshKey}

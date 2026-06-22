@@ -570,6 +570,7 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
     forfeitGoalsAgainst: Number(request.body.forfeitGoalsAgainst ?? current.forfeitGoalsAgainst),
     yellowSuspensionLimit: Number(request.body.yellowSuspensionLimit ?? current.yellowSuspensionLimit),
     defaultRedSuspensionMatches: Number(request.body.defaultRedSuspensionMatches ?? current.defaultRedSuspensionMatches ?? 1),
+    disciplineScope: request.body.disciplineScope === "league" ? "league" : "competition",
     playoffQualifiers: Number(request.body.playoffQualifiers ?? current.playoffQualifiers ?? 8),
     notes: request.body.notes ?? current.notes
   };

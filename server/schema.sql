@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS league_rules (
   forfeit_goals_against INTEGER NOT NULL DEFAULT 0,
   yellow_suspension_limit INTEGER NOT NULL DEFAULT 3,
   default_red_suspension_matches INTEGER NOT NULL DEFAULT 1,
+  discipline_scope TEXT NOT NULL DEFAULT 'competition',
   playoff_qualifiers INTEGER NOT NULL DEFAULT 8,
   notes TEXT
 );
@@ -152,6 +153,47 @@ CREATE TABLE IF NOT EXISTS player_injuries (
   support_detail TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS team_affiliations (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  source_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  target_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'active',
+  starts_at TEXT,
+  ends_at TEXT,
+  player_numbers_json TEXT,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS discipline_links (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_ids_json TEXT NOT NULL,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS discipline_adjustments (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+  player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+  value INTEGER NOT NULL,
+  date TEXT,
+  reason TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+);
+
+CREATE TABLE IF NOT EXISTS discipline_resets (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+  date TEXT,
+  reason TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
 );
 
 CREATE TABLE IF NOT EXISTS users (

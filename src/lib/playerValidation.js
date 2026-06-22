@@ -1,5 +1,5 @@
 export function validatePlayerFullName(name) {
-  const normalized = String(name || "").replace(/\s+/g, " ").trim();
+  const normalized = normalizePlayerNameForMatch(name);
   const words = normalized.split(" ").filter(Boolean);
 
   if (words.length < 2) {
@@ -24,7 +24,9 @@ export function normalizePlayerNameForMatch(name) {
   return String(name || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9ñÑ\s]/g, " ")
+    .replace(/#\s*\d+/g, " ")
+    .replace(/\b\d+\b/g, " ")
+    .replace(/[^a-zA-ZñÑ\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLocaleUpperCase("es-MX");

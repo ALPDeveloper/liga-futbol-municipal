@@ -3015,6 +3015,45 @@ th {
   line-height: 1;
 }
 
+.player-affiliation-breakdown {
+  display: grid;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.player-affiliation-breakdown > strong {
+  color: #fff;
+  font-size: 0.86rem;
+}
+
+.player-affiliation-breakdown span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.07);
+  color: #e5f3ec;
+  font-size: 0.78rem;
+}
+
+.player-affiliation-breakdown small {
+  color: #cbd5cf;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.player-affiliation-breakdown b {
+  white-space: nowrap;
+}
+
+.player-affiliation-breakdown .total {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.12);
+}
+
 .player-public-details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4288,7 +4327,8 @@ th {
 
 .sanction-form,
 .injury-form,
-.announcement-form {
+.announcement-form,
+.affiliation-form {
   display: grid;
   grid-template-columns: minmax(180px, 1.2fr) minmax(140px, 1fr) 150px 110px minmax(220px, 1.4fr);
   gap: 14px;
@@ -4296,11 +4336,139 @@ th {
   margin-bottom: 16px;
 }
 
+.affiliation-form {
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+}
+
+.affiliation-form .wide-field {
+  grid-column: span 3;
+}
+
 .sanction-list,
 .injury-list,
 .announcement-list {
   display: grid;
   gap: 10px;
+}
+
+.discipline-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.discipline-admin-form {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf6;
+}
+
+.discipline-admin-form h3,
+.discipline-admin-list h3 {
+  margin: 0;
+  color: var(--field-dark);
+}
+
+.discipline-admin-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.discipline-admin-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(120px, 0.5fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.discipline-admin-card.suspended {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.discipline-admin-card.warning {
+  border-color: #fde68a;
+  background: #fffdf1;
+}
+
+.discipline-admin-card strong,
+.discipline-admin-card span,
+.discipline-admin-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.discipline-admin-card small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.affiliate-badge {
+  display: inline-block;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.affiliation-card {
+  border-color: #bbf7d0;
+}
+
+.affiliation-number-form,
+.duplicate-merge-form {
+  display: grid;
+  gap: 10px;
+}
+
+.affiliation-number-form {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(220px, 1fr) 130px auto;
+  align-items: end;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.duplicate-merge-form {
+  grid-template-columns: repeat(2, minmax(220px, 1fr)) auto;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf6;
+}
+
+.searchable-select {
+  display: grid;
+  gap: 8px;
+}
+
+.searchable-select input,
+.searchable-select select {
+  width: 100%;
+}
+
+.searchable-select small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .sanction-card,
@@ -5277,8 +5445,13 @@ label {
   .form-grid,
   .identity-form,
   .rules-form,
+  .affiliation-form,
+  .affiliation-number-form,
+  .duplicate-merge-form,
   .sanction-form,
   .sanction-card,
+  .discipline-admin-grid,
+  .discipline-admin-card,
   .injury-form,
   .injury-edit-form,
   .injury-card,

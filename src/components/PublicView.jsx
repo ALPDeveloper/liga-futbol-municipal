@@ -10,8 +10,12 @@ import {
   getCompetition,
   getCurrentDisplayRound,
   getDefaultCompetitionId,
+  getEligiblePlayersForTeam,
   getIdentityTags,
   getPlayer,
+  getPlayerAffiliationForTeam,
+  getPlayerNumberForTeam,
+  getPlayerSeasonBreakdown,
   getPlayoffPhaseLabel,
   getTeam,
   playoffMatches,
@@ -60,6 +64,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const nextMatches = scheduledMatches.slice(0, 4);
   const latestResults = sortRecentMatches(finishedMatches(regularLeague)).slice(0, 3);
   const featuredMatch = getFeaturedPublicMatch(regularLeague, standings);
+  const disciplineLeague = league.rules?.disciplineScope === "league" ? league : activeLeague;
   const rounds = useMemo(() => (
     [...new Set(regularLeague.matches.map((match) => Number(match.round || 0)).filter(Boolean))]
       .sort((a, b) => a - b)
@@ -89,7 +94,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [activeLeague.teams, regularLeague.matches, selectedRoundMatches]);
   const scorers = stats.filter((row) => row.goals > 0).sort((a, b) => b.goals - a.goals).slice(0, 5);
-  const discipline = calculateYellowCardDiscipline(activeLeague);
+  const discipline = calculateYellowCardDiscipline(disciplineLeague);
   const spotlights = useMemo(
     () => buildPublicSpotlights(activeLeague).filter((item) => item.label !== "Partido destacado"),
     [activeLeague]
@@ -97,7 +102,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const fairPlayTeams = useMemo(() => buildFairPlayTeams(activeLeague).slice(0, 4), [activeLeague]);
   const [selectedTeamId, setSelectedTeamId] = useState(activeLeague.teams[0]?.id || "");
   const selectedTeam = activeLeague.teams.find((team) => team.id === selectedTeamId) || activeLeague.teams[0] || null;
-  const suspensionNotices = calculateSuspensionNotices(activeLeague).filter((notice) => notice.status === "active");
+  const suspensionNotices = calculateSuspensionNotices(disciplineLeague).filter((notice) => notice.status === "active");
   const activeInjuries = useMemo(() => (
     (activeLeague.injuries || [])
       .filter((injury) => injury.status === "active")
@@ -332,6 +337,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             <SectionHeading eyebrow="Jugador" title="Ficha publica" />
             <PlayerPublicCard
               league={activeLeague}
+              seasonLeague={league}
               player={selectedPlayer}
               stats={stats}
               onSelectTeam={setSelectedTeamId}
@@ -544,7 +550,7 @@ function sortRecentMatches(matches) {
 function getPublicSearchResults(league, stats, query) {
   const term = normalizeSearchTerm(query);
   if (term.length < 2) return [];
-  const goalsByPlayer = new Map((stats || []).map((row) => [row.player.id, row.goals || 0]));
+  const statsByPlayer = new Map((stats || []).map((row) => [row.player.id, row]));
   const teamResults = league.teams
     .filter((team) => normalizeSearchTerm(team.name).includes(term))
     .map((team) => ({
@@ -557,13 +563,14 @@ function getPublicSearchResults(league, stats, query) {
   const playerResults = league.players
     .filter((player) => normalizeSearchTerm(player.name).includes(term))
     .map((player) => {
-      const team = getTeam(league, player.teamId);
+      const row = statsByPlayer.get(player.id);
+      const team = row?.team || getTeam(league, player.teamId);
       return {
         id: player.id,
         type: "player",
         href: "#jugador",
         name: player.name,
-        detail: `${team?.name || "Sin equipo"} | ${goalsByPlayer.get(player.id) || 0} gol(es)`
+        detail: `${team?.name || "Sin equipo"} | ${row?.goals || 0} gol(es)`
       };
     });
   const matchResults = league.matches
@@ -1349,9 +1356,7 @@ function TeamProfile({ league, activeLeague, standings, stats, onSelectPlayer, s
   if (!activeLeague.teams.length) return <p className="empty">Aun no hay equipos registrados en esta categoria.</p>;
   if (!selectedTeam) return null;
 
-  const players = activeLeague.players
-    .filter((player) => player.teamId === selectedTeam.id)
-    .sort((a, b) => Number(a.number || 999) - Number(b.number || 999) || a.name.localeCompare(b.name));
+  const players = getEligiblePlayersForTeam(league, selectedTeam.id);
   const teamMatches = activeLeague.matches
     .filter((match) => match.homeTeamId === selectedTeam.id || match.awayTeamId === selectedTeam.id)
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || Number(b.round || 0) - Number(a.round || 0));
@@ -1469,12 +1474,15 @@ function TeamProfile({ league, activeLeague, standings, stats, onSelectPlayer, s
                   type="button"
                   onClick={() => onSelectPlayer(player.id)}
                 >
-                  <span className="jersey-number" aria-label={`Jersey ${player.number || "sin numero"}`}>
-                    <span>{player.number || "-"}</span>
+                  <span className="jersey-number" aria-label={`Jersey ${getPlayerNumberForTeam(league, player.id, selectedTeam.id) || "sin numero"}`}>
+                    <span>{getPlayerNumberForTeam(league, player.id, selectedTeam.id) || "-"}</span>
                   </span>
                   <div>
                     <strong>{player.name}</strong>
-                    <span>{normalizePositionLabel(player.position)}</span>
+                    <span>
+                      {normalizePositionLabel(player.position)}
+                      {getPlayerAffiliationForTeam(league, player.id, selectedTeam.id) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
+                    </span>
                   </div>
                   <span className="player-goals-pill">{goalsByPlayer.get(player.id) || 0} gol(es)</span>
                 </button>
@@ -1508,15 +1516,21 @@ function TeamProfileSelector({ teams, selectedTeamId, onSelectTeam }) {
   );
 }
 
-function PlayerPublicCard({ league, player, stats, onSelectTeam }) {
+function PlayerPublicCard({ league, seasonLeague = league, player, stats, onSelectTeam }) {
   if (!player) return <p className="empty empty-polished">Selecciona un jugador desde el buscador, goleadores o perfil de equipo para abrir su ficha deportiva.</p>;
 
   const row = stats.find((item) => item.player.id === player.id) || { goals: 0, yellowCards: 0, redCards: 0 };
+  const seasonBreakdown = getPlayerSeasonBreakdown(seasonLeague, player.id);
+  const showAffiliationBreakdown = seasonBreakdown.hasAffiliation && seasonBreakdown.rows.length > 1;
+  const displayGoals = showAffiliationBreakdown ? seasonBreakdown.totals.goals : row.goals || 0;
+  const displayYellowCards = showAffiliationBreakdown ? seasonBreakdown.totals.yellowCards : row.yellowCards || 0;
   const team = getTeam(league, player.teamId);
-  const teamPlayers = league.players.filter((item) => item.teamId === player.teamId);
+  const activePlayerTeam = row.team || team;
+  const publicNumber = getPlayerNumberForTeam(seasonLeague, player.id, activePlayerTeam?.id || player.teamId) || player.number || "-";
+  const teamPlayers = getEligiblePlayersForTeam(seasonLeague, activePlayerTeam?.id || player.teamId);
   const teamRanking = getPlayerTeamGoalRank(stats, player, teamPlayers);
   const teamMatches = league.matches
-    .filter((match) => match.homeTeamId === player.teamId || match.awayTeamId === player.teamId)
+    .filter((match) => match.homeTeamId === (activePlayerTeam?.id || player.teamId) || match.awayTeamId === (activePlayerTeam?.id || player.teamId))
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.time).localeCompare(String(a.time)));
   const nextMatch = [...teamMatches].reverse().find((match) => match.status === "scheduled");
   const lastMatch = teamMatches.find((match) => match.status === "finished" || match.status === "walkover");
@@ -1533,12 +1547,12 @@ function PlayerPublicCard({ league, player, stats, onSelectTeam }) {
       <div className="player-public-hero">
         <div className="player-portrait-wrap">
           <PlayerAvatar player={player} className="player-public-avatar" />
-          <span className="player-public-number">{player.number || "-"}</span>
+          <span className="player-public-number">{publicNumber}</span>
         </div>
         <div className="player-public-identity">
           <span>{normalizePositionLabel(player.position)}</span>
           <strong>{player.name}</strong>
-          <small><TeamMark team={team} className="player-team-crest" />{team?.name || "Sin equipo"}</small>
+          <small><TeamMark team={activePlayerTeam} className="player-team-crest" />{activePlayerTeam?.name || team?.name || "Sin equipo"}</small>
           <div className="player-badge-row">
             {playerBadges.map((badge) => <span className={badge.tone} key={badge.label}>{badge.label}</span>)}
           </div>
@@ -1546,13 +1560,31 @@ function PlayerPublicCard({ league, player, stats, onSelectTeam }) {
       </div>
 
       <div className="player-public-stats">
-        <span><strong>{row.goals || 0}</strong> Goles</span>
+        <span><strong>{displayGoals}</strong> Goles</span>
         <span><strong>{playedMatches}</strong> PJ</span>
-        <span><strong>{row.yellowCards || 0}</strong> Amarillas</span>
+        <span><strong>{displayYellowCards}</strong> Amarillas</span>
         <span><strong>{row.redCards || 0}</strong> Rojas</span>
         {"assists" in row && <span><strong>{row.assists || 0}</strong> Asistencias</span>}
         <span><strong>{row.suspensionMatches || 0}</strong> Suspensiones</span>
       </div>
+
+      {showAffiliationBreakdown && (
+        <div className="player-affiliation-breakdown">
+          <strong>Actividad por equipo en la temporada</strong>
+          {seasonBreakdown.rows.map((item) => (
+            <span key={item.team?.id || item.team?.name}>
+              <small>{item.team?.name || "Equipo"}</small>
+              <b>{item.goals} gol(es)</b>
+              <b>{item.yellowCards} amarilla(s)</b>
+            </span>
+          ))}
+          <span className="total">
+            <small>Total temporada</small>
+            <b>{seasonBreakdown.totals.goals} gol(es)</b>
+            <b>{seasonBreakdown.totals.yellowCards} amarilla(s)</b>
+          </span>
+        </div>
+      )}
 
       <div className="player-public-details">
         <span>
@@ -1607,11 +1639,11 @@ function PlayerPublicCard({ league, player, stats, onSelectTeam }) {
         {!recentMatches.length && <p className="empty empty-polished">Este jugador aun no tiene historial reciente de partidos finalizados.</p>}
       </div>
 
-      {team && (
+      {activePlayerTeam && (
         <a
           className="player-team-link"
           href="#equipos"
-          onClick={() => onSelectTeam(team.id)}
+          onClick={() => onSelectTeam(activePlayerTeam.id)}
         >
           Ver perfil del equipo
         </a>

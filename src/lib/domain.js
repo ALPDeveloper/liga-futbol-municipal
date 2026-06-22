@@ -139,9 +139,11 @@ export function normalizeStore(data) {
           forfeitGoalsAgainst: 0,
           yellowSuspensionLimit: YELLOW_SUSPENSION_LIMIT,
           defaultRedSuspensionMatches: 1,
+          disciplineScope: "competition",
           playoffQualifiers: 8,
           notes: "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.",
           ...(league.rules || {}),
+          disciplineScope: league.rules?.disciplineScope === "league" ? "league" : "competition",
           notes: upperText(league.rules?.notes || "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.")
         },
         membershipNotes: upperText(league.membershipNotes),
@@ -180,6 +182,27 @@ export function normalizeStore(data) {
           photoUrl: sanitizeImageUrl(player.photoUrl),
           photoAuthorized: player.photoAuthorized === true
         })),
+        teamAffiliations: (league.teamAffiliations || []).map((affiliation) => ({
+          ...affiliation,
+          id: affiliation.id || makeId("team-affiliation"),
+          sourceTeamId: affiliation.sourceTeamId || "",
+          targetTeamId: affiliation.targetTeamId || "",
+          status: affiliation.status || "active",
+          startsAt: affiliation.startsAt || "",
+          endsAt: affiliation.endsAt || "",
+          playerNumbers: Object.fromEntries(
+            Object.entries(affiliation.playerNumbers || {})
+              .map(([playerId, number]) => [playerId, Number(number || 0)])
+              .filter(([, number]) => number >= 0)
+          ),
+          notes: upperText(affiliation.notes || "")
+        })).filter((affiliation) => (
+          affiliation.sourceTeamId &&
+          affiliation.targetTeamId &&
+          affiliation.sourceTeamId !== affiliation.targetTeamId &&
+          normalizedTeams.some((team) => team.id === affiliation.sourceTeamId) &&
+          normalizedTeams.some((team) => team.id === affiliation.targetTeamId)
+        )),
         sanctions: (league.sanctions || []).map((sanction) => ({
           ...sanction,
           competitionId: sanction.competitionId || currentCompetitionId,
@@ -189,6 +212,34 @@ export function normalizeStore(data) {
           status: sanction.status || "active",
           notes: upperText(sanction.notes)
         })),
+        disciplineLinks: (league.disciplineLinks || []).map((link) => ({
+          ...link,
+          id: link.id || makeId("discipline-link"),
+          playerIds: [...new Set(link.playerIds || [])].filter((playerId) => (
+            (league.players || []).some((player) => player.id === playerId)
+          )),
+          notes: upperText(link.notes || "")
+        })).filter((link) => link.playerIds.length > 1),
+        disciplineAdjustments: (league.disciplineAdjustments || []).map((adjustment) => ({
+          ...adjustment,
+          id: adjustment.id || makeId("discipline-adjustment"),
+          competitionId: adjustment.competitionId || currentCompetitionId,
+          playerId: adjustment.playerId || "",
+          value: Number(adjustment.value || 0),
+          date: adjustment.date || "",
+          reason: upperText(adjustment.reason || ""),
+          notes: upperText(adjustment.notes || ""),
+          status: adjustment.status || "active"
+        })).filter((adjustment) => adjustment.playerId && adjustment.value),
+        disciplineResets: (league.disciplineResets || []).map((reset) => ({
+          ...reset,
+          id: reset.id || makeId("discipline-reset"),
+          playerId: reset.playerId || "",
+          date: reset.date || "",
+          reason: upperText(reset.reason || ""),
+          notes: upperText(reset.notes || ""),
+          status: reset.status || "active"
+        })).filter((reset) => reset.playerId),
         injuries: (league.injuries || []).map((injury) => ({
           ...injury,
           competitionId: injury.competitionId || currentCompetitionId,
@@ -228,11 +279,111 @@ export function getCurrentLeague(store) {
 }
 
 export function getTeam(league, teamId) {
-  return league.teams.find((team) => team.id === teamId);
+  return (league.allTeams || league.teams || []).find((team) => team.id === teamId);
 }
 
 export function getPlayer(league, playerId) {
-  return league.players.find((player) => player.id === playerId);
+  return (league.allPlayers || league.players || []).find((player) => player.id === playerId);
+}
+
+export function getActiveTeamAffiliations(league) {
+  return (league.teamAffiliations || []).filter((affiliation) => (
+    affiliation.status !== "inactive" &&
+    affiliation.status !== "revoked" &&
+    getTeam(league, affiliation.sourceTeamId) &&
+    getTeam(league, affiliation.targetTeamId) &&
+    affiliation.sourceTeamId !== affiliation.targetTeamId
+  ));
+}
+
+export function getTeamAffiliationsForTarget(league, targetTeamId) {
+  return getActiveTeamAffiliations(league).filter((affiliation) => affiliation.targetTeamId === targetTeamId);
+}
+
+export function getPlayerAffiliationForTeam(league, playerId, teamId) {
+  const player = getPlayer(league, playerId);
+  if (!player || player.teamId === teamId) return null;
+  return getTeamAffiliationsForTarget(league, teamId).find((affiliation) => affiliation.sourceTeamId === player.teamId) || null;
+}
+
+export function getPlayerNumberForTeam(league, playerId, teamId) {
+  const player = getPlayer(league, playerId);
+  if (!player) return "";
+  if (!teamId || player.teamId === teamId) return player.number || "";
+  const affiliation = getPlayerAffiliationForTeam(league, playerId, teamId);
+  return affiliation?.playerNumbers?.[playerId] || player.number || "";
+}
+
+export function getEligiblePlayersForTeam(league, teamId) {
+  const sourceTeamIds = new Set(getTeamAffiliationsForTarget(league, teamId).map((affiliation) => affiliation.sourceTeamId));
+  return (league.allPlayers || league.players || [])
+    .filter((player) => player.teamId === teamId || sourceTeamIds.has(player.teamId))
+    .sort((a, b) => (
+      (a.teamId === teamId ? 0 : 1) - (b.teamId === teamId ? 0 : 1) ||
+      Number(getPlayerNumberForTeam(league, a.id, teamId) || 999) - Number(getPlayerNumberForTeam(league, b.id, teamId) || 999) ||
+      a.name.localeCompare(b.name)
+    ));
+}
+
+export function getEligibleTeamIdsForPlayer(league, playerId) {
+  const player = getPlayer(league, playerId);
+  if (!player) return [];
+  const teamIds = new Set([player.teamId]);
+  for (const affiliation of getActiveTeamAffiliations(league)) {
+    if (affiliation.sourceTeamId === player.teamId) teamIds.add(affiliation.targetTeamId);
+  }
+  return [...teamIds].filter(Boolean);
+}
+
+export function isPlayerEligibleForTeam(league, playerId, teamId) {
+  const player = getPlayer(league, playerId);
+  return Boolean(player && (player.teamId === teamId || getPlayerAffiliationForTeam(league, playerId, teamId)));
+}
+
+export function getPlayerSeasonBreakdown(league, playerId) {
+  const player = getPlayer(league, playerId);
+  if (!player) return { rows: [], totals: { goals: 0, yellowCards: 0, redCards: 0 }, hasAffiliation: false };
+
+  const affiliatedTeamIds = new Set(getEligibleTeamIdsForPlayer(league, playerId));
+  const hasAffiliation = affiliatedTeamIds.size > 1;
+  const rowsByTeam = new Map();
+
+  function ensureRow(teamId) {
+    if (!teamId) return null;
+    if (!rowsByTeam.has(teamId)) {
+      rowsByTeam.set(teamId, {
+        team: getTeam(league, teamId),
+        goals: 0,
+        yellowCards: 0,
+        redCards: 0
+      });
+    }
+    return rowsByTeam.get(teamId);
+  }
+
+  for (const match of finishedMatches(league)) {
+    for (const event of match.events || []) {
+      if (event.playerId !== playerId) continue;
+      const row = ensureRow(event.teamId || player.teamId);
+      if (!row) continue;
+      if (event.type === "goal") row.goals += 1;
+      if (event.type === "yellow") row.yellowCards += 1;
+      if (event.type === "red") row.redCards += 1;
+    }
+  }
+
+  const rows = [...rowsByTeam.values()]
+    .filter((row) => row.goals || row.yellowCards || row.redCards || affiliatedTeamIds.has(row.team?.id))
+    .sort((a, b) => (
+      (a.team?.name || "").localeCompare(b.team?.name || "")
+    ));
+  const totals = rows.reduce((acc, row) => ({
+    goals: acc.goals + row.goals,
+    yellowCards: acc.yellowCards + row.yellowCards,
+    redCards: acc.redCards + row.redCards
+  }), { goals: 0, yellowCards: 0, redCards: 0 });
+
+  return { rows, totals, hasAffiliation };
 }
 
 export function makeId(prefix) {
@@ -251,17 +402,31 @@ export function scopeLeagueToCompetition(league, competitionId = getDefaultCompe
   const targetCompetitionId = competitionId || getDefaultCompetitionId(league);
   const teams = league.teams.filter((team) => (team.competitionId || targetCompetitionId) === targetCompetitionId);
   const teamIds = new Set(teams.map((team) => team.id));
+  const affiliatedSourceTeamIds = new Set(
+    getActiveTeamAffiliations(league)
+      .filter((affiliation) => teamIds.has(affiliation.targetTeamId))
+      .map((affiliation) => affiliation.sourceTeamId)
+  );
 
   return {
     ...league,
     currentCompetitionId: targetCompetitionId,
+    allTeams: league.allTeams || league.teams,
+    allPlayers: league.allPlayers || league.players,
     teams,
     players: league.players.filter((player) => (
       (player.competitionId || targetCompetitionId) === targetCompetitionId ||
-      teamIds.has(player.teamId)
+      teamIds.has(player.teamId) ||
+      affiliatedSourceTeamIds.has(player.teamId)
     )),
     matches: league.matches.filter((match) => match.competitionId === targetCompetitionId),
     sanctions: (league.sanctions || []).filter((sanction) => !sanction.competitionId || sanction.competitionId === targetCompetitionId),
+    teamAffiliations: getActiveTeamAffiliations(league).filter((affiliation) => (
+      teamIds.has(affiliation.targetTeamId) || teamIds.has(affiliation.sourceTeamId)
+    )),
+    disciplineLinks: league.disciplineLinks || [],
+    disciplineAdjustments: (league.disciplineAdjustments || []).filter((adjustment) => !adjustment.competitionId || adjustment.competitionId === targetCompetitionId),
+    disciplineResets: league.disciplineResets || [],
     injuries: (league.injuries || []).filter((injury) => !injury.competitionId || injury.competitionId === targetCompetitionId)
   };
 }
@@ -355,6 +520,7 @@ export function calculatePlayerStats(league) {
       {
         player,
         team: getTeam(league, player.teamId),
+        teamActivity: new Map(),
         goals: 0,
         yellowCards: 0,
         redCards: 0,
@@ -365,17 +531,29 @@ export function calculatePlayerStats(league) {
     ])
   );
 
+  function registerTeamActivity(row, teamId, weight = 1) {
+    if (!teamId) return;
+    row.teamActivity.set(teamId, (row.teamActivity.get(teamId) || 0) + weight);
+  }
+
   for (const match of finishedMatches(league)) {
     for (const event of match.events) {
       const row = stats.get(event.playerId);
       if (!row) continue;
 
-      if (event.type === "goal") row.goals += 1;
-      if (event.type === "yellow") row.yellowCards += 1;
+      if (event.type === "goal") {
+        row.goals += 1;
+        registerTeamActivity(row, event.teamId, 3);
+      }
+      if (event.type === "yellow") {
+        row.yellowCards += 1;
+        registerTeamActivity(row, event.teamId);
+      }
       if (event.type === "red") {
         row.redCards += 1;
         row.suspensionMatches += Number(event.suspensionMatches || 1);
         row.reasons.push(event.reason || "Tarjeta roja");
+        registerTeamActivity(row, event.teamId);
       }
     }
   }
@@ -398,62 +576,163 @@ export function calculatePlayerStats(league) {
     row.reasons.push(sanction.reason || sanction.type || "Sancion disciplinaria");
   }
 
-  return [...stats.values()];
+  return [...stats.values()].map((row) => {
+    const primaryTeamId = [...row.teamActivity.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    return {
+      ...row,
+      team: getTeam(league, primaryTeamId) || row.team,
+      teamActivity: undefined
+    };
+  });
+}
+
+function buildDisciplineContext(league) {
+  const shared = league.rules?.disciplineScope === "league";
+  const linkByPlayerId = new Map();
+
+  for (const link of league.disciplineLinks || []) {
+    const playerIds = [...new Set(link.playerIds || [])].filter((playerId) => getPlayer(league, playerId));
+    if (playerIds.length < 2) continue;
+    const key = shared ? `link:${link.id}` : "";
+    for (const playerId of playerIds) linkByPlayerId.set(playerId, { key, playerIds });
+  }
+
+  function getKey(playerId) {
+    if (!shared) return `player:${playerId}`;
+    return linkByPlayerId.get(playerId)?.key || `player:${playerId}`;
+  }
+
+  function getPlayerIds(playerId) {
+    return linkByPlayerId.get(playerId)?.playerIds || [playerId];
+  }
+
+  function getState(states, playerId) {
+    const key = getKey(playerId);
+    if (!states.has(key)) {
+      states.set(key, {
+        key,
+        playerId,
+        playerIds: getPlayerIds(playerId),
+        yellowCards: 0,
+        suspensionOrigin: null,
+        sources: []
+      });
+    }
+    const state = states.get(key);
+    state.playerIds = [...new Set([...state.playerIds, ...getPlayerIds(playerId)])];
+    if (!state.playerIds.includes(state.playerId)) state.playerId = state.playerIds[0];
+    return state;
+  }
+
+  return { getKey, getPlayerIds, getState, shared };
+}
+
+function groupInvolvesMatch(league, state, match) {
+  return state.playerIds.some((playerId) => {
+    const teamIds = getEligibleTeamIdsForPlayer(league, playerId);
+    return teamIds.some((teamId) => involvesTeam(match, teamId));
+  });
+}
+
+function getDisplayPlayerForState(league, state) {
+  return state.playerIds.map((playerId) => getPlayer(league, playerId)).filter(Boolean)[0] || getPlayer(league, state.playerId);
+}
+
+function getDisplayTeamForState(league, state) {
+  const player = getDisplayPlayerForState(league, state);
+  return player ? getTeam(league, player.teamId) : null;
 }
 
 export function calculateYellowCardDiscipline(league) {
   const yellowLimit = Number(league.rules?.yellowSuspensionLimit || YELLOW_SUSPENSION_LIMIT);
   const states = new Map();
+  const discipline = buildDisciplineContext(league);
 
-  function getState(playerId) {
-    if (!states.has(playerId)) {
-      states.set(playerId, {
-        playerId,
-        yellowCards: 0,
-        suspensionOrigin: null
-      });
-    }
-    return states.get(playerId);
-  }
+  const timeline = [
+    ...sortMatches(finishedMatches(league)).flatMap((match) => [
+      { movementType: "match-start", date: match.date, round: match.round, match },
+      ...(match.events || [])
+        .filter((event) => event.type === "yellow")
+        .map((event) => ({ movementType: "yellow", date: match.date, round: match.round, match, event }))
+    ]),
+    ...(league.disciplineAdjustments || [])
+      .filter((adjustment) => adjustment.status !== "revoked" && Number(adjustment.value || 0))
+      .map((adjustment) => ({ ...adjustment, movementType: "adjustment" })),
+    ...(league.disciplineResets || [])
+      .filter((reset) => reset.status !== "revoked")
+      .map((reset) => ({ ...reset, movementType: "reset" }))
+  ].sort((a, b) => (
+    String(a.date || "").localeCompare(String(b.date || "")) ||
+    movementOrder(a.movementType) - movementOrder(b.movementType) ||
+    Number(a.round || 0) - Number(b.round || 0) ||
+    String(a.id || "").localeCompare(String(b.id || ""))
+  ));
 
-  for (const match of sortMatches(finishedMatches(league))) {
-    for (const state of states.values()) {
-      if (!state.suspensionOrigin) continue;
-      const player = getPlayer(league, state.playerId);
-      if (player && involvesTeam(match, player.teamId) && isAfterOrigin(match, state.suspensionOrigin)) {
-        state.yellowCards = 0;
-        state.suspensionOrigin = null;
+  for (const movement of timeline) {
+    if (movement.movementType === "match-start") {
+      for (const state of states.values()) {
+        if (!state.suspensionOrigin) continue;
+        if (groupInvolvesMatch(league, state, movement.match) && isAfterOrigin(movement.match, state.suspensionOrigin)) {
+          state.yellowCards = 0;
+          state.suspensionOrigin = null;
+          state.sources = [];
+        }
       }
+      continue;
     }
 
-    for (const event of match.events || []) {
-      if (event.type !== "yellow") continue;
+    if (movement.movementType === "yellow") {
+      const { event, match } = movement;
       const player = getPlayer(league, event.playerId);
-      if (!player || !involvesTeam(match, player.teamId)) continue;
+      if (!player || !involvesTeam(match, event.teamId) || !isPlayerEligibleForTeam(league, event.playerId, event.teamId)) continue;
 
-      const state = getState(event.playerId);
+      const state = discipline.getState(states, event.playerId);
       if (state.suspensionOrigin) continue;
 
       state.yellowCards += 1;
+      state.sources.push({ type: "Acta", playerId: event.playerId, matchId: match.id, date: match.date, competitionId: match.competitionId });
       if (state.yellowCards >= yellowLimit) {
         state.yellowCards = yellowLimit;
         state.suspensionOrigin = { date: match.date, round: match.round, matchId: match.id };
       }
+      continue;
+    }
+
+    const player = getPlayer(league, movement.playerId);
+    if (!player) continue;
+    const state = discipline.getState(states, movement.playerId);
+
+    if (movement.movementType === "reset") {
+      state.yellowCards = 0;
+      state.suspensionOrigin = null;
+      state.sources = [];
+      continue;
+    }
+
+    if (state.suspensionOrigin && Number(movement.value || 0) > 0) continue;
+
+    state.yellowCards = Math.max(0, state.yellowCards + Number(movement.value || 0));
+    state.sources.push({ type: "Ajuste", playerId: movement.playerId, date: movement.date, adjustmentId: movement.id, value: Number(movement.value || 0), reason: movement.reason });
+    if (state.yellowCards >= yellowLimit) {
+      state.yellowCards = yellowLimit;
+      state.suspensionOrigin = { date: movement.date, adjustmentId: movement.id };
     }
   }
 
   return [...states.values()]
     .map((state) => {
-      const player = getPlayer(league, state.playerId);
+      const player = getDisplayPlayerForState(league, state);
       if (!player || !state.yellowCards) return null;
-      const team = getTeam(league, player.teamId);
+      const team = getDisplayTeamForState(league, state);
       const isSuspended = Boolean(state.suspensionOrigin);
 
       return {
         player,
         team,
+        linkedPlayers: state.playerIds.map((playerId) => getPlayer(league, playerId)).filter(Boolean),
         yellowCards: state.yellowCards,
         yellowLimit,
+        suspensionOrigin: state.suspensionOrigin,
         remainingToSuspension: Math.max(yellowLimit - state.yellowCards, 0),
         status: isSuspended ? "suspended" : state.yellowCards >= yellowLimit - 1 ? "warning" : "tracking",
         message: isSuspended
@@ -467,6 +746,14 @@ export function calculateYellowCardDiscipline(league) {
       b.yellowCards - a.yellowCards ||
       a.player.name.localeCompare(b.player.name)
     ));
+}
+
+function movementOrder(type) {
+  if (type === "match-start") return 0;
+  if (type === "yellow") return 1;
+  if (type === "adjustment") return 2;
+  if (type === "reset") return 3;
+  return 9;
 }
 
 function sortMatches(matches) {
@@ -508,14 +795,24 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
   if (!player) return null;
 
   const team = getTeam(league, player.teamId);
+  const eligibleTeamIds = getEligibleTeamIdsForPlayer(league, playerId);
   const total = Number(totalMatches || 0);
   if (total <= 0) return null;
 
-  const servedMatches = getServedMatches(league, player.teamId, origin);
+  const servedMatches = sortMatches(finishedMatches(league).filter((match) => (
+    eligibleTeamIds.some((teamId) => involvesTeam(match, teamId)) && isAfterOrigin(match, origin)
+  )));
   const served = Math.min(servedMatches.length, total);
   const remaining = Math.max(total - served, 0);
-  const nextMatch = getNextScheduledMatch(league, player.teamId);
-  const returnMatch = getReturnMatch(league, player.teamId, remaining, origin);
+  const nextMatch = sortMatches(league.matches.filter((match) => (
+    match.status === "scheduled" && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
+  )))[0] || null;
+  const scheduled = sortMatches(league.matches.filter((match) => (
+    match.status === "scheduled" &&
+    eligibleTeamIds.some((teamId) => involvesTeam(match, teamId)) &&
+    isAfterOrigin(match, origin)
+  )));
+  const returnMatch = remaining > 0 ? scheduled[remaining] || null : scheduled[0] || null;
   const status = remaining > 0 ? "active" : "available";
   const fallbackReturnRound = origin?.round ? Number(origin.round) + total + 1 : null;
 
@@ -554,22 +851,15 @@ export function calculateSuspensionNotices(league) {
   }
 
   const yellowLimit = Number(league.rules?.yellowSuspensionLimit || YELLOW_SUSPENSION_LIMIT);
-  const yellowCounts = new Map();
-  for (const match of sortMatches(finishedMatches(league))) {
-    for (const event of match.events || []) {
-      if (event.type !== "yellow") continue;
-      const count = (yellowCounts.get(event.playerId) || 0) + 1;
-      yellowCounts.set(event.playerId, count);
-      if (count === yellowLimit) {
-        notices.push(buildSuspensionNotice(league, {
-          playerId: event.playerId,
-          totalMatches: 1,
-          reason: `Acumulacion de ${yellowLimit} amarillas`,
-          type: "Acumulacion",
-          origin: { date: match.date, round: match.round, matchId: match.id }
-        }));
-      }
-    }
+  for (const row of calculateYellowCardDiscipline(league)) {
+    if (row.status !== "suspended") continue;
+    notices.push(buildSuspensionNotice(league, {
+      playerId: row.player.id,
+      totalMatches: 1,
+      reason: `Acumulacion de ${yellowLimit} amarillas`,
+      type: "Acumulacion",
+      origin: row.suspensionOrigin || { date: "", sanctionId: row.player.id }
+    }));
   }
 
   for (const sanction of league.sanctions || []) {

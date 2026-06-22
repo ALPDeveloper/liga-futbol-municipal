@@ -55,6 +55,9 @@ function runMigrations() {
   if (!ruleColumns.includes("default_red_suspension_matches")) {
     db.prepare("ALTER TABLE league_rules ADD COLUMN default_red_suspension_matches INTEGER NOT NULL DEFAULT 1").run();
   }
+  if (!ruleColumns.includes("discipline_scope")) {
+    db.prepare("ALTER TABLE league_rules ADD COLUMN discipline_scope TEXT NOT NULL DEFAULT 'competition'").run();
+  }
   if (!ruleColumns.includes("playoff_qualifiers")) {
     db.prepare("ALTER TABLE league_rules ADD COLUMN playoff_qualifiers INTEGER NOT NULL DEFAULT 8").run();
   }
@@ -192,6 +195,47 @@ function runMigrations() {
       expires_at TEXT NOT NULL,
       used_at TEXT,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS team_affiliations (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      source_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      target_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'active',
+      starts_at TEXT,
+      ends_at TEXT,
+      player_numbers_json TEXT,
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS discipline_links (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      player_ids_json TEXT NOT NULL,
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS discipline_adjustments (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      value INTEGER NOT NULL,
+      date TEXT,
+      reason TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+
+    CREATE TABLE IF NOT EXISTS discipline_resets (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      date TEXT,
+      reason TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'active'
     );
   `);
 
@@ -335,6 +379,39 @@ export function getStore() {
       status: row.status,
       notes: row.notes
     }));
+    const teamAffiliations = db.prepare("SELECT * FROM team_affiliations WHERE league_id = ? ORDER BY id").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      sourceTeamId: row.source_team_id,
+      targetTeamId: row.target_team_id,
+      status: row.status,
+      startsAt: row.starts_at || "",
+      endsAt: row.ends_at || "",
+      playerNumbers: row.player_numbers_json ? JSON.parse(row.player_numbers_json) : {},
+      notes: row.notes || ""
+    }));
+    const disciplineLinks = db.prepare("SELECT * FROM discipline_links WHERE league_id = ? ORDER BY id").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      playerIds: row.player_ids_json ? JSON.parse(row.player_ids_json) : [],
+      notes: row.notes || ""
+    }));
+    const disciplineAdjustments = db.prepare("SELECT * FROM discipline_adjustments WHERE league_id = ? ORDER BY date DESC, id DESC").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      competitionId: row.competition_id,
+      playerId: row.player_id,
+      value: row.value,
+      date: row.date,
+      reason: row.reason,
+      notes: row.notes,
+      status: row.status
+    }));
+    const disciplineResets = db.prepare("SELECT * FROM discipline_resets WHERE league_id = ? ORDER BY date DESC, id DESC").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      playerId: row.player_id,
+      date: row.date,
+      reason: row.reason,
+      notes: row.notes,
+      status: row.status
+    }));
     const sponsors = db.prepare("SELECT * FROM sponsors WHERE league_id = ? ORDER BY sort_order, name").all(leagueRow.id).map((row) => ({
       id: row.id,
       name: row.name,
@@ -403,6 +480,7 @@ export function getStore() {
         forfeitGoalsAgainst: rules.forfeit_goals_against,
         yellowSuspensionLimit: rules.yellow_suspension_limit,
         defaultRedSuspensionMatches: rules.default_red_suspension_matches,
+        disciplineScope: rules.discipline_scope,
         playoffQualifiers: rules.playoff_qualifiers,
         notes: rules.notes
       },
@@ -412,6 +490,10 @@ export function getStore() {
       players,
       sanctions,
       injuries,
+      teamAffiliations,
+      disciplineLinks,
+      disciplineAdjustments,
+      disciplineResets,
       sponsors,
       matches
     };
@@ -440,9 +522,13 @@ export function importStore(store) {
 
     db.exec(`
       DELETE FROM match_events;
+      DELETE FROM discipline_resets;
+      DELETE FROM discipline_adjustments;
+      DELETE FROM discipline_links;
       DELETE FROM player_injuries;
       DELETE FROM player_sanctions;
       DELETE FROM matches;
+      DELETE FROM team_affiliations;
       DELETE FROM players;
       DELETE FROM teams;
       DELETE FROM competitions;
@@ -504,8 +590,8 @@ export function importStore(store) {
       );
 
       db.prepare(`
-        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, playoff_qualifiers, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         league.id,
         league.rules?.withdrawalPolicy || "award_walkover",
@@ -514,6 +600,7 @@ export function importStore(store) {
         Number(league.rules?.forfeitGoalsAgainst ?? 0),
         Number(league.rules?.yellowSuspensionLimit ?? 3),
         Number(league.rules?.defaultRedSuspensionMatches ?? 1),
+        league.rules?.disciplineScope === "league" ? "league" : "competition",
         Number(league.rules?.playoffQualifiers ?? 8),
         league.rules?.notes || "Si un equipo se da de baja, la liga puede otorgar triunfo por default segun sus estatutos."
       );
@@ -616,6 +703,54 @@ export function importStore(store) {
           injury.status || "active",
           injury.notes || ""
         );
+      }
+
+      for (const affiliation of league.teamAffiliations || []) {
+        db.prepare(`
+          INSERT INTO team_affiliations (id, league_id, source_team_id, target_team_id, status, starts_at, ends_at, player_numbers_json, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          affiliation.id,
+          league.id,
+          affiliation.sourceTeamId,
+          affiliation.targetTeamId,
+          affiliation.status || "active",
+          affiliation.startsAt || "",
+          affiliation.endsAt || "",
+          JSON.stringify(affiliation.playerNumbers || {}),
+          affiliation.notes || ""
+        );
+      }
+
+      for (const link of league.disciplineLinks || []) {
+        db.prepare(`
+          INSERT INTO discipline_links (id, league_id, player_ids_json, notes)
+          VALUES (?, ?, ?, ?)
+        `).run(link.id, league.id, JSON.stringify(link.playerIds || []), link.notes || "");
+      }
+
+      for (const adjustment of league.disciplineAdjustments || []) {
+        db.prepare(`
+          INSERT INTO discipline_adjustments (id, league_id, competition_id, player_id, value, date, reason, notes, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          adjustment.id,
+          league.id,
+          adjustment.competitionId || league.currentCompetitionId,
+          adjustment.playerId,
+          Number(adjustment.value || 0),
+          adjustment.date || "",
+          adjustment.reason || "",
+          adjustment.notes || "",
+          adjustment.status || "active"
+        );
+      }
+
+      for (const reset of league.disciplineResets || []) {
+        db.prepare(`
+          INSERT INTO discipline_resets (id, league_id, player_id, date, reason, notes, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(reset.id, league.id, reset.playerId, reset.date || "", reset.reason || "", reset.notes || "", reset.status || "active");
       }
 
       for (const match of league.matches) {

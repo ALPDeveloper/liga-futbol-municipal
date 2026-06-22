@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { seedData } from "../src/data/seedData.js";
 import {
   addCompetition,
+  addDisciplineLink,
+  addDisciplineReset,
   addPlayerInjury,
   addPlayerSanction,
   addAnnouncement,
   addMatch,
   addSponsor,
   addTeam,
+  addTeamAffiliation,
   deleteLeague,
   deleteAnnouncement,
   deletePlayer,
@@ -15,10 +18,12 @@ import {
   deletePlayoffMatches,
   deleteSponsor,
   generatePlayoffBracket,
+  mergeDuplicatePlayer,
   generateSchedule,
   saveMatchSheet,
   saveResult,
   updatePlayerInjury,
+  updateTeamAffiliationPlayerNumber,
   updateLeagueMembership,
   updateLeagueRules,
   updateAnnouncement,
@@ -32,6 +37,9 @@ import {
   calculateYellowCardDiscipline,
   buildSmartHighlights,
   getCurrentLeague,
+  getEligiblePlayersForTeam,
+  getPlayerNumberForTeam,
+  getPlayerSeasonBreakdown,
   normalizeStore,
   playoffMatches,
   regularMatches,
@@ -53,6 +61,169 @@ assert.equal(scopeLeagueToCompetition(league, "comp-copa-tinguindin-2026").teams
 const hugoNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p6" && notice.type === "Expulsion");
 assert.equal(hugoNotice.remainingMatches, 1);
 assert.equal(hugoNotice.returnRound, 3);
+
+let disciplineStore = normalizeStore({
+  currentLeagueId: "liga-disciplina",
+  leagues: [
+    {
+      id: "liga-disciplina",
+      name: "Liga Disciplina",
+      city: "Ciudad",
+      season: "2026",
+      currentCompetitionId: "primera",
+      competitions: [
+        { id: "primera", name: "Primera", season: "2026", status: "active" },
+        { id: "segunda", name: "Segunda", season: "2026", status: "active" }
+      ],
+      rules: { disciplineScope: "league", yellowSuspensionLimit: 3 },
+      identity: {},
+      teams: [
+        { id: "primera-a", competitionId: "primera", name: "Primera A" },
+        { id: "segunda-a", competitionId: "segunda", name: "Segunda A" }
+      ],
+      players: [
+        { id: "juan-primera", competitionId: "primera", teamId: "primera-a", name: "Juan Perez", number: 10 },
+        { id: "juan-segunda", competitionId: "segunda", teamId: "segunda-a", name: "Juan Perez", number: 10 }
+      ],
+      matches: [
+        {
+          id: "disciplina-1",
+          competitionId: "segunda",
+          round: 1,
+          date: "2026-01-01",
+          status: "finished",
+          homeTeamId: "segunda-a",
+          awayTeamId: "primera-a",
+          events: [
+            { type: "yellow", playerId: "juan-segunda", teamId: "segunda-a" },
+            { type: "yellow", playerId: "juan-segunda", teamId: "segunda-a" }
+          ]
+        },
+        {
+          id: "disciplina-2",
+          competitionId: "primera",
+          round: 2,
+          date: "2026-01-02",
+          status: "finished",
+          homeTeamId: "primera-a",
+          awayTeamId: "segunda-a",
+          events: [{ type: "yellow", playerId: "juan-primera", teamId: "primera-a" }]
+        }
+      ],
+      sanctions: [],
+      injuries: []
+    }
+  ]
+});
+disciplineStore = addDisciplineLink(disciplineStore, "liga-disciplina", { playerId: "juan-primera", linkedPlayerId: "juan-segunda" });
+let disciplineLeague = getCurrentLeague(disciplineStore);
+let disciplineRows = calculateYellowCardDiscipline(disciplineLeague);
+assert.equal(disciplineRows.length, 1);
+assert.equal(disciplineRows[0].yellowCards, 3);
+assert.equal(disciplineRows[0].status, "suspended");
+assert.equal(disciplineRows[0].linkedPlayers.length, 2);
+disciplineStore = addDisciplineReset(disciplineStore, "liga-disciplina", { playerId: "juan-primera", date: "2026-01-03", reason: "Cumplio sancion" });
+disciplineLeague = getCurrentLeague(disciplineStore);
+disciplineRows = calculateYellowCardDiscipline(disciplineLeague);
+assert.equal(disciplineRows.length, 0);
+
+let affiliationStore = normalizeStore({
+  currentLeagueId: "liga-afiliacion",
+  leagues: [
+    {
+      id: "liga-afiliacion",
+      name: "Liga Afiliacion",
+      city: "Ciudad",
+      season: "2026",
+      currentCompetitionId: "primera",
+      competitions: [
+        { id: "primera", name: "Primera", season: "2026", status: "active" },
+        { id: "segunda", name: "Segunda", season: "2026", status: "active" }
+      ],
+      rules: { disciplineScope: "league", yellowSuspensionLimit: 3 },
+      identity: {},
+      teams: [
+        { id: "fresno", competitionId: "primera", name: "Fresno Hass" },
+        { id: "primera-rival", competitionId: "primera", name: "Primera Rival" },
+        { id: "guascuaro", competitionId: "segunda", name: "Guascuaro" },
+        { id: "segunda-rival", competitionId: "segunda", name: "Segunda Rival" }
+      ],
+      players: [
+        { id: "juan-guascuaro", competitionId: "segunda", teamId: "guascuaro", name: "Juan Afiliado", number: 10 },
+        { id: "juan-fresno", competitionId: "primera", teamId: "fresno", name: "#15 Juan Afiliado", number: 15 }
+      ],
+      matches: [
+        {
+          id: "aff-segunda",
+          competitionId: "segunda",
+          round: 1,
+          date: "2026-02-01",
+          status: "scheduled",
+          homeTeamId: "guascuaro",
+          awayTeamId: "segunda-rival",
+          events: []
+        },
+        {
+          id: "aff-primera",
+          competitionId: "primera",
+          round: 2,
+          date: "2026-02-02",
+          status: "scheduled",
+          homeTeamId: "fresno",
+          awayTeamId: "primera-rival",
+          events: []
+        }
+      ],
+      sanctions: [],
+      injuries: []
+    }
+  ]
+});
+affiliationStore = addTeamAffiliation(affiliationStore, "liga-afiliacion", { sourceTeamId: "guascuaro", targetTeamId: "fresno" });
+let affiliationLeague = getCurrentLeague(affiliationStore);
+assert.equal(getEligiblePlayersForTeam(affiliationLeague, "fresno").some((player) => player.id === "juan-guascuaro"), true);
+const affiliationId = affiliationLeague.teamAffiliations[0].id;
+affiliationStore = updateTeamAffiliationPlayerNumber(affiliationStore, "liga-afiliacion", affiliationId, { playerId: "juan-guascuaro", number: 14 });
+assert.equal(getPlayerNumberForTeam(getCurrentLeague(affiliationStore), "juan-guascuaro", "fresno"), 14);
+
+affiliationStore = saveMatchSheet(affiliationStore, "liga-afiliacion", {
+  matchId: "aff-segunda",
+  homeGoals: 1,
+  awayGoals: 0,
+  events: [
+    { type: "goal", playerId: "juan-guascuaro", teamId: "guascuaro", minute: 11 },
+    { type: "yellow", playerId: "juan-guascuaro", teamId: "guascuaro", minute: 30 },
+    { type: "yellow", playerId: "juan-guascuaro", teamId: "guascuaro", minute: 70 }
+  ]
+});
+affiliationStore = saveMatchSheet(affiliationStore, "liga-afiliacion", {
+  matchId: "aff-primera",
+  homeGoals: 1,
+  awayGoals: 0,
+  events: [
+    { type: "goal", playerId: "juan-fresno", teamId: "fresno", minute: 20 },
+    { type: "yellow", playerId: "juan-fresno", teamId: "fresno", minute: 50 }
+  ]
+});
+affiliationStore = mergeDuplicatePlayer(affiliationStore, "liga-afiliacion", { targetPlayerId: "juan-guascuaro", duplicatePlayerId: "juan-fresno" });
+affiliationLeague = getCurrentLeague(affiliationStore);
+assert.equal(affiliationLeague.players.some((player) => player.id === "juan-fresno"), false);
+assert.equal(getPlayerNumberForTeam(affiliationLeague, "juan-guascuaro", "fresno"), 15);
+assert.equal(affiliationLeague.matches.find((match) => match.id === "aff-primera").events[0].playerId, "juan-guascuaro");
+assert.equal(affiliationLeague.matches.find((match) => match.id === "aff-primera").events[0].teamId, "fresno");
+const primeraAffiliationStats = calculatePlayerStats(scopeLeagueToCompetition(affiliationLeague, "primera")).find((row) => row.player.id === "juan-guascuaro");
+const segundaAffiliationStats = calculatePlayerStats(scopeLeagueToCompetition(affiliationLeague, "segunda")).find((row) => row.player.id === "juan-guascuaro");
+assert.equal(primeraAffiliationStats.goals, 1);
+assert.equal(primeraAffiliationStats.team.id, "fresno");
+assert.equal(segundaAffiliationStats.goals, 1);
+assert.equal(segundaAffiliationStats.team.id, "guascuaro");
+const affiliationBreakdown = getPlayerSeasonBreakdown(affiliationLeague, "juan-guascuaro");
+assert.equal(affiliationBreakdown.hasAffiliation, true);
+assert.equal(affiliationBreakdown.totals.goals, 2);
+assert.equal(affiliationBreakdown.totals.yellowCards, 3);
+assert.equal(calculateYellowCardDiscipline(affiliationLeague)[0].status, "suspended");
+affiliationStore = addDisciplineReset(affiliationStore, "liga-afiliacion", { playerId: "juan-guascuaro", date: "2026-02-03", reason: "Cumplio sancion" });
+assert.equal(calculateYellowCardDiscipline(getCurrentLeague(affiliationStore)).length, 0);
 
 store = addTeam(store, league.id, {
   name: "Club Prueba",
@@ -567,12 +738,15 @@ const passwordHash = hashPassword("admin123");
 assert.equal(verifyPassword("admin123", passwordHash), true);
 assert.equal(verifyPassword("mal-password", passwordHash), false);
 assert.equal(validatePlayerFullName("JUAN PEREZ").valid, true);
+assert.equal(validatePlayerFullName("#3 JUAN PEREZ").valid, true);
 assert.equal(validatePlayerFullName("JUAN").valid, false);
 const duplicateValidationLeague = {
   ...league,
   players: [...league.players, { id: "player-duplicate-test", name: "JOSE PEREZ", teamId: "halcones" }]
 };
 assert.equal(findDuplicatePlayer(duplicateValidationLeague, { name: "  José   Pérez  " })?.name, "JOSE PEREZ");
+assert.equal(findDuplicatePlayer(duplicateValidationLeague, { name: "#3 JOSE PEREZ" })?.name, "JOSE PEREZ");
+assert.equal(findDuplicatePlayer(duplicateValidationLeague, { name: "JOSE PEREZ #3" })?.name, "JOSE PEREZ");
 assert.equal(findDuplicatePlayer(duplicateValidationLeague, { name: "JOSE PEREZ" }, "player-duplicate-test")?.id, undefined);
 
 const sheetEvent = {
