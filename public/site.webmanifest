@@ -1,0 +1,17 @@
+{
+  "name": "LIGA TEC",
+  "short_name": "LIGA TEC",
+  "description": "Plataforma deportiva para ligas, equipos, jugadores y estadisticas.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06111f",
+  "theme_color": "#06111f",
+  "icons": [
+    {
+      "src": "/ligatec-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

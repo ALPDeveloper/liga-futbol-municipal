@@ -2349,7 +2349,31 @@ function DisciplineControlPanel({
 }) {
   const rows = calculateYellowCardDiscipline(league);
   const players = useMemo(() => [...league.players].sort((a, b) => a.name.localeCompare(b.name)), [league.players]);
+  const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
+  const teams = useMemo(() => [...league.teams].sort((a, b) => a.name.localeCompare(b.name)), [league.teams]);
+  const [disciplineQuery, setDisciplineQuery] = useState("");
+  const [disciplineCompetitionId, setDisciplineCompetitionId] = useState("");
+  const [disciplineTeamId, setDisciplineTeamId] = useState("");
+  const [disciplineStatus, setDisciplineStatus] = useState("all");
   const [notice, setNotice] = useState("");
+  const visibleTeams = useMemo(() => (
+    disciplineCompetitionId
+      ? teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === disciplineCompetitionId)
+      : teams
+  ), [disciplineCompetitionId, league, teams]);
+  const filteredRows = useMemo(() => rows.filter((row) => disciplineRowMatchesFilters(league, row, {
+    query: disciplineQuery,
+    competitionId: disciplineCompetitionId,
+    teamId: disciplineTeamId,
+    status: disciplineStatus
+  })), [disciplineCompetitionId, disciplineQuery, disciplineStatus, disciplineTeamId, league, rows]);
+  const manualHistory = useMemo(() => [...(league.disciplineAdjustments || []), ...(league.disciplineResets || [])]
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))), [league.disciplineAdjustments, league.disciplineResets]);
+  const filteredManualHistory = useMemo(() => manualHistory.filter((item) => disciplineMovementMatchesFilters(league, item, {
+    query: disciplineQuery,
+    competitionId: disciplineCompetitionId,
+    teamId: disciplineTeamId
+  })), [disciplineCompetitionId, disciplineQuery, disciplineTeamId, league, manualHistory]);
 
   function submitAdjustment(event) {
     event.preventDefault();
@@ -2382,7 +2406,7 @@ function DisciplineControlPanel({
         <form className="discipline-admin-form" onSubmit={submitAdjustment}>
           <h3>Ajuste manual</h3>
           <label>Jugador
-            <PlayerSelect league={league} name="playerId" players={players} />
+            <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador para ajustar..." />
           </label>
           <label>Torneo relacionado
             <CompetitionSelect league={league} name="competitionId" defaultValue={getDefaultCompetitionId(league)} />
@@ -2408,7 +2432,7 @@ function DisciplineControlPanel({
         <form className="discipline-admin-form" onSubmit={submitReset}>
           <h3>Cumplimiento / reset</h3>
           <label>Jugador
-            <PlayerSelect league={league} name="playerId" players={players} />
+            <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador suspendido..." />
           </label>
           <label>Fecha
             <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
@@ -2421,8 +2445,50 @@ function DisciplineControlPanel({
       </div>
 
       <div className="discipline-admin-list">
-        <h3>Acumulacion vigente</h3>
-        {rows.map((row) => (
+        <div className="discipline-list-head">
+          <div>
+            <h3>Acumulacion vigente</h3>
+            <p className="helper-text">{filteredRows.length} de {rows.length} jugador(es) visibles con los filtros actuales.</p>
+          </div>
+          <div className="discipline-filters">
+            <label>Buscar
+              <input
+                type="search"
+                value={disciplineQuery}
+                onChange={(event) => setDisciplineQuery(event.target.value)}
+                placeholder="Nombre, numero o equipo"
+              />
+            </label>
+            <label>Categoria
+              <select value={disciplineCompetitionId} onChange={(event) => {
+                setDisciplineCompetitionId(event.target.value);
+                setDisciplineTeamId("");
+              }}>
+                <option value="">Todas</option>
+                {competitions.map((competition) => (
+                  <option key={competition.id} value={competition.id}>{competition.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>Equipo
+              <select value={disciplineTeamId} onChange={(event) => setDisciplineTeamId(event.target.value)}>
+                <option value="">Todos</option>
+                {visibleTeams.map((team) => (
+                  <option key={team.id} value={team.id}>{team.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>Estado
+              <select value={disciplineStatus} onChange={(event) => setDisciplineStatus(event.target.value)}>
+                <option value="all">Todos</option>
+                <option value="suspended">Suspendidos</option>
+                <option value="warning">En riesgo</option>
+                <option value="tracking">En seguimiento</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        {filteredRows.map((row) => (
           <article className={`discipline-admin-card ${row.status}`} key={row.player.id}>
             <div>
               <strong>{row.player.name}</strong>
@@ -2439,13 +2505,17 @@ function DisciplineControlPanel({
           </article>
         ))}
         {!rows.length && <p className="empty">No hay jugadores con acumulacion disciplinaria vigente.</p>}
+        {Boolean(rows.length) && !filteredRows.length && <p className="empty">No hay jugadores que coincidan con los filtros.</p>}
       </div>
 
       <div className="discipline-admin-list">
-        <h3>Historial manual</h3>
-        {[...(league.disciplineAdjustments || []), ...(league.disciplineResets || [])]
-          .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
-          .map((item) => {
+        <div className="discipline-list-head">
+          <div>
+            <h3>Historial manual</h3>
+            <p className="helper-text">{filteredManualHistory.length} de {manualHistory.length} movimiento(s) visibles con los filtros actuales.</p>
+          </div>
+        </div>
+        {filteredManualHistory.map((item) => {
             const player = getPlayer(league, item.playerId);
             const isReset = item.value === undefined;
             return (
@@ -2471,10 +2541,33 @@ function DisciplineControlPanel({
               </article>
             );
           })}
-        {!(league.disciplineAdjustments || []).length && !(league.disciplineResets || []).length && <p className="empty">Aun no hay movimientos manuales.</p>}
+        {!manualHistory.length && <p className="empty">Aun no hay movimientos manuales.</p>}
+        {Boolean(manualHistory.length) && !filteredManualHistory.length && <p className="empty">No hay movimientos manuales que coincidan con los filtros.</p>}
       </div>
     </section>
   );
+}
+
+function disciplineRowMatchesFilters(league, row, filters) {
+  if (filters.status !== "all" && row.status !== filters.status) return false;
+  const linkedPlayers = row.linkedPlayers?.length ? row.linkedPlayers : [row.player];
+  return linkedPlayers.some((player) => disciplinePlayerMatchesFilters(league, player, filters));
+}
+
+function disciplineMovementMatchesFilters(league, item, filters) {
+  const player = getPlayer(league, item.playerId);
+  return player ? disciplinePlayerMatchesFilters(league, player, filters) : normalizeAdminSearchTerm("Jugador eliminado").includes(normalizeAdminSearchTerm(filters.query));
+}
+
+function disciplinePlayerMatchesFilters(league, player, filters) {
+  const teamIds = getPlayerAdminTeamIds(league, player);
+  const teams = teamIds.map((teamId) => getTeam(league, teamId)).filter(Boolean);
+  const competitionIds = teams.map((team) => team.competitionId || getDefaultCompetitionId(league));
+  const query = normalizeAdminSearchTerm(filters.query);
+  if (filters.competitionId && !competitionIds.includes(filters.competitionId)) return false;
+  if (filters.teamId && !teamIds.includes(filters.teamId)) return false;
+  if (!query) return true;
+  return getPlayerAdminSearchValues(league, player).some((value) => normalizeAdminSearchTerm(value).includes(query));
 }
 
 function PlayerSelect({ league, name, players }) {
@@ -2499,14 +2592,7 @@ function SearchablePlayerSelect({ league, name, players, placeholder }) {
     const term = normalizeAdminSearchTerm(query);
     const source = term
       ? players.filter((player) => {
-        const team = getTeam(league, player.teamId);
-        const competition = getCompetition(league, player.competitionId || team?.competitionId);
-        return [
-          player.name,
-          player.number,
-          team?.name,
-          competition?.name
-        ].some((value) => normalizeAdminSearchTerm(value).includes(term));
+        return getPlayerAdminSearchValues(league, player).some((value) => normalizeAdminSearchTerm(value).includes(term));
       })
       : players;
     return source.slice(0, 60);
@@ -2535,6 +2621,26 @@ function SearchablePlayerSelect({ league, name, players, placeholder }) {
       {!filteredPlayers.length && <small>No hay jugadores con esa busqueda.</small>}
     </div>
   );
+}
+
+function getPlayerAdminTeamIds(league, player) {
+  const ids = new Set([player.teamId].filter(Boolean));
+  for (const affiliation of league.teamAffiliations || []) {
+    if (affiliation.status && affiliation.status !== "active") continue;
+    if (affiliation.sourceTeamId === player.teamId) ids.add(affiliation.targetTeamId);
+  }
+  return [...ids];
+}
+
+function getPlayerAdminSearchValues(league, player) {
+  const teamIds = getPlayerAdminTeamIds(league, player);
+  const values = [player.name, player.number];
+  for (const teamId of teamIds) {
+    const team = getTeam(league, teamId);
+    const competition = getCompetition(league, team?.competitionId || player.competitionId || getDefaultCompetitionId(league));
+    values.push(team?.name, competition?.name);
+  }
+  return values;
 }
 
 function normalizeAdminSearchTerm(value) {

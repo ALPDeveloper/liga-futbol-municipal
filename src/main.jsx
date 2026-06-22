@@ -1,6 +1,6 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import alpLogo from "../assets/alp-logo.png";
+import ligatecLogo from "../assets/ligatec-logo.png";
 import heroImage from "../assets/league-hero.webp";
 import { DEFAULT_IDENTITY } from "./data/seedData.js";
 import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
@@ -13,6 +13,16 @@ const LazyAdminRoute = React.lazy(() => import("./components/AdminRoute.jsx").th
 const LazyAuthPanel = React.lazy(() => import("./components/AuthPanel.jsx").then((module) => ({ default: module.AuthPanel })));
 const LazyLegalView = React.lazy(() => import("./components/LegalView.jsx").then((module) => ({ default: module.LegalView })));
 const LazyPublicView = React.lazy(() => import("./components/PublicView.jsx").then((module) => ({ default: module.PublicView })));
+
+function registerPwaServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {
+      // La app sigue funcionando como web normal si el navegador bloquea el registro.
+    });
+  });
+}
 
 const initialIsAdminRoute = window.location.pathname.startsWith("/admin");
 const cachedStore = initialIsAdminRoute ? loadStore() : null;
@@ -60,7 +70,7 @@ function RouteFallback({ label = "Cargando" }) {
   return (
     <main className="startup-screen">
       <div className="startup-card">
-        <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
+        <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
         <strong>{label}</strong>
         <small>Preparando la experiencia de LIGATEC.</small>
       </div>
@@ -246,7 +256,7 @@ function App() {
     return (
       <main className="startup-screen">
         <div className="startup-card">
-          <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
+          <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
           <strong>Cargando liga</strong>
           <small>Preparando calendario, tabla y estadisticas.</small>
         </div>
@@ -258,7 +268,7 @@ function App() {
     return (
       <main className="startup-screen">
         <div className="startup-card">
-          <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
+          <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
           <strong>No se pudieron cargar datos reales</strong>
           <small>Revisa tu conexion e intenta actualizar la pagina.</small>
         </div>
@@ -271,15 +281,15 @@ function App() {
   }
 
   return (
-    <div style={themeStyle}>
-      <header className="topbar">
+    <div className={isAdminRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} style={themeStyle}>
+      <header className={`topbar ${isAdminRoute ? "admin-topbar" : "public-topbar"}`}>
         <a className="brand" href={isAdminRoute ? "/admin" : publicLeaguePath} aria-label="Ir al inicio" onClick={(event) => {
           event.preventDefault();
           navigateTo(isAdminRoute ? "/admin" : publicLeaguePath);
         }}>
-          <span className="brand-mark brand-mark-logo"><img alt="" src={alpLogo} /></span>
-          <span>
-            <strong>LIGA TEC</strong>
+          <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
+          <span className="brand-copy">
+            <strong className="brand-wordmark">LIGA<span>TEC</span></strong>
             <small>PLATAFORMA DEPORTIVA</small>
           </span>
         </a>
@@ -399,3 +409,5 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+registerPwaServiceWorker();

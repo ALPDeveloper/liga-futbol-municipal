@@ -710,7 +710,8 @@ if (runtimeConfig.serveStatic) {
     immutable: runtimeConfig.isProduction,
     maxAge: runtimeConfig.isProduction ? "1y" : 0,
     setHeaders: (response, filePath) => {
-      if (path.basename(filePath) === "index.html") {
+      const filename = path.basename(filePath);
+      if (filename === "index.html" || filename === "service-worker.js" || filename === "site.webmanifest") {
         response.setHeader("Cache-Control", "no-cache");
       }
     }
