@@ -44,6 +44,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
           }
         }}
       >
+        <small className="auth-help">Solicita el codigo con tu correo. Si existe una cuenta activa, recibiras instrucciones por el canal configurado.</small>
         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Correo" aria-label="Correo de recuperacion" />
         <input value={recoveryCode} onChange={(event) => setRecoveryCode(event.target.value)} placeholder="Codigo" aria-label="Codigo de recuperacion" />
         <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="Nueva contraseña" aria-label="Nueva contraseña" />

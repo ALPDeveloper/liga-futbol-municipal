@@ -74,6 +74,10 @@ export const runtimeConfig = {
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
   supabaseStorageBucket: process.env.SUPABASE_STORAGE_BUCKET || "ligatec-images",
   storagePublicBaseUrl: process.env.STORAGE_PUBLIC_BASE_URL || "",
+  appBaseUrl: process.env.APP_BASE_URL || "",
+  emailProvider: process.env.EMAIL_PROVIDER || "",
+  emailFrom: process.env.EMAIL_FROM || "",
+  resendApiKey: process.env.RESEND_API_KEY || "",
   serveStatic: parseBoolean(process.env.SERVE_STATIC, IS_PRODUCTION),
   publicCacheSeconds: Math.max(0, Number(process.env.PUBLIC_CACHE_SECONDS || 5))
 };
@@ -110,6 +114,13 @@ export function validateRuntimeConfig() {
 
   if (runtimeConfig.showRecoveryCodeInResponse) {
     problems.push("SHOW_RECOVERY_CODE_IN_RESPONSE debe ser false en produccion.");
+  }
+
+  if (runtimeConfig.emailProvider && runtimeConfig.emailProvider !== "resend") {
+    problems.push("EMAIL_PROVIDER solo soporta 'resend' por ahora.");
+  }
+  if (runtimeConfig.emailProvider === "resend" && (!runtimeConfig.resendApiKey || !runtimeConfig.emailFrom)) {
+    problems.push("EMAIL_PROVIDER=resend requiere RESEND_API_KEY y EMAIL_FROM.");
   }
 
   if (runtimeConfig.seedDemoUsers) {

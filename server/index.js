@@ -7,6 +7,7 @@ import path from "node:path";
 import { ROOT_DIR } from "./env.js";
 import { listAuditLogs, logAudit } from "./audit.js";
 import { createToken, getAuthUser, requireAuth, requireSuperAdmin, toPublicUser } from "./auth.js";
+import { sendPasswordResetEmail } from "./mailer.js";
 import {
   clearLoginLockData,
   countActiveSuperAdminsExcept,
@@ -261,6 +262,7 @@ app.post("/api/auth/request-password-reset", passwordResetLimiter, async (reques
   const id = `reset-${crypto.randomUUID()}`;
   const expiresAt = new Date(Date.now() + 1000 * 60 * 20).toISOString();
   await createPasswordResetData({ id, userId: user.id, codeHash: hashPassword(code), expiresAt });
+  const delivery = await sendPasswordResetEmail({ to: email, code, expiresAt });
 
   await logAudit({
     user: toPublicUser(user),
@@ -268,7 +270,9 @@ app.post("/api/auth/request-password-reset", passwordResetLimiter, async (reques
     action: "password_reset_request",
     entityType: "user",
     entityId: user.id,
-    detail: "Solicito recuperacion de contraseña"
+    detail: delivery.sent
+      ? "Solicito recuperacion de contraseña. Codigo enviado por correo."
+      : `Solicito recuperacion de contraseña. Correo no enviado: ${delivery.reason || "sin detalle"}`
   });
 
   const payload = {
@@ -432,28 +436,38 @@ app.get("/api/audit-logs", requireSuperAdmin, async (request, response) => {
 app.post("/api/users", requireSuperAdmin, async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
   const password = String(request.body.password || "");
+  const role = String(request.body.role || "");
+  const leagueId = role === "league_admin" ? request.body.leagueId || "" : null;
   const passwordError = requireStrongPassword(password);
-  if (!email || !password || !request.body.name || !request.body.role) {
+  if (!email || !password || !request.body.name || !role) {
     return response.status(400).json({ error: "Nombre, correo, rol y contraseña son requeridos" });
   }
   if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido" });
-  if (!validateUserRole(request.body.role)) return response.status(400).json({ error: "Rol invalido" });
+  if (!validateUserRole(role)) return response.status(400).json({ error: "Rol invalido" });
   if (request.body.status && !validateUserStatus(request.body.status)) return response.status(400).json({ error: "Estado invalido" });
-  if (request.body.role === "league_admin" && !request.body.leagueId) {
+  if (role === "league_admin" && !leagueId) {
     return response.status(400).json({ error: "Un admin de liga debe estar asignado a una liga" });
   }
   if (passwordError) return response.status(400).json({ error: passwordError });
 
   const id = `user-${crypto.randomUUID()}`;
-  const user = await createUserData({
-    id,
-    leagueId: request.body.leagueId || null,
-    name: request.body.name,
-    email,
-    role: request.body.role,
-    status: request.body.status || "active",
-    passwordHash: hashPassword(password)
-  });
+  let user;
+  try {
+    user = await createUserData({
+      id,
+      leagueId,
+      name: request.body.name,
+      email,
+      role,
+      status: request.body.status || "active",
+      passwordHash: hashPassword(password)
+    });
+  } catch (error) {
+    if (String(error?.message || "").toLowerCase().includes("unique")) {
+      return response.status(409).json({ error: "Ya existe un usuario con ese correo." });
+    }
+    throw error;
+  }
   await logAudit({
     user: request.user,
     leagueId: user.league_id,
@@ -470,12 +484,14 @@ app.patch("/api/users/:userId", requireSuperAdmin, async (request, response) => 
   if (!current) return response.status(404).json({ error: "Usuario no encontrado" });
 
   const next = {
-    leagueId: request.body.leagueId === "" ? null : request.body.leagueId ?? current.league_id,
     name: request.body.name ?? current.name,
     email: request.body.email ? String(request.body.email).trim().toLowerCase() : current.email,
     role: request.body.role ?? current.role,
     status: request.body.status ?? current.status
   };
+  next.leagueId = next.role === "league_admin"
+    ? (request.body.leagueId === "" ? null : request.body.leagueId ?? current.league_id)
+    : null;
   if (!validateEmail(next.email)) return response.status(400).json({ error: "Correo invalido" });
   if (!validateUserRole(next.role)) return response.status(400).json({ error: "Rol invalido" });
   if (!validateUserStatus(next.status)) return response.status(400).json({ error: "Estado invalido" });
@@ -496,10 +512,18 @@ app.patch("/api/users/:userId", requireSuperAdmin, async (request, response) => 
   const passwordError = nextPassword ? requireStrongPassword(nextPassword) : "";
   if (passwordError) return response.status(400).json({ error: passwordError });
 
-  const user = await updateUserData(current.id, {
-    ...next,
-    passwordHash: nextPassword ? hashPassword(nextPassword) : null
-  });
+  let user;
+  try {
+    user = await updateUserData(current.id, {
+      ...next,
+      passwordHash: nextPassword ? hashPassword(nextPassword) : null
+    });
+  } catch (error) {
+    if (String(error?.message || "").toLowerCase().includes("unique")) {
+      return response.status(409).json({ error: "Ya existe un usuario con ese correo." });
+    }
+    throw error;
+  }
   await logAudit({
     user: request.user,
     leagueId: user.league_id,

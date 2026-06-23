@@ -3248,6 +3248,61 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
   );
 }
 
+function generateSecureTemporaryPassword() {
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const all = `${lower}${upper}${digits}`;
+  const pick = (source) => source[getSecureRandomIndex(source.length)];
+  const chars = [
+    pick(upper),
+    pick(lower),
+    pick(digits),
+    pick(all),
+    pick(all),
+    pick(all),
+    pick(all),
+    pick(all),
+    pick(all),
+    pick(all),
+    pick(all),
+    pick(all)
+  ];
+  return shuffleSecure(chars).join("");
+}
+
+function getSecureRandomIndex(max) {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return values[0] % max;
+}
+
+function shuffleSecure(items) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = getSecureRandomIndex(index + 1);
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
+function getAdminPasswordError(password) {
+  const value = String(password || "");
+  if (value.length < 10) return "La contraseña debe tener minimo 10 caracteres.";
+  if (!/[a-z]/.test(value)) return "La contraseña debe tener una minuscula.";
+  if (!/[A-Z]/.test(value)) return "La contraseña debe tener una mayuscula.";
+  if (!/\d/.test(value)) return "La contraseña debe tener un numero.";
+  return "";
+}
+
+function normalizeUserPayload(payload) {
+  return {
+    ...payload,
+    email: String(payload.email || "").trim().toLowerCase(),
+    leagueId: payload.role === "league_admin" ? payload.leagueId : ""
+  };
+}
+
 function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
@@ -3270,17 +3325,37 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
 
   async function handleCreate(payload) {
     setNotice("");
+    setError("");
+    if (payload.role === "league_admin" && !payload.leagueId) {
+      setError("Selecciona una liga para crear un admin de liga.");
+      return false;
+    }
+    const passwordError = getAdminPasswordError(payload.password);
+    if (passwordError) {
+      setError(passwordError);
+      return false;
+    }
     if (!window.confirm(`¿Confirmas crear el usuario ${payload.email}?`)) return false;
-    await createUser(authToken, payload);
+    await createUser(authToken, normalizeUserPayload(payload));
     await loadUsers();
-    setNotice("Usuario creado correctamente.");
+    setNotice("Usuario creado correctamente. Comparte la clave temporal por un canal seguro y pide al usuario cambiarla.");
     return true;
   }
 
   async function handleUpdate(userId, payload) {
     setNotice("");
+    setError("");
+    if (payload.role === "league_admin" && !payload.leagueId) {
+      setError("Selecciona una liga para este admin de liga.");
+      return false;
+    }
+    const passwordError = payload.password ? getAdminPasswordError(payload.password) : "";
+    if (passwordError) {
+      setError(passwordError);
+      return false;
+    }
     if (!window.confirm("¿Guardar cambios de este usuario?")) return false;
-    await updateUser(authToken, userId, payload);
+    await updateUser(authToken, userId, normalizeUserPayload(payload));
     await loadUsers();
     setNotice(payload.password
       ? "Usuario actualizado. Comparte la nueva clave temporal con el usuario por un canal seguro."
@@ -3309,7 +3384,7 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   }
 
   function generateTemporaryPassword(userId = "new") {
-    const password = `Liga-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    const password = generateSecureTemporaryPassword();
     setTemporaryPasswords((current) => ({ ...current, [userId]: password }));
   }
 
@@ -3320,8 +3395,12 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
         className="user-create-form"
         onSubmit={async (event) => {
           event.preventDefault();
-          const created = await handleCreate(getFormPayload(event.currentTarget));
-          if (created) event.currentTarget.reset();
+          try {
+            const created = await handleCreate(getFormPayload(event.currentTarget));
+            if (created) event.currentTarget.reset();
+          } catch (requestError) {
+            setError(requestError.message);
+          }
         }}
       >
         <label>
@@ -3340,7 +3419,7 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
             type="text"
             value={temporaryPasswords.new || ""}
             onChange={(event) => setTemporaryPasswords((current) => ({ ...current, new: event.target.value }))}
-            placeholder="Genera o escribe una clave"
+            placeholder="Minimo 10, mayuscula, minuscula y numero"
           />
         </label>
         <label>
@@ -3363,7 +3442,7 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
 
       {error && <p className="auth-error">{error}</p>}
       {notice && <p className="auth-ok">{notice}</p>}
-      <p className="helper-text">Si un usuario olvida su contraseña, el super admin puede asignar una nueva clave temporal aqui. Tambien existe recuperacion por codigo desde el login.</p>
+      <p className="helper-text">Usa correos reales y accesibles. La recuperacion por codigo se envia por correo cuando el proveedor de email esta configurado en produccion; mientras tanto el super admin puede asignar una clave temporal.</p>
 
       <div className="user-list">
         {users.map((user) => {
@@ -3372,9 +3451,13 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
             <form
               className="user-card"
               key={user.id}
-              onSubmit={(event) => {
+              onSubmit={async (event) => {
                 event.preventDefault();
-                handleUpdate(user.id, getFormPayload(event.currentTarget));
+                try {
+                  await handleUpdate(user.id, getFormPayload(event.currentTarget));
+                } catch (requestError) {
+                  setError(requestError.message);
+                }
               }}
             >
               <label>
@@ -3415,7 +3498,7 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
                   type="text"
                   value={temporaryPasswords[user.id] || ""}
                   onChange={(event) => setTemporaryPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
-                  placeholder="Opcional"
+                  placeholder="Opcional, minimo 10"
                 />
               </label>
               <button type="button" onClick={() => generateTemporaryPassword(user.id)}>Sugerir clave</button>

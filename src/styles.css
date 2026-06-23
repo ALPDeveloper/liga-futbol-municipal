@@ -321,6 +321,11 @@ a:hover {
   font-weight: 800;
 }
 
+.auth-help {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
 .auth-error {
   grid-column: 1 / -1;
   color: var(--danger);
@@ -1879,9 +1884,64 @@ th {
 
 .competition-picker {
   display: grid;
-  grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1fr);
-  gap: 12px;
-  align-items: end;
+  gap: 14px;
+}
+
+.competition-choice-group {
+  display: grid;
+  gap: 8px;
+}
+
+.competition-choice-group > span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.competition-button-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scrollbar-width: thin;
+}
+
+.competition-button-row button {
+  min-height: 44px;
+  flex: 0 0 auto;
+  display: grid;
+  gap: 2px;
+  align-content: center;
+  justify-items: start;
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--field) 18%, var(--line));
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 252, 247, 0.86));
+  color: color-mix(in srgb, var(--field-dark) 90%, #111827);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.competition-button-row button.active {
+  border-color: color-mix(in srgb, var(--lime) 56%, var(--field));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--field) 92%, #06111f), color-mix(in srgb, var(--lime) 74%, var(--field)));
+  color: #fff;
+  box-shadow: 0 12px 26px rgba(15, 107, 79, 0.18);
+}
+
+.competition-button-row button strong,
+.competition-button-row button small {
+  display: block;
+}
+
+.competition-button-row button small {
+  color: currentColor;
+  font-size: 0.68rem;
+  font-weight: 850;
+  opacity: 0.78;
+  text-transform: uppercase;
 }
 
 .competition-summary {

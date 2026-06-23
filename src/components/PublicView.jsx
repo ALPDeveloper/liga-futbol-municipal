@@ -1821,26 +1821,43 @@ function CompetitionSelector({ competitions, selectedSeason, selectedCompetition
 
   return (
     <div className="competition-picker" aria-label="Seleccionar temporada o torneo">
-      <label>Temporada
-        <select
-          value={selectedSeason}
-          onChange={(event) => {
-            const season = event.target.value;
-            const nextCompetition = competitions.find((competition) => competition.season === season);
-            onSelectSeason(season);
-            if (nextCompetition) onSelectCompetition(nextCompetition.id);
-          }}
-        >
-          {seasons.map((season) => <option key={season} value={season}>{season}</option>)}
-        </select>
-      </label>
-      <label>Torneo
-        <select value={selectedCompetitionId} onChange={(event) => onSelectCompetition(event.target.value)}>
-          {visibleCompetitions.map((competition) => (
-            <option key={competition.id} value={competition.id}>{competition.name}</option>
+      <div className="competition-choice-group">
+        <span>Temporada</span>
+        <div className="competition-button-row">
+          {seasons.map((season) => (
+            <button
+              className={season === selectedSeason ? "active" : ""}
+              key={season}
+              type="button"
+              aria-pressed={season === selectedSeason}
+              onClick={() => {
+                const nextCompetition = competitions.find((competition) => competition.season === season);
+                onSelectSeason(season);
+                if (nextCompetition) onSelectCompetition(nextCompetition.id);
+              }}
+            >
+              {season}
+            </button>
           ))}
-        </select>
-      </label>
+        </div>
+      </div>
+      <div className="competition-choice-group">
+        <span>Torneo</span>
+        <div className="competition-button-row">
+          {visibleCompetitions.map((competition) => (
+            <button
+              className={competition.id === selectedCompetitionId ? "active" : ""}
+              key={competition.id}
+              type="button"
+              aria-pressed={competition.id === selectedCompetitionId}
+              onClick={() => onSelectCompetition(competition.id)}
+            >
+              <strong>{competition.name}</strong>
+              {competition.type && <small>{competitionTypeLabel(competition.type)}</small>}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
