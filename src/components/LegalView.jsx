@@ -6,7 +6,7 @@ const LEGAL_PROFILE = {
   owner: "Ing. Antonio Linares Pulido / ALP DEV",
   brand: "LIGATEC",
   address: "C. Nueva Espana 36, Guascuaro de Mujica, Michoacan, Mexico",
-  email: "linares.pulido@gmail.com",
+  email: "contacto@ligatec.mx",
   phone: "3541073146",
   phoneHref: "tel:+523541073146",
   domain: "www.ligatec.mx",
@@ -240,7 +240,7 @@ export function LegalView({ league, onNavigate, publicLeaguePath = "/" }) {
 
           <article className="panel legal-section" id="contacto">
             <SectionHeading eyebrow="Derechos ARCO" title="Contacto, solicitudes y cambios" />
-            <p>Para acceso, rectificacion, cancelacion, oposicion, limitacion de uso, retiro de consentimiento, baja de fotografia, reporte de vulneracion, aclaracion de cobro o reclamacion de derechos, escribe al correo de contacto de ALP DEV.</p>
+            <p>Para acceso, rectificacion, cancelacion, oposicion, limitacion de uso, retiro de consentimiento, baja de fotografia, reporte de vulneracion, aclaracion de cobro o reclamacion de derechos, escribe al correo institucional de {LEGAL_PROFILE.brand}.</p>
             <div className="legal-contact-card">
               <span>Correo legal y privacidad</span>
               <a href={`mailto:${LEGAL_PROFILE.email}`}>{LEGAL_PROFILE.email}</a>
