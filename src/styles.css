@@ -1475,12 +1475,33 @@ input[name*="password"] {
 @media (max-width: 720px) {
   .delegate-create-form,
   .team-player-form,
-  .delegate-grid {
+  .delegate-grid,
+  .delegate-filter-bar {
     grid-template-columns: 1fr;
   }
 
   .team-portal-player-list article {
     grid-template-columns: 42px 44px minmax(0, 1fr);
+  }
+
+  .delegate-card-head,
+  .delegate-user-card > summary,
+  .delegate-compact-group > summary {
+    align-items: flex-start;
+  }
+
+  .delegate-card-head {
+    display: grid;
+  }
+
+  .delegate-card-head small {
+    text-align: left;
+  }
+
+  .delegate-user-card > summary b,
+  .delegate-compact-group > summary span {
+    white-space: normal;
+    text-align: right;
   }
 
   .delegate-card .inline-actions button {
@@ -7220,9 +7241,109 @@ label {
   align-items: start;
 }
 
+.delegate-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(180px, 0.75fr) minmax(160px, 0.65fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #dbe7ef;
+  border-radius: 10px;
+  background: #f8fbfd;
+}
+
+.delegate-filter-bar button {
+  min-height: 48px;
+  white-space: nowrap;
+}
+
+.delegate-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.delegate-summary-strip span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--field) 8%, #fff);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.delegate-summary-strip strong {
+  color: var(--field-dark);
+}
+
+.delegate-group-list {
+  display: grid;
+  gap: 10px;
+}
+
+.delegate-compact-group {
+  border: 1px solid #dbe7ef;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.delegate-compact-group > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  cursor: pointer;
+  list-style: none;
+  background: #f8fbfd;
+}
+
+.delegate-compact-group > summary::-webkit-details-marker,
+.delegate-user-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.delegate-compact-group > summary::after {
+  content: "+";
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--field) 10%, #fff);
+  color: var(--field-dark);
+  font-weight: 950;
+}
+
+.delegate-compact-group[open] > summary::after {
+  content: "-";
+}
+
+.delegate-compact-group > summary strong {
+  color: var(--field-dark);
+  overflow-wrap: anywhere;
+}
+
+.delegate-compact-group > summary span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .delegate-list {
   display: grid;
   gap: 10px;
+}
+
+.delegate-list.compact {
+  padding: 10px;
 }
 
 .delegate-card {
@@ -7232,6 +7353,22 @@ label {
   border: 1px solid #dbe7ef;
   border-radius: 10px;
   background: #f8fbfd;
+}
+
+.delegate-card.compact {
+  padding: 10px;
+  gap: 7px;
+}
+
+.delegate-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.delegate-card-head small {
+  text-align: right;
 }
 
 .delegate-card strong,
@@ -7306,6 +7443,30 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.delegate-user-card > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.delegate-user-card > summary span {
+  display: grid;
+  gap: 2px;
+}
+
+.delegate-user-card > summary b {
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lime) 12%, #fff);
+  color: var(--field-dark);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .team-portal-page {
@@ -7502,6 +7663,8 @@ label {
   .sheet-picker,
   .sheet-default-controls,
   .event-quick-panel,
+  .delegate-filter-bar,
+  .delegate-grid,
   .team-portal-roster-head,
   .team-portal-filters {
     grid-template-columns: 1fr;
@@ -7554,6 +7717,17 @@ label {
 
   .team-player-edit-form {
     grid-template-columns: 1fr;
+  }
+
+  .delegate-card-head,
+  .delegate-user-card > summary {
+    display: grid;
+    align-items: start;
+  }
+
+  .delegate-card-head small,
+  .delegate-user-card > summary b {
+    text-align: left;
   }
 
   .activation-summary,

@@ -562,7 +562,47 @@ function TeamDelegatesPanel({ authToken, league }) {
   const [busyAction, setBusyAction] = useState("");
   const [cardMessages, setCardMessages] = useState({});
   const [lastInvitation, setLastInvitation] = useState(null);
+  const [delegateSearch, setDelegateSearch] = useState("");
+  const [delegateCompetitionFilter, setDelegateCompetitionFilter] = useState("all");
+  const [delegateStatusFilter, setDelegateStatusFilter] = useState("all");
   const teams = useMemo(() => [...(league.teams || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.teams]);
+  const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
+  const filteredTeams = useMemo(() => {
+    const query = normalizeAdminSearchTerm(delegateSearch);
+    return teams.filter((team) => {
+      const competition = getCompetition(league, team.competitionId);
+      if (delegateCompetitionFilter !== "all" && (team.competitionId || getDefaultCompetitionId(league)) !== delegateCompetitionFilter) return false;
+      if (!query) return true;
+      const delegate = delegates.find((item) => item.teamId === team.id);
+      const searchable = normalizeAdminSearchTerm(`${team.name} ${competition?.name || ""} ${delegate?.userName || ""} ${delegate?.userEmail || ""} ${delegate?.userPhone || ""}`);
+      return searchable.includes(query);
+    });
+  }, [delegateCompetitionFilter, delegateSearch, delegates, league, teams]);
+  const filteredDelegates = useMemo(() => {
+    const query = normalizeAdminSearchTerm(delegateSearch);
+    return delegates.filter((delegate) => {
+      if (delegateCompetitionFilter !== "all" && (delegate.competitionId || getDefaultCompetitionId(league)) !== delegateCompetitionFilter) return false;
+      if (delegateStatusFilter !== "all" && delegate.status !== delegateStatusFilter) return false;
+      if (!query) return true;
+      const searchable = normalizeAdminSearchTerm(`${delegate.userName} ${delegate.userEmail} ${delegate.userPhone || ""} ${delegate.teamName} ${delegate.competitionName || ""}`);
+      return searchable.includes(query);
+    });
+  }, [delegateCompetitionFilter, delegateSearch, delegateStatusFilter, delegates, league]);
+  const teamsByCompetition = useMemo(
+    () => groupDelegateItemsByCompetition(filteredTeams, league, (team) => team.competitionId),
+    [filteredTeams, league]
+  );
+  const delegatesByCompetition = useMemo(
+    () => groupDelegateItemsByCompetition(filteredDelegates, league, (delegate) => delegate.competitionId),
+    [filteredDelegates, league]
+  );
+  const createTeamOptions = useMemo(
+    () => delegateCompetitionFilter === "all"
+      ? teams
+      : teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === delegateCompetitionFilter),
+    [delegateCompetitionFilter, league, teams]
+  );
+  const assignedTeamIds = useMemo(() => new Set(delegates.map((delegate) => delegate.teamId)), [delegates]);
 
   function setCardMessage(key, message, type = "ok") {
     setCardMessages((current) => ({ ...current, [key]: { message, type } }));
@@ -754,9 +794,17 @@ function TeamDelegatesPanel({ authToken, league }) {
 
       <form className="delegate-create-form" onSubmit={submitDelegate}>
         <h3>Crear delegado de equipo</h3>
+        <label>Torneo / categoria
+          <select value={delegateCompetitionFilter} onChange={(event) => setDelegateCompetitionFilter(event.target.value)}>
+            <option value="all">Todos los torneos</option>
+            {competitions.map((competition) => (
+              <option key={competition.id} value={competition.id}>{competition.name}</option>
+            ))}
+          </select>
+        </label>
         <label>Equipo
-          <select name="teamId" required disabled={!teams.length}>
-            {teams.map((team) => (
+          <select name="teamId" required disabled={!createTeamOptions.length}>
+            {createTeamOptions.map((team) => (
               <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Categoria"}</option>
             ))}
           </select>
@@ -764,7 +812,7 @@ function TeamDelegatesPanel({ authToken, league }) {
         <label>Nombre del delegado<input name="name" required placeholder="Nombre del responsable" /></label>
         <label>Telefono<input name="phone" required inputMode="tel" placeholder="354..." /></label>
         <label>Correo<input name="email" required type="email" placeholder="delegado@correo.com" /></label>
-        <button className="primary" type="submit" disabled={!teams.length || busyAction === "create-delegate"}>
+        <button className="primary" type="submit" disabled={!createTeamOptions.length || busyAction === "create-delegate"}>
           {busyAction === "create-delegate" ? "Creando invitacion..." : "Crear invitacion"}
         </button>
       </form>
@@ -781,87 +829,176 @@ function TeamDelegatesPanel({ authToken, league }) {
         </div>
       )}
 
+      <div className="delegate-filter-bar">
+        <label>Buscar equipo o delegado
+          <input
+            type="search"
+            value={delegateSearch}
+            onChange={(event) => setDelegateSearch(event.target.value)}
+            placeholder="Equipo, delegado, correo o telefono"
+          />
+        </label>
+        <label>Torneo / categoria
+          <select value={delegateCompetitionFilter} onChange={(event) => setDelegateCompetitionFilter(event.target.value)}>
+            <option value="all">Todos los torneos</option>
+            {competitions.map((competition) => (
+              <option key={competition.id} value={competition.id}>{competition.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>Estado delegado
+          <select value={delegateStatusFilter} onChange={(event) => setDelegateStatusFilter(event.target.value)}>
+            <option value="all">Todos</option>
+            <option value="pending_activation">Pendiente</option>
+            <option value="active">Activo</option>
+            <option value="disabled">Desactivado</option>
+            <option value="suspended">Suspendido</option>
+          </select>
+        </label>
+        <button type="button" onClick={() => {
+          setDelegateSearch("");
+          setDelegateCompetitionFilter("all");
+          setDelegateStatusFilter("all");
+        }}>
+          Limpiar filtros
+        </button>
+      </div>
+      <div className="delegate-summary-strip">
+        <span><strong>{delegates.length}</strong> delegados</span>
+        <span><strong>{assignedTeamIds.size}</strong> equipos asignados</span>
+        <span><strong>{Math.max(teams.length - assignedTeamIds.size, 0)}</strong> equipos sin delegado</span>
+      </div>
+
       <div className="delegate-grid">
         <div>
           <h3>Permisos por equipo</h3>
-          <div className="delegate-list">
-            {teams.map((team) => {
-              const permission = permissionForTeam(team.id);
-              const actionKey = `permission-${team.id}`;
-              const cardMessage = cardMessages[actionKey];
-              return (
-                <form className="delegate-card" key={team.id} onSubmit={(event) => savePermission(event, team)}>
-                  <strong>{team.name}</strong>
-                  <small>{getCompetition(league, team.competitionId)?.name || "Categoria"}</small>
-                  <label className="checkbox-field compact-checkbox">
-                    <input name="registrationEnabled" type="checkbox" defaultChecked={permission.registrationEnabled === true} />
-                    Registro abierto
-                  </label>
-                  <label>Abierto hasta
-                    <input name="enabledUntil" type="datetime-local" defaultValue={permission.enabledUntil ? permission.enabledUntil.slice(0, 16) : ""} />
-                  </label>
-                  <label>Nota
-                    <input name="notes" defaultValue={permission.notes || ""} placeholder="Ej. Cierre viernes 8 pm" />
-                  </label>
-                  {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
-                  <button type="submit" disabled={busyAction === actionKey}>
-                    {busyAction === actionKey ? "Guardando..." : "Guardar permiso"}
-                  </button>
-                </form>
-              );
-            })}
+          <div className="delegate-group-list">
+            {teamsByCompetition.map((group) => (
+              <details className="delegate-compact-group" key={group.id} open={delegateCompetitionFilter !== "all" || Boolean(delegateSearch)}>
+                <summary>
+                  <strong>{group.name}</strong>
+                  <span>{group.items.length} equipo(s)</span>
+                </summary>
+                <div className="delegate-list compact">
+                  {group.items.map((team) => {
+                    const permission = permissionForTeam(team.id);
+                    const actionKey = `permission-${team.id}`;
+                    const cardMessage = cardMessages[actionKey];
+                    return (
+                      <form className="delegate-card compact" key={team.id} onSubmit={(event) => savePermission(event, team)}>
+                        <div className="delegate-card-head">
+                          <strong>{team.name}</strong>
+                          <small>{permission.userName ? `Delegado: ${permission.userName}` : "Sin delegado asignado"}</small>
+                        </div>
+                        <label className="checkbox-field compact-checkbox">
+                          <input name="registrationEnabled" type="checkbox" defaultChecked={permission.registrationEnabled === true} />
+                          Registro abierto
+                        </label>
+                        <label>Abierto hasta
+                          <input name="enabledUntil" type="datetime-local" defaultValue={permission.enabledUntil ? permission.enabledUntil.slice(0, 16) : ""} />
+                        </label>
+                        <label>Nota
+                          <input name="notes" defaultValue={permission.notes || ""} placeholder="Ej. Cierre viernes 8 pm" />
+                        </label>
+                        {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
+                        <button type="submit" disabled={busyAction === actionKey}>
+                          {busyAction === actionKey ? "Guardando..." : "Guardar permiso"}
+                        </button>
+                      </form>
+                    );
+                  })}
+                </div>
+              </details>
+            ))}
             {!teams.length && <p className="empty">Primero registra equipos para poder asignar delegados.</p>}
+            {teams.length > 0 && !filteredTeams.length && <p className="empty">No hay equipos que coincidan con los filtros.</p>}
           </div>
         </div>
 
         <div>
           <h3>Delegados asignados</h3>
-          <div className="delegate-list">
-            {loading ? <p className="empty">Cargando delegados...</p> : delegates.map((delegate) => {
-              const cardMessage = cardMessages[delegate.id];
-              const isActivating = busyAction === `active-${delegate.id}`;
-              const isDisabling = busyAction === `disabled-${delegate.id}`;
-              const isSuspending = busyAction === `suspended-${delegate.id}`;
-              const isRemoving = busyAction === `remove-${delegate.id}`;
-              const isDeleting = busyAction === `delete-${delegate.id}`;
-              const isInviting = busyAction === `invite-${delegate.id}`;
-              const isBusyDelegate = isActivating || isDisabling || isSuspending || isRemoving || isDeleting || isInviting;
-              return (
-              <article className="delegate-card" key={delegate.id}>
-                <strong>{delegate.userName}</strong>
-                <span>{delegate.userEmail}</span>
-                {delegate.userPhone && <span>{delegate.userPhone}</span>}
-                <small>{delegate.teamName} | {delegate.registrationEnabled ? "Registro abierto" : "Registro cerrado"} | Usuario {getDelegateStatusLabel(delegate.status)}</small>
-                {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
-                <div className="inline-actions">
-                  <button type="button" disabled={delegate.status === "active" || delegate.status === "pending_activation" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "active")}>
-                    {isActivating ? "Activando..." : "Activar usuario"}
-                  </button>
-                  <button type="button" disabled={isBusyDelegate} onClick={() => regenerateInvitation(delegate)}>
-                    {isInviting ? "Generando..." : delegate.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
-                  </button>
-                  <button className="danger" type="button" disabled={delegate.status === "disabled" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "disabled")}>
-                    {isDisabling ? "Desactivando..." : "Desactivar usuario"}
-                  </button>
-                  <button className="danger" type="button" disabled={delegate.status === "suspended" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "suspended")}>
-                    {isSuspending ? "Suspendiendo..." : "Suspender usuario"}
-                  </button>
-                  <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => removeDelegate(delegate)}>
-                    {isRemoving ? "Quitando..." : "Quitar acceso al equipo"}
-                  </button>
-                  <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => deleteDelegateUser(delegate)}>
-                    {isDeleting ? "Eliminando..." : "Eliminar usuario definitivo"}
-                  </button>
+          <div className="delegate-group-list">
+            {loading ? <p className="empty">Cargando delegados...</p> : delegatesByCompetition.map((group) => (
+              <details className="delegate-compact-group" key={group.id} open={delegateCompetitionFilter !== "all" || Boolean(delegateSearch) || delegateStatusFilter !== "all"}>
+                <summary>
+                  <strong>{group.name}</strong>
+                  <span>{group.items.length} delegado(s)</span>
+                </summary>
+                <div className="delegate-list compact">
+                  {group.items.map((delegate) => {
+                    const cardMessage = cardMessages[delegate.id];
+                    const isActivating = busyAction === `active-${delegate.id}`;
+                    const isDisabling = busyAction === `disabled-${delegate.id}`;
+                    const isSuspending = busyAction === `suspended-${delegate.id}`;
+                    const isRemoving = busyAction === `remove-${delegate.id}`;
+                    const isDeleting = busyAction === `delete-${delegate.id}`;
+                    const isInviting = busyAction === `invite-${delegate.id}`;
+                    const isBusyDelegate = isActivating || isDisabling || isSuspending || isRemoving || isDeleting || isInviting;
+                    return (
+                    <details className="delegate-card compact delegate-user-card" key={delegate.id}>
+                      <summary>
+                        <span>
+                          <strong>{delegate.userName}</strong>
+                          <small>{delegate.teamName} | Usuario {getDelegateStatusLabel(delegate.status)}</small>
+                        </span>
+                        <b>{delegate.registrationEnabled ? "Registro abierto" : "Registro cerrado"}</b>
+                      </summary>
+                      <span>{delegate.userEmail}</span>
+                      {delegate.userPhone && <span>{delegate.userPhone}</span>}
+                      <small>{delegate.competitionName || group.name}</small>
+                      {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
+                      <div className="inline-actions">
+                        <button type="button" disabled={delegate.status === "active" || delegate.status === "pending_activation" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "active")}>
+                          {isActivating ? "Activando..." : "Activar usuario"}
+                        </button>
+                        <button type="button" disabled={isBusyDelegate} onClick={() => regenerateInvitation(delegate)}>
+                          {isInviting ? "Generando..." : delegate.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
+                        </button>
+                        <button className="danger" type="button" disabled={delegate.status === "disabled" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "disabled")}>
+                          {isDisabling ? "Desactivando..." : "Desactivar usuario"}
+                        </button>
+                        <button className="danger" type="button" disabled={delegate.status === "suspended" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "suspended")}>
+                          {isSuspending ? "Suspendiendo..." : "Suspender usuario"}
+                        </button>
+                        <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => removeDelegate(delegate)}>
+                          {isRemoving ? "Quitando..." : "Quitar acceso al equipo"}
+                        </button>
+                        <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => deleteDelegateUser(delegate)}>
+                          {isDeleting ? "Eliminando..." : "Eliminar usuario definitivo"}
+                        </button>
+                      </div>
+                    </details>
+                    );
+                  })}
                 </div>
-              </article>
-              );
-            })}
+              </details>
+            ))}
             {!loading && !delegates.length && <p className="empty">Aun no hay delegados asignados.</p>}
+            {!loading && delegates.length > 0 && !filteredDelegates.length && <p className="empty">No hay delegados que coincidan con los filtros.</p>}
           </div>
         </div>
       </div>
     </section>
   );
+}
+
+function groupDelegateItemsByCompetition(items, league, getCompetitionId) {
+  const fallbackCompetition = getDefaultCompetitionId(league);
+  const groups = new Map();
+  for (const item of items) {
+    const competitionId = getCompetitionId(item) || fallbackCompetition;
+    const competition = getCompetition(league, competitionId);
+    const key = competitionId || "sin-categoria";
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: key,
+        name: competition?.name || "Sin categoria",
+        items: []
+      });
+    }
+    groups.get(key).items.push(item);
+  }
+  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliation, onMergeDuplicatePlayer, onUpdateTeamAffiliationPlayerNumber }) {
