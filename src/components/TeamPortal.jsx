@@ -8,6 +8,15 @@ import { getPlayerPhotoInitials } from "../lib/playerPhotoProcessing.js";
 
 const PLAYER_POSITION_OPTIONS = ["Arquero", "Defensor", "Mediocampista", "Delantero"];
 
+function getPlayerPositionOptionValue(position) {
+  const normalized = String(position || "").toLocaleUpperCase("es-MX");
+  if (normalized.includes("ARQUERO") || normalized.includes("PORTERO")) return "Arquero";
+  if (normalized.includes("DEFENSOR") || normalized.includes("DEFENSA")) return "Defensor";
+  if (normalized.includes("MEDIOCAMPISTA") || normalized.includes("MEDIO")) return "Mediocampista";
+  if (normalized.includes("DELANTERO")) return "Delantero";
+  return "Delantero";
+}
+
 export function TeamPortal({ authToken, currentUser }) {
   const [context, setContext] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -278,7 +287,7 @@ export function TeamPortal({ authToken, currentUser }) {
                         <input name="number" type="number" min="0" max="9999" defaultValue={player.number || ""} />
                       </label>
                       <label>Posicion
-                        <select name="position" defaultValue={player.position || "Delantero"}>
+                        <select name="position" defaultValue={getPlayerPositionOptionValue(player.position)}>
                           {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
                         </select>
                       </label>

@@ -947,7 +947,7 @@ function TeamDelegatesPanel({ authToken, league }) {
                       {delegate.userPhone && <span>{delegate.userPhone}</span>}
                       <small>{delegate.competitionName || group.name}</small>
                       {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
-                      <div className="inline-actions">
+                      <div className="inline-actions delegate-action-grid">
                         <button type="button" disabled={delegate.status === "active" || delegate.status === "pending_activation" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "active")}>
                           {isActivating ? "Activando..." : "Activar usuario"}
                         </button>

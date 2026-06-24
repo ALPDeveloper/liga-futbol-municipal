@@ -7445,6 +7445,23 @@ label {
   gap: 8px;
 }
 
+.delegate-card .delegate-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.delegate-card .delegate-action-grid button {
+  width: 100%;
+  flex: none;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.05;
+}
+
 .delegate-user-card > summary {
   display: flex;
   justify-content: space-between;
@@ -7728,6 +7745,10 @@ label {
   .delegate-card-head small,
   .delegate-user-card > summary b {
     text-align: left;
+  }
+
+  .delegate-card .delegate-action-grid {
+    grid-template-columns: 1fr;
   }
 
   .activation-summary,
