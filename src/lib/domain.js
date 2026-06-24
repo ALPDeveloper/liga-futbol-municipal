@@ -26,6 +26,8 @@ export function sanitizeImageUrl(value) {
     return ALLOWED_IMAGE_DATA_URL_PATTERN.test(text) ? text.replace(/\s+/g, "") : "";
   }
 
+  if (text.startsWith("/uploads/")) return text;
+
   try {
     const url = new URL(text);
     return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";

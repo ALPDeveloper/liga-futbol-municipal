@@ -3,6 +3,7 @@ dist/
 /data/
 /backups/
 /uploads/
+/uploads-local-test*/
 .env
 .env.local
 .DS_Store

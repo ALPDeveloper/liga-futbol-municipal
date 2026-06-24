@@ -201,12 +201,43 @@ CREATE TABLE IF NOT EXISTS users (
   league_id TEXT REFERENCES leagues(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
+  phone TEXT,
   role TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   password_hash TEXT,
   failed_login_count INTEGER NOT NULL DEFAULT 0,
   locked_until TEXT,
   last_failed_login_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS team_delegate_activation_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  assignment_id TEXT NOT NULL REFERENCES team_user_assignments(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS team_user_assignments (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'delegate',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS team_roster_permissions (
+  team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  registration_enabled INTEGER NOT NULL DEFAULT 0,
+  enabled_until TEXT,
+  notes TEXT,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS memberships (

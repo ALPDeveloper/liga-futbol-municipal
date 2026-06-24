@@ -15,7 +15,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
       <div className="auth-panel signed-in">
         <span>
           <strong>{currentUser.name}</strong>
-          <small>{currentUser.role === "super_admin" ? "Super admin" : "Admin de liga"}</small>
+          <small>{currentUser.role === "super_admin" ? "Super admin" : currentUser.role === "team_delegate" ? "Delegado de equipo" : "Admin de liga"}</small>
         </span>
         <button type="button" onClick={onLogout}>Salir</button>
       </div>

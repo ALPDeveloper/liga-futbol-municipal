@@ -4,7 +4,9 @@ import { fetchAuditLogs } from "../lib/auditApi.js";
 import { MAX_IMAGE_DATA_URL_LENGTH, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, scopeLeagueToCompetition } from "../lib/domain.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
+import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
 import { createUser, deleteUser, disableUser, fetchUsers, updateUser } from "../lib/userApi.js";
+import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamDelegateInvitation, updateTeamDelegate, updateTeamRosterPermission } from "../lib/teamDelegateApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
 import { updateMatchSheetEventItem } from "../lib/matchSheet.js";
 
@@ -228,6 +230,7 @@ function LeagueAdmin({
     { id: "capture", label: "Captura" },
     { id: "tournaments", label: "Torneos" },
     { id: "squads", label: "Plantillas" },
+    { id: "delegates", label: "Delegados" },
     { id: "venues", label: "Canchas" },
     { id: "announcements", label: "Avisos" },
     { id: "lists", label: "Listados" },
@@ -297,6 +300,13 @@ function LeagueAdmin({
       )}
 
       {activeSection === "squads" && <SquadsPanel league={league} />}
+
+      {activeSection === "delegates" && (
+        <TeamDelegatesPanel
+          authToken={authToken}
+          league={league}
+        />
+      )}
 
       {activeSection === "venues" && (
         <VenuesPanel
@@ -540,6 +550,316 @@ function SquadsPanel({ league }) {
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+function TeamDelegatesPanel({ authToken, league }) {
+  const [delegates, setDelegates] = useState([]);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busyAction, setBusyAction] = useState("");
+  const [cardMessages, setCardMessages] = useState({});
+  const [lastInvitation, setLastInvitation] = useState(null);
+  const teams = useMemo(() => [...(league.teams || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.teams]);
+
+  function setCardMessage(key, message, type = "ok") {
+    setCardMessages((current) => ({ ...current, [key]: { message, type } }));
+  }
+
+  async function reload() {
+    setLoading(true);
+    try {
+      setDelegates(await fetchTeamDelegates(authToken, league.id));
+      setError("");
+    } catch (loadError) {
+      setError(loadError.message || "No se pudieron cargar los delegados.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    reload();
+  }, [authToken, league.id]);
+
+  async function submitDelegate(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
+    if (!window.confirm("¿Crear este usuario delegado y asignarlo al equipo seleccionado?")) return;
+    try {
+      setBusyAction("create-delegate");
+      const response = await createTeamDelegate(authToken, { ...payload, leagueId: league.id });
+      setDelegates(response.delegates || []);
+      setLastInvitation(response.invitation || null);
+      setNotice(`Invitacion creada para ${payload.name}. Copia el mensaje y envialo por WhatsApp.`);
+      setError("");
+      form.reset();
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo crear el delegado.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function regenerateInvitation(delegate) {
+    const actionKey = `invite-${delegate.id}`;
+    setBusyAction(actionKey);
+    setCardMessage(delegate.id, "Generando nueva invitacion...", "working");
+    try {
+      const response = await resendTeamDelegateInvitation(authToken, delegate.id);
+      setDelegates(response.delegates || []);
+      setLastInvitation(response.invitation || null);
+      const message = "Invitacion regenerada. Copia el nuevo mensaje para enviarlo.";
+      setNotice(message);
+      setCardMessage(delegate.id, message, "ok");
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo regenerar la invitacion.");
+      setCardMessage(delegate.id, saveError.message || "No se pudo regenerar la invitacion.", "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function savePermission(event, team) {
+    event.preventDefault();
+    const payload = getFormPayload(event.currentTarget);
+    const actionKey = `permission-${team.id}`;
+    setBusyAction(actionKey);
+    setCardMessage(actionKey, "Guardando permiso...", "working");
+    try {
+      const nextDelegates = await updateTeamRosterPermission(authToken, team.id, {
+        leagueId: league.id,
+        registrationEnabled: payload.registrationEnabled === "on",
+        enabledUntil: payload.enabledUntil,
+        notes: payload.notes
+      });
+      setDelegates(nextDelegates);
+      const stateLabel = payload.registrationEnabled === "on" ? "abierto" : "cerrado";
+      const message = `Permiso guardado. Registro ${stateLabel} para ${team.name}.`;
+      setNotice(message);
+      setCardMessage(actionKey, message, "ok");
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo actualizar el permiso.");
+      setCardMessage(actionKey, saveError.message || "No se pudo actualizar el permiso.", "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function changeDelegateStatus(delegate, status) {
+    const actionKey = `${status}-${delegate.id}`;
+    setBusyAction(actionKey);
+    setCardMessage(delegate.id, status === "active" ? "Activando delegado..." : status === "suspended" ? "Suspendiendo delegado..." : "Desactivando delegado...", "working");
+    try {
+      const nextDelegates = await updateTeamDelegate(authToken, delegate.id, { status });
+      setDelegates(nextDelegates);
+      const message = status === "active"
+        ? `${delegate.userName} activado correctamente. Ya puede iniciar sesion si tiene acceso vigente.`
+        : status === "suspended"
+        ? `${delegate.userName} suspendido. No podra iniciar sesion hasta reactivarlo.`
+        : `${delegate.userName} desactivado. No podra iniciar sesion hasta reactivarlo.`;
+      setNotice(message);
+      setCardMessage(delegate.id, message, "ok");
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo actualizar el delegado.");
+      setCardMessage(delegate.id, saveError.message || "No se pudo actualizar el delegado.", "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function removeDelegate(delegate) {
+    const confirmed = window.confirm(
+      `¿Quitar a ${delegate.userName} como delegado de ${delegate.teamName}?\n\n` +
+      "Se elimina solo su asignacion a este equipo. Si no tiene otro equipo asignado, tambien se deshabilita su usuario para que no pueda iniciar sesion."
+    );
+    if (!confirmed) return;
+
+    const actionKey = `remove-${delegate.id}`;
+    setBusyAction(actionKey);
+    setCardMessage(delegate.id, "Quitando acceso del equipo...", "working");
+    try {
+      const response = await deleteTeamDelegate(authToken, delegate.id, { disableUser: true });
+      setDelegates(response.delegates || []);
+      const message = response.userDisabled
+        ? "Delegado quitado y usuario deshabilitado correctamente."
+        : "Delegado quitado del equipo correctamente.";
+      setNotice(message);
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo quitar el delegado.");
+      setCardMessage(delegate.id, saveError.message || "No se pudo quitar el delegado.", "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function deleteDelegateUser(delegate) {
+    const typedEmail = window.prompt(
+      `Eliminar definitivamente el usuario de equipo de ${delegate.userName}.\n\n` +
+      `Esta accion borra la cuenta ${delegate.userEmail} y le quita el acceso a ${delegate.teamName}. No elimina jugadores ni datos del equipo.\n\n` +
+      "Para confirmar, escribe el correo completo del usuario:"
+    );
+    if (typedEmail === null) return;
+    if (typedEmail.trim().toLowerCase() !== String(delegate.userEmail || "").toLowerCase()) {
+      setNotice("");
+      setError("No se elimino el usuario. El correo escrito no coincide.");
+      setCardMessage(delegate.id, "No se elimino el usuario. El correo escrito no coincide.", "error");
+      return;
+    }
+
+    const actionKey = `delete-${delegate.id}`;
+    setBusyAction(actionKey);
+    setCardMessage(delegate.id, "Eliminando usuario de equipo...", "working");
+    try {
+      const response = await deleteTeamDelegate(authToken, delegate.id, { deleteUser: true });
+      setDelegates(response.delegates || []);
+      const message = response.userDeleted
+        ? "Usuario de equipo eliminado definitivamente."
+        : "Acceso del delegado eliminado.";
+      setNotice(message);
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo eliminar definitivamente el usuario.");
+      setCardMessage(delegate.id, saveError.message || "No se pudo eliminar definitivamente el usuario.", "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  function permissionForTeam(teamId) {
+    return delegates.find((delegate) => delegate.teamId === teamId) || {};
+  }
+
+  return (
+    <section className="panel">
+      <SectionHeading eyebrow="Equipos" title="Delegados y registro de plantillas" />
+      <p className="helper-text">
+        Crea un usuario por equipo y controla cuando puede registrar jugadores. Los delegados usan la ruta /equipo y no tienen acceso al panel administrativo completo.
+      </p>
+      {notice && <p className="auth-ok">{notice}</p>}
+      {error && <p className="auth-error">{error}</p>}
+
+      <form className="delegate-create-form" onSubmit={submitDelegate}>
+        <h3>Crear delegado de equipo</h3>
+        <label>Equipo
+          <select name="teamId" required disabled={!teams.length}>
+            {teams.map((team) => (
+              <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Categoria"}</option>
+            ))}
+          </select>
+        </label>
+        <label>Nombre del delegado<input name="name" required placeholder="Nombre del responsable" /></label>
+        <label>Telefono<input name="phone" required inputMode="tel" placeholder="354..." /></label>
+        <label>Correo<input name="email" required type="email" placeholder="delegado@correo.com" /></label>
+        <button className="primary" type="submit" disabled={!teams.length || busyAction === "create-delegate"}>
+          {busyAction === "create-delegate" ? "Creando invitacion..." : "Crear invitacion"}
+        </button>
+      </form>
+
+      {lastInvitation && (
+        <div className="delegate-invitation-box">
+          <strong>Mensaje listo para WhatsApp</strong>
+          <textarea readOnly value={lastInvitation.whatsappMessage || ""} />
+          <div className="inline-actions">
+            <button type="button" onClick={() => navigator.clipboard?.writeText(lastInvitation.whatsappMessage || "")}>Copiar mensaje</button>
+            <a href={`https://wa.me/?text=${encodeURIComponent(lastInvitation.whatsappMessage || "")}`} rel="noreferrer" target="_blank">Abrir WhatsApp</a>
+          </div>
+          <small>Expira: {lastInvitation.expiresAt ? new Date(lastInvitation.expiresAt).toLocaleString("es-MX") : "segun configuracion"}</small>
+        </div>
+      )}
+
+      <div className="delegate-grid">
+        <div>
+          <h3>Permisos por equipo</h3>
+          <div className="delegate-list">
+            {teams.map((team) => {
+              const permission = permissionForTeam(team.id);
+              const actionKey = `permission-${team.id}`;
+              const cardMessage = cardMessages[actionKey];
+              return (
+                <form className="delegate-card" key={team.id} onSubmit={(event) => savePermission(event, team)}>
+                  <strong>{team.name}</strong>
+                  <small>{getCompetition(league, team.competitionId)?.name || "Categoria"}</small>
+                  <label className="checkbox-field compact-checkbox">
+                    <input name="registrationEnabled" type="checkbox" defaultChecked={permission.registrationEnabled === true} />
+                    Registro abierto
+                  </label>
+                  <label>Abierto hasta
+                    <input name="enabledUntil" type="datetime-local" defaultValue={permission.enabledUntil ? permission.enabledUntil.slice(0, 16) : ""} />
+                  </label>
+                  <label>Nota
+                    <input name="notes" defaultValue={permission.notes || ""} placeholder="Ej. Cierre viernes 8 pm" />
+                  </label>
+                  {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
+                  <button type="submit" disabled={busyAction === actionKey}>
+                    {busyAction === actionKey ? "Guardando..." : "Guardar permiso"}
+                  </button>
+                </form>
+              );
+            })}
+            {!teams.length && <p className="empty">Primero registra equipos para poder asignar delegados.</p>}
+          </div>
+        </div>
+
+        <div>
+          <h3>Delegados asignados</h3>
+          <div className="delegate-list">
+            {loading ? <p className="empty">Cargando delegados...</p> : delegates.map((delegate) => {
+              const cardMessage = cardMessages[delegate.id];
+              const isActivating = busyAction === `active-${delegate.id}`;
+              const isDisabling = busyAction === `disabled-${delegate.id}`;
+              const isSuspending = busyAction === `suspended-${delegate.id}`;
+              const isRemoving = busyAction === `remove-${delegate.id}`;
+              const isDeleting = busyAction === `delete-${delegate.id}`;
+              const isInviting = busyAction === `invite-${delegate.id}`;
+              const isBusyDelegate = isActivating || isDisabling || isSuspending || isRemoving || isDeleting || isInviting;
+              return (
+              <article className="delegate-card" key={delegate.id}>
+                <strong>{delegate.userName}</strong>
+                <span>{delegate.userEmail}</span>
+                {delegate.userPhone && <span>{delegate.userPhone}</span>}
+                <small>{delegate.teamName} | {delegate.registrationEnabled ? "Registro abierto" : "Registro cerrado"} | Usuario {getDelegateStatusLabel(delegate.status)}</small>
+                {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
+                <div className="inline-actions">
+                  <button type="button" disabled={delegate.status === "active" || delegate.status === "pending_activation" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "active")}>
+                    {isActivating ? "Activando..." : "Activar usuario"}
+                  </button>
+                  <button type="button" disabled={isBusyDelegate} onClick={() => regenerateInvitation(delegate)}>
+                    {isInviting ? "Generando..." : delegate.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
+                  </button>
+                  <button className="danger" type="button" disabled={delegate.status === "disabled" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "disabled")}>
+                    {isDisabling ? "Desactivando..." : "Desactivar usuario"}
+                  </button>
+                  <button className="danger" type="button" disabled={delegate.status === "suspended" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "suspended")}>
+                    {isSuspending ? "Suspendiendo..." : "Suspender usuario"}
+                  </button>
+                  <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => removeDelegate(delegate)}>
+                    {isRemoving ? "Quitando..." : "Quitar acceso al equipo"}
+                  </button>
+                  <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => deleteDelegateUser(delegate)}>
+                    {isDeleting ? "Eliminando..." : "Eliminar usuario definitivo"}
+                  </button>
+                </div>
+              </article>
+              );
+            })}
+            {!loading && !delegates.length && <p className="empty">Aun no hay delegados asignados.</p>}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -957,6 +1277,7 @@ function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, o
   const [captureNotice, setCaptureNotice] = useState("");
   const [captureError, setCaptureError] = useState("");
   const [selectedPlayerTeamId, setSelectedPlayerTeamId] = useState("");
+  const [playerPhotoResetKey, setPlayerPhotoResetKey] = useState(0);
   const modes = [
     { id: "team", label: "Equipo" },
     { id: "player", label: "Jugador" },
@@ -1014,12 +1335,13 @@ function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, o
     setCaptureError("");
     setCaptureNotice("Subiendo foto y guardando jugador...");
     try {
-      const payload = await getPlayerPayload(form, "", { authToken, leagueId: league.id, scope: "players" });
+      const payload = await getPlayerPayload(form, "", { authToken, leagueId: league.id, scope: "player-photos" });
       if (!window.confirm("¿Confirmas registrar este jugador en el equipo seleccionado?")) return;
       const result = onAddPlayer(payload);
       if (result === false) return;
       setCaptureNotice("Jugador registrado correctamente.");
       form.reset();
+      setPlayerPhotoResetKey((value) => value + 1);
       if (form.elements.photoFile) form.elements.photoFile.value = "";
     } catch (error) {
       setCaptureNotice("");
@@ -1114,11 +1436,9 @@ function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, o
                 <label>Nombre<input name="name" required pattern=".*\S+\s+\S+.*" placeholder="NOMBRE Y APELLIDOS" title="Registra nombre(s) y apellido(s)" /></label>
                 <label>Numero<input name="number" type="number" min="0" max="9999" placeholder="10" /></label>
                 <label>Posicion<PlayerPositionSelect name="position" /></label>
-                <label>Foto del jugador<input name="photoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label>
-                <label className="checkbox-field compact-checkbox">
-                  <input name="photoAuthorized" type="checkbox" />
-                  Foto autorizada
-                </label>
+                <div className="wide-field">
+                  <PlayerPhotoUploader key={playerPhotoResetKey} />
+                </div>
               </div>
               <button className="primary" type="submit" disabled={!activeCompetitionLeague.teams.length}>Agregar jugador</button>
             </form>
@@ -1488,7 +1808,7 @@ function ManagementBoard({
   async function handlePlayerSave(player, form) {
     if (!window.confirm("¿Guardar cambios de este jugador?")) return;
     try {
-      const payload = await getPlayerPayload(form, player.photoUrl || "", { authToken, leagueId: league.id, scope: "players" });
+      const payload = await getPlayerPayload(form, player.photoUrl || "", { authToken, leagueId: league.id, scope: "player-photos" });
       const result = onUpdatePlayer(player.id, payload);
       if (result === false) return;
       setListNotice("Datos del jugador guardados correctamente.");
@@ -1639,15 +1959,12 @@ function ManagementBoard({
                       <input name="name" defaultValue={player.name} aria-label={`Jugador ${player.name}`} required pattern=".*\S+\s+\S+.*" title="Registra nombre(s) y apellido(s)" />
                       <input name="number" defaultValue={player.number} aria-label={`Numero de ${player.name}`} type="number" min="0" max="9999" />
                       <PlayerPositionSelect name="position" defaultValue={getPlayerPositionOptionValue(player.position)} ariaLabel={`Posicion de ${player.name}`} />
-                      <input name="photoFile" aria-label={`Foto de ${player.name}`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
-                      <label className="checkbox-field compact-checkbox">
-                        <input name="photoAuthorized" type="checkbox" defaultChecked={player.photoAuthorized === true} />
-                        Foto autorizada
-                      </label>
-                      <label className="checkbox-field compact-checkbox">
-                        <input name="removePhoto" type="checkbox" />
-                        Quitar foto
-                      </label>
+                      <PlayerPhotoUploader
+                        compact
+                        defaultAuthorized={player.photoAuthorized === true}
+                        existingPhotoUrl={player.photoUrl || ""}
+                        playerName={player.name}
+                      />
                       <button className="primary" type="submit">Guardar</button>
                       <button className="danger" type="button" onClick={() => confirmDelete(`al jugador ${player.name}`, () => onDeletePlayer(player.id), "Jugador eliminado correctamente.")}>Eliminar</button>
                     </form>
@@ -1923,7 +2240,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       playerId: event.playerId,
       minute: event.minute || "",
       suspensionMatches: event.suspensionMatches || 1,
-      reason: event.reason || ""
+      reason: event.reason || "",
+      playerQuery: ""
     })));
     setValidationMessage("");
     setSheetNotice("");
@@ -1945,6 +2263,21 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       : getPlayersForTeam(teamId);
   }
 
+  function getEventPlayersForDisplay(eventItem, playerTeamId) {
+    const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
+    const eventPlayers = getPlayersForEvent(eventItem.type, eventTeamId);
+    const query = normalizeAdminSearchTerm(eventItem.playerQuery);
+    if (!query) return eventPlayers;
+
+    const filteredPlayers = eventPlayers.filter((player) => (
+      normalizeAdminSearchTerm(`#${getPlayerNumberForTeam(league, player.id, playerTeamId) || ""} ${player.name} ${getTeam(league, player.teamId)?.name || ""}`).includes(query)
+    ));
+    if (!eventItem.playerId || filteredPlayers.some((player) => player.id === eventItem.playerId)) return filteredPlayers;
+
+    const selectedPlayer = eventPlayers.find((player) => player.id === eventItem.playerId);
+    return selectedPlayer ? [selectedPlayer, ...filteredPlayers] : filteredPlayers;
+  }
+
   function addEvent(type, teamId = selectedMatch?.homeTeamId) {
     const players = getPlayersForEvent(type, teamId);
     setEvents((current) => [
@@ -1957,7 +2290,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         playerId: players[0]?.id || "",
         minute: "",
         suspensionMatches: type === "red" ? Number(league.rules?.defaultRedSuspensionMatches || 1) : 0,
-        reason: ""
+        reason: "",
+        playerQuery: ""
       }
     ]);
   }
@@ -1979,7 +2313,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       playerId: players[0]?.id || "",
       minute: "",
       suspensionMatches: 0,
-      reason: ""
+      reason: "",
+      playerQuery: ""
     }));
   }
 
@@ -2030,9 +2365,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     setDefaultWinner(winner);
     setHomeGoals(winner === "home" ? score : "0");
     setAwayGoals(winner === "away" ? score : "0");
-    setEvents([]);
     setValidationMessage("");
-    setSheetNotice(`Marcador por default ${score}-0 aplicado para ${winner === "home" ? "local" : "visitante"}.`);
+    setSheetNotice(`Marcador por default ${score}-0 aplicado para ${winner === "home" ? "local" : "visitante"}. Puedes conservar o capturar eventos reales para estadisticas de jugadores.`);
   }
 
   function changeDefaultWinner(winner) {
@@ -2068,6 +2402,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   const isDefaultSheet = sheetMode !== "played";
   const isEditingSavedSheet = selectedMatch.status === "finished" || selectedMatch.status === "walkover";
   const hasMissingGoalEvents = homeGoalEvents < expectedHomeGoals || awayGoalEvents < expectedAwayGoals;
+  const homeTeam = getTeam(league, selectedMatch.homeTeamId);
+  const awayTeam = getTeam(league, selectedMatch.awayTeamId);
 
   function validateMatchSheet() {
     if (!selectedMatch) return "Selecciona un partido para capturar el acta.";
@@ -2079,28 +2415,29 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       const maxGoals = Math.max(expectedHomeGoals, expectedAwayGoals);
       const minGoals = Math.min(expectedHomeGoals, expectedAwayGoals);
       if (![3, 5].includes(maxGoals) || minGoals !== 0) return "El default solo puede guardarse como 3-0 o 5-0.";
-      return "";
     }
-    const canAssignHomeGoals = getPlayersForTeam(selectedMatch.homeTeamId).length || getPlayersForTeam(selectedMatch.awayTeamId).length;
-    const canAssignAwayGoals = getPlayersForTeam(selectedMatch.awayTeamId).length || getPlayersForTeam(selectedMatch.homeTeamId).length;
-    if ((expectedHomeGoals > 0 && !canAssignHomeGoals) || (expectedAwayGoals > 0 && !canAssignAwayGoals)) {
-      return "Para guardar goles o autogoles, el partido debe tener jugadores registrados.";
-    }
+    if (!isDefaultSheet) {
+      const canAssignHomeGoals = getPlayersForTeam(selectedMatch.homeTeamId).length || getPlayersForTeam(selectedMatch.awayTeamId).length;
+      const canAssignAwayGoals = getPlayersForTeam(selectedMatch.awayTeamId).length || getPlayersForTeam(selectedMatch.homeTeamId).length;
+      if ((expectedHomeGoals > 0 && !canAssignHomeGoals) || (expectedAwayGoals > 0 && !canAssignAwayGoals)) {
+        return "Para guardar goles o autogoles, el partido debe tener jugadores registrados.";
+      }
 
-    if (expectedHomeGoals > 0 && homeGoalEvents !== expectedHomeGoals) {
-      return `Revisa goleadores del equipo local: marcador ${expectedHomeGoals}, capturados ${homeGoalEvents}.`;
-    }
+      if (expectedHomeGoals > 0 && homeGoalEvents !== expectedHomeGoals) {
+        return `Revisa goleadores del equipo local: marcador ${expectedHomeGoals}, capturados ${homeGoalEvents}.`;
+      }
 
-    if (expectedAwayGoals > 0 && awayGoalEvents !== expectedAwayGoals) {
-      return `Revisa goleadores del equipo visitante: marcador ${expectedAwayGoals}, capturados ${awayGoalEvents}.`;
-    }
+      if (expectedAwayGoals > 0 && awayGoalEvents !== expectedAwayGoals) {
+        return `Revisa goleadores del equipo visitante: marcador ${expectedAwayGoals}, capturados ${awayGoalEvents}.`;
+      }
 
-    if (expectedHomeGoals === 0 && homeGoalEvents > 0) {
-      return "Hay goleadores capturados para el local, pero el marcador local esta en 0.";
-    }
+      if (expectedHomeGoals === 0 && homeGoalEvents > 0) {
+        return "Hay goleadores capturados para el local, pero el marcador local esta en 0.";
+      }
 
-    if (expectedAwayGoals === 0 && awayGoalEvents > 0) {
-      return "Hay goleadores capturados para el visitante, pero el marcador visitante esta en 0.";
+      if (expectedAwayGoals === 0 && awayGoalEvents > 0) {
+        return "Hay goleadores capturados para el visitante, pero el marcador visitante esta en 0.";
+      }
     }
 
     const eventWithoutPlayer = events.find((item) => !item.playerId);
@@ -2144,7 +2481,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
           ? "\nEsta accion reemplazara la captura anterior del acta y recalculara estadisticas con los nuevos eventos.\n"
           : "";
         const modeLabel = isDefaultSheet ? `Default ${Math.max(expectedHomeGoals, expectedAwayGoals)}-0` : "Partido jugado";
-        const confirmed = window.confirm(`Antes de guardar, verifica el acta:\n\nTipo: ${modeLabel}\nMarcador: ${expectedHomeGoals}-${expectedAwayGoals}\nGoles capturados: ${isDefaultSheet ? "No aplica" : goalEvents.length}\nAmarillas: ${isDefaultSheet ? 0 : cleanEvents.filter((item) => item.type === "yellow").length}\nRojas: ${isDefaultSheet ? 0 : cleanEvents.filter((item) => item.type === "red").length}${editWarning}\n¿Guardar acta?`);
+        const goalsLabel = isDefaultSheet
+          ? `${homeGoalEvents}-${awayGoalEvents} reales, solo para jugadores`
+          : String(goalEvents.length);
+        const confirmed = window.confirm(`Antes de guardar, verifica el acta:\n\nTipo: ${modeLabel}\nMarcador oficial: ${expectedHomeGoals}-${expectedAwayGoals}\nGoles capturados: ${goalsLabel}\nAmarillas: ${cleanEvents.filter((item) => item.type === "yellow").length}\nRojas: ${cleanEvents.filter((item) => item.type === "red").length}${editWarning}\n¿Guardar acta?`);
         if (!confirmed) return;
 
         try {
@@ -2156,11 +2496,11 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             status: isDefaultSheet ? "walkover" : "finished",
             resolutionType: isDefaultSheet ? "no_show" : "normal",
             resolutionNote: isDefaultSheet
-              ? `Default administrativo ${Math.max(expectedHomeGoals, expectedAwayGoals)}-0 por inasistencia.`
+              ? `Default administrativo ${Math.max(expectedHomeGoals, expectedAwayGoals)}-0. Eventos capturados solo para estadisticas individuales.`
               : "",
-            events: isDefaultSheet ? [] : cleanEvents
+            events: cleanEvents
           });
-          setSheetNotice(isDefaultSheet ? "Default guardado correctamente." : isEditingSavedSheet ? "Acta corregida correctamente." : "Acta guardada correctamente.");
+          setSheetNotice(isDefaultSheet ? "Default guardado correctamente. Los eventos capturados contaran solo para jugadores." : isEditingSavedSheet ? "Acta corregida correctamente." : "Acta guardada correctamente.");
         } catch (saveError) {
           setValidationMessage(saveError.message || "No se pudo guardar el acta.");
         }
@@ -2189,6 +2529,15 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             <option value="all">Todos</option>
           </select>
         </label>
+        <label className="sheet-match-select">Partido
+          <select value={selectedMatch.id} onChange={(event) => setMatchId(event.target.value)} disabled={!visibleRoundMatches.length}>
+            {visibleRoundMatches.map((match) => (
+              <option key={match.id} value={match.id}>
+                {getTeam(league, match.homeTeamId)?.name || "Local"} vs {getTeam(league, match.awayTeamId)?.name || "Visitante"} | {match.status === "finished" || match.status === "walkover" ? `${match.homeGoals}-${match.awayGoals}` : match.time || "POR DEFINIR"}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="sheet-match-grid" aria-label="Partidos de la jornada">
           {visibleRoundMatches.map((match) => (
             <button
@@ -2210,7 +2559,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         <div className="sheet-score">
           <div className="sheet-team home">
             <span>Local</span>
-            <strong>{getTeam(league, selectedMatch.homeTeamId)?.name || "Local"}</strong>
+            <strong>{homeTeam?.name || "Local"}</strong>
           </div>
           <div className="score-box">
             <input value={homeGoals} onChange={(event) => setHomeGoals(event.target.value)} type="number" min="0" aria-label="Goles local" />
@@ -2219,7 +2568,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
           </div>
           <div className="sheet-team away">
             <span>Visitante</span>
-            <strong>{getTeam(league, selectedMatch.awayTeamId)?.name || "Visitante"}</strong>
+            <strong>{awayTeam?.name || "Visitante"}</strong>
           </div>
         </div>
         <div className="sheet-match-meta" aria-label="Datos del partido seleccionado">
@@ -2231,8 +2580,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       </div>
 
       <div className="sheet-checklist">
-        <span>Goles local: {homeGoalEvents}/{expectedHomeGoals}</span>
-        <span>Goles visitante: {awayGoalEvents}/{expectedAwayGoals}</span>
+        <span>{isDefaultSheet ? `Goles reales local: ${homeGoalEvents}` : `Goles local: ${homeGoalEvents}/${expectedHomeGoals}`}</span>
+        <span>{isDefaultSheet ? `Goles reales visitante: ${awayGoalEvents}` : `Goles visitante: ${awayGoalEvents}/${expectedAwayGoals}`}</span>
         <span>Tarjetas: {cleanEvents.filter((item) => item.type === "yellow").length} amarilla(s), {cleanEvents.filter((item) => item.type === "red").length} roja(s)</span>
       </div>
 
@@ -2246,13 +2595,13 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         </label>
         <label>Ganador del default
           <select value={defaultWinner} onChange={(event) => changeDefaultWinner(event.target.value)} disabled={!isDefaultSheet}>
-            <option value="home">{getTeam(league, selectedMatch.homeTeamId)?.name || "Local"}</option>
-            <option value="away">{getTeam(league, selectedMatch.awayTeamId)?.name || "Visitante"}</option>
+            <option value="home">{homeTeam?.name || "Local"}</option>
+            <option value="away">{awayTeam?.name || "Visitante"}</option>
           </select>
         </label>
         <p>
           {isDefaultSheet
-            ? `Se guardara como default administrativo ${defaultScore}-0, sin exigir goleadores.`
+            ? `Se guardara como default administrativo ${defaultScore}-0 para la tabla. Los eventos capturados se suman solo a jugadores.`
             : "Usa partido jugado cuando el marcador requiere goles, tarjetas y eventos normales."}
         </p>
       </div>
@@ -2271,53 +2620,95 @@ function MatchSheet({ league, onSaveMatchSheet }) {
 
       <div className="event-toolbar">
         <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Completar goles del marcador</button>
-        <button type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.awayTeamId).length}>Autogol para local</button>
-        <button type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.homeTeamId).length}>Autogol para visitante</button>
-        <button type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.homeTeamId).length}>Amarilla local</button>
-        <button type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.awayTeamId).length}>Amarilla visitante</button>
-        <button type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.homeTeamId).length}>Roja local</button>
-        <button type="button" onClick={() => addEvent("red", selectedMatch.awayTeamId)} disabled={isDefaultSheet || !getPlayersForTeam(selectedMatch.awayTeamId).length}>Roja visitante</button>
       </div>
 
-      {!isDefaultSheet && <div className="event-list">
-        {events.map((eventItem) => {
+      <div className="event-quick-panel" aria-label="Agregar eventos rapidos">
+        <div className="event-team-card">
+          <strong>{homeTeam?.name || "Local"}</strong>
+          <span>Eventos del local</span>
+          <div className="event-quick-buttons">
+            <button type="button" onClick={() => addEvent("goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Gol</button>
+            <button type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Amarilla</button>
+            <button type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Roja</button>
+            <button type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Autogol</button>
+          </div>
+        </div>
+        <div className="event-team-card away">
+          <strong>{awayTeam?.name || "Visitante"}</strong>
+          <span>Eventos del visitante</span>
+          <div className="event-quick-buttons">
+            <button type="button" onClick={() => addEvent("goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Gol</button>
+            <button type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Amarilla</button>
+            <button type="button" onClick={() => addEvent("red", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Roja</button>
+            <button type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Autogol</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="event-list">
+        {events.map((eventItem, index) => {
           const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
           const eventTeam = getTeam(league, eventTeamId);
-          const eventPlayers = getPlayersForEvent(eventItem.type, eventTeamId);
           const isLockedTeamEvent = Boolean(eventItem.lockedTeamId);
           const eventTeamLabel = eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento";
           const playerTeamId = eventItem.type === "own_goal" ? getOpponentTeamId(eventTeamId) : eventTeamId;
+          const eventPlayers = getEventPlayersForDisplay(eventItem, playerTeamId);
+          const playerLabel = eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : "Jugador";
 
           return (
             <article className="event-row" key={eventItem.id}>
-              <select value={eventItem.type} onChange={(event) => updateEvent(eventItem.id, "type", event.target.value)} aria-label="Tipo de evento">
-                <option value="goal">Gol</option>
-                <option value="own_goal">Autogol</option>
-                <option value="yellow">Amarilla</option>
-                <option value="red">Roja</option>
-              </select>
-              <select
-                disabled={isLockedTeamEvent}
-                title={isLockedTeamEvent ? "El equipo queda fijo segun el boton local/visitante seleccionado." : eventTeamLabel}
-                value={eventTeamId}
-                onChange={(event) => updateEvent(eventItem.id, "teamId", event.target.value)}
-                aria-label={eventTeamLabel}
-              >
-                <option value={selectedMatch.homeTeamId}>{getTeam(league, selectedMatch.homeTeamId)?.name || "Local"}</option>
-                <option value={selectedMatch.awayTeamId}>{getTeam(league, selectedMatch.awayTeamId)?.name || "Visitante"}</option>
-              </select>
-              <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label={eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : `Jugador de ${eventTeam?.name || "equipo"}`}>
-                {eventPlayers.map((player) => (
-                  <option key={player.id} value={player.id}>
-                    #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
-                  </option>
-                ))}
-              </select>
-              <input value={eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} type="number" min="0" max="130" placeholder="Min" aria-label="Minuto" />
+              <div className="event-row-head">
+                <strong>{getMatchEventLabel(eventItem.type)} | {eventTeam?.name || "Equipo"}</strong>
+                <span>Evento {index + 1}</span>
+                <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
+              </div>
+              <label>Evento
+                <select value={eventItem.type} onChange={(event) => updateEvent(eventItem.id, "type", event.target.value)} aria-label="Tipo de evento">
+                  <option value="goal">Gol</option>
+                  <option value="own_goal">Autogol</option>
+                  <option value="yellow">Amarilla</option>
+                  <option value="red">Roja</option>
+                </select>
+              </label>
+              <label>{eventTeamLabel}
+                <select
+                  disabled={isLockedTeamEvent}
+                  title={isLockedTeamEvent ? "El equipo queda fijo segun el boton local/visitante seleccionado." : eventTeamLabel}
+                  value={eventTeamId}
+                  onChange={(event) => updateEvent(eventItem.id, "teamId", event.target.value)}
+                  aria-label={eventTeamLabel}
+                >
+                  <option value={selectedMatch.homeTeamId}>{homeTeam?.name || "Local"}</option>
+                  <option value={selectedMatch.awayTeamId}>{awayTeam?.name || "Visitante"}</option>
+                </select>
+              </label>
+              <label>Buscar jugador
+                <input
+                  value={eventItem.playerQuery || ""}
+                  onChange={(event) => updateEvent(eventItem.id, "playerQuery", event.target.value)}
+                  placeholder="Nombre o numero"
+                />
+              </label>
+              <label>{playerLabel}
+                <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label={eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : `Jugador de ${eventTeam?.name || "equipo"}`}>
+                  {eventPlayers.map((player) => (
+                    <option key={player.id} value={player.id}>
+                      #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>Minuto
+                <input value={eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} type="number" min="0" max="130" placeholder="Min" aria-label="Minuto" />
+              </label>
               {eventItem.type === "red" ? (
                 <>
-                  <input value={eventItem.suspensionMatches} onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)} type="number" min="1" placeholder="Sancion" aria-label="Partidos de sancion" />
-                  <input value={eventItem.reason} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Motivo" aria-label="Motivo de sancion" required />
+                  <label>Partidos de sancion
+                    <input value={eventItem.suspensionMatches} onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)} type="number" min="1" placeholder="Sancion" aria-label="Partidos de sancion" />
+                  </label>
+                  <label className="event-reason-field">Motivo
+                    <input value={eventItem.reason} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Motivo" aria-label="Motivo de sancion" required />
+                  </label>
                 </>
               ) : (
                 <span className="event-hint">
@@ -2328,12 +2719,11 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                     : `Amonestacion de ${eventTeam?.name || "equipo asignado"}`}
                 </span>
               )}
-              <button className="danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
             </article>
           );
         })}
         {!events.length && <p className="empty">Agrega goles, tarjetas amarillas o rojas para completar el acta.</p>}
-      </div>}
+      </div>
 
       <button className="primary" type="submit">Guardar acta</button>
     </form>
@@ -2651,6 +3041,23 @@ function normalizeAdminSearchTerm(value) {
     .replace(/\s+/g, " ")
     .trim()
     .toLocaleUpperCase("es-MX");
+}
+
+function getMatchEventLabel(type) {
+  if (type === "goal") return "Gol";
+  if (type === "own_goal") return "Autogol";
+  if (type === "yellow") return "Amarilla";
+  if (type === "red") return "Roja";
+  return "Evento";
+}
+
+function getDelegateStatusLabel(status) {
+  if (status === "pending_activation") return "pendiente de activacion";
+  if (status === "active") return "activo";
+  if (status === "disabled") return "desactivado";
+  if (status === "suspended") return "suspendido";
+  if (status === "deleted") return "eliminado";
+  return "sin estado";
 }
 
 function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction }) {
@@ -3071,6 +3478,10 @@ function readFileAsDataUrl(file) {
 
 async function resolveImageUpload(file, { authToken, leagueId, scope } = {}) {
   const dataUrl = await readFileAsDataUrl(file);
+  return resolveImageDataUrlUpload(dataUrl, { authToken, leagueId, scope });
+}
+
+async function resolveImageDataUrlUpload(dataUrl, { authToken, leagueId, scope } = {}) {
   if (!dataUrl || !authToken) return dataUrl;
   const response = await uploadImage(authToken, { dataUrl, leagueId, scope });
   return response.url;
@@ -3101,13 +3512,16 @@ async function getPlayerPayload(form, fallbackPhotoUrl = "", uploadContext = {})
   const file = form.elements.photoFile?.files?.[0];
   const shouldRemovePhoto = payload.removePhoto === "on";
   const photoAuthorized = payload.photoAuthorized === "on" || payload.photoAuthorized === true || payload.photoAuthorized === "true" || payload.photoAuthorized === "1";
+  const optimizedPhotoDataUrl = String(payload.photoDataUrl || "");
   const photoUrl = shouldRemovePhoto
     ? ""
     : !photoAuthorized
       ? ""
-    : file && file.size
-      ? await resolveImageUpload(file, uploadContext)
-      : fallbackPhotoUrl;
+      : optimizedPhotoDataUrl
+        ? await resolveImageDataUrlUpload(optimizedPhotoDataUrl, uploadContext)
+        : file && file.size
+          ? await resolveImageUpload(file, uploadContext)
+          : fallbackPhotoUrl;
 
   return { ...payload, photoUrl };
 }
@@ -3308,6 +3722,8 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [temporaryPasswords, setTemporaryPasswords] = useState({});
+  const adminUsers = users.filter((user) => user.role !== "team_delegate");
+  const delegateUserCount = users.length - adminUsers.length;
 
   async function loadUsers() {
     if (!authToken) return;
@@ -3443,9 +3859,10 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
       {error && <p className="auth-error">{error}</p>}
       {notice && <p className="auth-ok">{notice}</p>}
       <p className="helper-text">Usa correos reales y accesibles. La recuperacion por codigo se envia por correo cuando el proveedor de email esta configurado en produccion; mientras tanto el super admin puede asignar una clave temporal.</p>
+      {delegateUserCount > 0 && <p className="helper-text">{delegateUserCount} usuario(s) delegado se administran desde Admin de liga &gt; Delegados.</p>}
 
       <div className="user-list">
-        {users.map((user) => {
+        {adminUsers.map((user) => {
           const isSelf = user.id === currentUser?.id;
           return (
             <form

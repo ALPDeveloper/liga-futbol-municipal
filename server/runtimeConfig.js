@@ -57,6 +57,7 @@ export const runtimeConfig = {
   loginIpMaxAttempts: Number(process.env.LOGIN_IP_MAX_ATTEMPTS || 40),
   passwordResetWindowMinutes: Number(process.env.PASSWORD_RESET_WINDOW_MINUTES || 30),
   passwordResetMaxRequests: Number(process.env.PASSWORD_RESET_MAX_REQUESTS || 5),
+  delegateActivationHours: Number(process.env.DELEGATE_ACTIVATION_HOURS || 48),
   showRecoveryCodeInResponse: parseBoolean(
     process.env.SHOW_RECOVERY_CODE_IN_RESPONSE,
     false
@@ -137,6 +138,10 @@ export function validateRuntimeConfig() {
 
   if (runtimeConfig.databaseProvider !== "postgres") {
     problems.push("DATABASE_PROVIDER debe ser postgres en produccion.");
+  }
+
+  if (!Number.isFinite(runtimeConfig.delegateActivationHours) || runtimeConfig.delegateActivationHours <= 0 || runtimeConfig.delegateActivationHours > 168) {
+    problems.push("DELEGATE_ACTIVATION_HOURS debe estar entre 1 y 168 horas.");
   }
 
   if (runtimeConfig.imageUploadMaxBytes <= 0 || runtimeConfig.imageUploadMaxBytes > 5_000_000) {

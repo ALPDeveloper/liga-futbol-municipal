@@ -78,6 +78,7 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS assistant_coach TEXT");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS address TEXT");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS logo_url TEXT");
+  await pool.query("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS phone TEXT");
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS photo_url TEXT");
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS photo_authorized BOOLEAN NOT NULL DEFAULT false");
@@ -127,6 +128,39 @@ async function runPostgresMigrations(pool) {
       reason TEXT,
       notes TEXT,
       status TEXT NOT NULL DEFAULT 'active'
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS team_user_assignments (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'delegate',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS team_roster_permissions (
+      team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      registration_enabled BOOLEAN NOT NULL DEFAULT false,
+      enabled_until TIMESTAMPTZ,
+      notes TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS team_delegate_activation_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      assignment_id TEXT NOT NULL REFERENCES team_user_assignments(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
   await pool.query(`

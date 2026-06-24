@@ -217,6 +217,12 @@ ALTER TABLE IF EXISTS teams
 ALTER TABLE IF EXISTS players
   ADD COLUMN IF NOT EXISTS competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL;
 
+ALTER TABLE IF EXISTS players
+  ADD COLUMN IF NOT EXISTS photo_url TEXT;
+
+ALTER TABLE IF EXISTS players
+  ADD COLUMN IF NOT EXISTS photo_authorized BOOLEAN NOT NULL DEFAULT false;
+
 ALTER TABLE IF EXISTS matches
   ADD COLUMN IF NOT EXISTS observations TEXT;
 
@@ -249,12 +255,46 @@ CREATE TABLE IF NOT EXISTS users (
   league_id TEXT REFERENCES leagues(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
+  phone TEXT,
   role TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   password_hash TEXT,
   failed_login_count INTEGER NOT NULL DEFAULT 0,
   locked_until TIMESTAMPTZ,
   last_failed_login_at TIMESTAMPTZ
+);
+
+ALTER TABLE IF EXISTS users
+  ADD COLUMN IF NOT EXISTS phone TEXT;
+
+CREATE TABLE IF NOT EXISTS team_user_assignments (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'delegate',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS team_roster_permissions (
+  team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  registration_enabled BOOLEAN NOT NULL DEFAULT false,
+  enabled_until TIMESTAMPTZ,
+  notes TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS team_delegate_activation_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  assignment_id TEXT NOT NULL REFERENCES team_user_assignments(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS memberships (
@@ -314,3 +354,6 @@ CREATE INDEX IF NOT EXISTS idx_player_sanctions_league ON player_sanctions(leagu
 CREATE INDEX IF NOT EXISTS idx_player_injuries_league ON player_injuries(league_id, competition_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_league_created ON audit_logs(league_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_league ON users(league_id);
+CREATE INDEX IF NOT EXISTS idx_team_user_assignments_user ON team_user_assignments(user_id);
+CREATE INDEX IF NOT EXISTS idx_team_user_assignments_league_team ON team_user_assignments(league_id, team_id);
+CREATE INDEX IF NOT EXISTS idx_team_delegate_activation_tokens_hash ON team_delegate_activation_tokens(token_hash);

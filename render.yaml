@@ -34,6 +34,10 @@ services:
         value: "false"
       - key: VITE_API_BASE_URL
         value: /api
+      - key: APP_BASE_URL
+        value: https://ligatec.mx
+      - key: DELEGATE_ACTIVATION_HOURS
+        value: "48"
       - key: PUBLIC_CACHE_SECONDS
         value: "5"
       - key: BACKUP_STORAGE_BUCKET

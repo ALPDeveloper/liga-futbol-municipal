@@ -1,7 +1,7 @@
 const PASSWORD_MIN_LENGTH = 10;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const USER_ROLES = new Set(["super_admin", "league_admin"]);
-const USER_STATUSES = new Set(["active", "disabled"]);
+const USER_ROLES = new Set(["super_admin", "league_admin", "team_delegate"]);
+const USER_STATUSES = new Set(["pending_activation", "active", "disabled", "suspended", "deleted"]);
 
 export function applySecurityHeaders(request, response, next) {
   response.setHeader(

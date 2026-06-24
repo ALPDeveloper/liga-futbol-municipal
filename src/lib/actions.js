@@ -1099,25 +1099,6 @@ export function saveMatchSheet(store, leagueId, payload) {
         throw new Error("El marcador del acta no es valido.");
       }
       const isWalkover = payload.status === "walkover";
-      if (isWalkover) {
-        const maxGoals = Math.max(homeGoals, awayGoals);
-        const minGoals = Math.min(homeGoals, awayGoals);
-        if (![3, 5].includes(maxGoals) || minGoals !== 0) {
-          throw new Error("El default solo puede guardarse como 3-0 o 5-0.");
-        }
-
-        return {
-          ...match,
-          homeGoals,
-          awayGoals,
-          status: "walkover",
-          resolutionType: payload.resolutionType || "no_show",
-          resolutionNote: upperText(payload.resolutionNote || `Default administrativo ${maxGoals}-0`),
-          observations: upperText(payload.observations || ""),
-          events: []
-        };
-      }
-
       const events = payload.events
         .map((event) => {
           const player = getPlayer(league, event.playerId);
@@ -1152,6 +1133,26 @@ export function saveMatchSheet(store, leagueId, payload) {
           };
         })
         .filter(Boolean);
+
+      if (isWalkover) {
+        const maxGoals = Math.max(homeGoals, awayGoals);
+        const minGoals = Math.min(homeGoals, awayGoals);
+        if (![3, 5].includes(maxGoals) || minGoals !== 0) {
+          throw new Error("El default solo puede guardarse como 3-0 o 5-0.");
+        }
+
+        return {
+          ...match,
+          homeGoals,
+          awayGoals,
+          status: "walkover",
+          resolutionType: payload.resolutionType || "no_show",
+          resolutionNote: upperText(payload.resolutionNote || `Default administrativo ${maxGoals}-0`),
+          observations: upperText(payload.observations || ""),
+          events
+        };
+      }
+
       const goals = events.filter((event) => event.type === "goal" || event.type === "own_goal");
       const homeGoalEvents = goals.filter((event) => event.teamId === match.homeTeamId).length;
       const awayGoalEvents = goals.filter((event) => event.teamId === match.awayTeamId).length;

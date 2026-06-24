@@ -13,6 +13,8 @@ const LazyAdminRoute = React.lazy(() => import("./components/AdminRoute.jsx").th
 const LazyAuthPanel = React.lazy(() => import("./components/AuthPanel.jsx").then((module) => ({ default: module.AuthPanel })));
 const LazyLegalView = React.lazy(() => import("./components/LegalView.jsx").then((module) => ({ default: module.LegalView })));
 const LazyPublicView = React.lazy(() => import("./components/PublicView.jsx").then((module) => ({ default: module.PublicView })));
+const LazyTeamPortal = React.lazy(() => import("./components/TeamPortal.jsx").then((module) => ({ default: module.TeamPortal })));
+const LazyDelegateActivationView = React.lazy(() => import("./components/DelegateActivationView.jsx").then((module) => ({ default: module.DelegateActivationView })));
 
 function registerPwaServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -24,8 +26,8 @@ function registerPwaServiceWorker() {
   });
 }
 
-const initialIsAdminRoute = window.location.pathname.startsWith("/admin");
-const cachedStore = initialIsAdminRoute ? loadStore() : null;
+const initialIsPrivateRoute = window.location.pathname.startsWith("/admin") || window.location.pathname.startsWith("/equipo");
+const cachedStore = initialIsPrivateRoute ? loadStore() : null;
 const emptyStore = normalizeStore({ currentLeagueId: "", leagues: [] });
 const initialStore = cachedStore || emptyStore;
 const initialAuth = loadAuth();
@@ -38,6 +40,11 @@ function getPublicLeagueIdFromPath(path) {
 function getLegalLeagueIdFromPath(path) {
   const [, section, leagueId] = path.split("/");
   return section === "legal" ? decodeURIComponent(leagueId || "") : "";
+}
+
+function getDelegateActivationTokenFromPath(path) {
+  const [, section, token] = path.split("/");
+  return section === "activar-delegado" ? decodeURIComponent(token || "") : "";
 }
 
 function getPublicLeaguePath(leagueId) {
@@ -93,8 +100,11 @@ function App() {
   const pendingPersistRef = useRef(null);
   const persistRunningRef = useRef(false);
   const isAdminRoute = routePath.startsWith("/admin");
-  const publicLeagueId = !isAdminRoute ? getPublicLeagueIdFromPath(routePath) : "";
-  const legalLeagueId = !isAdminRoute ? getLegalLeagueIdFromPath(routePath) : "";
+  const isTeamRoute = routePath.startsWith("/equipo");
+  const isPrivateRoute = isAdminRoute || isTeamRoute;
+  const publicLeagueId = !isPrivateRoute ? getPublicLeagueIdFromPath(routePath) : "";
+  const legalLeagueId = !isPrivateRoute ? getLegalLeagueIdFromPath(routePath) : "";
+  const delegateActivationToken = !isPrivateRoute ? getDelegateActivationTokenFromPath(routePath) : "";
   const routeLeagueId = publicLeagueId || legalLeagueId;
   const league = useMemo(() => {
     if (!store.leagues.length) return null;
@@ -105,9 +115,12 @@ function App() {
   const canUseSuperAdmin = currentUser?.role === "super_admin";
   const canUseLeagueAdmin = currentUser?.role === "league_admin" && currentUser.leagueId === league?.id && league?.status === "active";
   const canUseAdmin = canUseSuperAdmin || canUseLeagueAdmin;
+  const shouldRedirectAdminToTeamPortal = isAdminRoute && currentUser?.role === "team_delegate";
+  const shouldRedirectTeamPortalToAdmin = isTeamRoute && currentUser && currentUser.role !== "team_delegate";
   const publicLeaguePath = league?.id ? getPublicLeaguePath(league.id) : "/";
   const legalLeaguePath = league?.id ? getLegalLeaguePath(league.id) : "/legal";
   const isLegalRoute = routePath === "/legal" || routePath.startsWith("/legal/");
+  const isDelegateActivationRoute = routePath.startsWith("/activar-delegado/");
 
   function navigateTo(path) {
     window.history.pushState({}, "", path);
@@ -166,6 +179,11 @@ function App() {
     if (adminPanel === "super" && !canUseSuperAdmin) setAdminPanel("league");
   }, [adminPanel, canUseSuperAdmin]);
 
+  useEffect(() => {
+    if (shouldRedirectAdminToTeamPortal) navigateTo("/equipo");
+    if (shouldRedirectTeamPortalToAdmin) navigateTo("/admin");
+  }, [shouldRedirectAdminToTeamPortal, shouldRedirectTeamPortalToAdmin]);
+
   async function flushPersistQueue() {
     if (persistRunningRef.current || !auth.token) return;
     persistRunningRef.current = true;
@@ -215,12 +233,12 @@ function App() {
     const normalized = normalizeStore({ ...store, currentLeagueId: leagueId });
     setStore(normalized);
     saveStore(normalized);
-    if (!isAdminRoute) navigateTo(getPublicLeaguePath(leagueId));
+    if (!isPrivateRoute) navigateTo(getPublicLeaguePath(leagueId));
   }
 
   useEffect(() => {
-    if (!isAdminRoute && league?.id) saveLastPublicLeagueId(league.id);
-  }, [isAdminRoute, league?.id]);
+    if (!isPrivateRoute && league?.id) saveLastPublicLeagueId(league.id);
+  }, [isPrivateRoute, league?.id]);
 
   async function login(email, password) {
     const nextAuth = await loginWithApi(email, password);
@@ -234,7 +252,22 @@ function App() {
     setStore(normalizedStore);
     saveStore(normalizedStore);
     setApiStatus("connected");
-    if (!isAdminRoute) navigateTo("/admin");
+    if (nextAuth.user.role === "team_delegate") {
+      navigateTo("/equipo");
+    } else if (!isAdminRoute) {
+      navigateTo("/admin");
+    }
+  }
+
+  async function completeDelegateActivation(nextAuth) {
+    const apiStore = await fetchStoreFromApi(nextAuth.token);
+    const normalizedStore = normalizeStore(apiStore);
+    setAuth(nextAuth);
+    saveAuth(nextAuth);
+    setStore(normalizedStore);
+    saveStore(normalizedStore);
+    setApiStatus("connected");
+    navigateTo("/equipo");
   }
 
   function logout() {
@@ -252,7 +285,7 @@ function App() {
     "--blue": identity.secondaryColor
   };
 
-  if (!initialApiLoaded && !isAdminRoute) {
+  if (!initialApiLoaded && !isPrivateRoute && !isDelegateActivationRoute) {
     return (
       <main className="startup-screen">
         <div className="startup-card">
@@ -264,7 +297,7 @@ function App() {
     );
   }
 
-  if (!league && !isAdminRoute && !isLegalRoute) {
+  if (!league && !isPrivateRoute && !isLegalRoute && !isDelegateActivationRoute) {
     return (
       <main className="startup-screen">
         <div className="startup-card">
@@ -280,12 +313,16 @@ function App() {
     return <RouteFallback label="Cargando datos reales" />;
   }
 
+  if (shouldRedirectAdminToTeamPortal || shouldRedirectTeamPortalToAdmin) {
+    return <RouteFallback label="Redirigiendo acceso" />;
+  }
+
   return (
-    <div className={isAdminRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} style={themeStyle}>
-      <header className={`topbar ${isAdminRoute ? "admin-topbar" : "public-topbar"}`}>
+    <div className={isPrivateRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} style={themeStyle}>
+      <header className={`topbar ${isPrivateRoute ? "admin-topbar" : "public-topbar"}`}>
         <a className="brand" href={isAdminRoute ? "/admin" : publicLeaguePath} aria-label="Ir al inicio" onClick={(event) => {
           event.preventDefault();
-          navigateTo(isAdminRoute ? "/admin" : publicLeaguePath);
+          navigateTo(isAdminRoute ? "/admin" : isTeamRoute ? "/equipo" : publicLeaguePath);
         }}>
           <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
           <span className="brand-copy">
@@ -311,7 +348,7 @@ function App() {
               <strong>{isLegalRoute ? "Aviso legal" : league?.name || "Cargando"}</strong>
             </div>
           )}
-          {!isAdminRoute && (
+          {!isPrivateRoute && (
             <a className="admin-public-link" href={isLegalRoute ? publicLeaguePath : legalLeaguePath} onClick={(event) => {
               event.preventDefault();
               navigateTo(isLegalRoute ? publicLeaguePath : legalLeaguePath);
@@ -319,17 +356,17 @@ function App() {
               {isLegalRoute ? "Vista liga" : "Legal"}
             </a>
           )}
-          {isAdminRoute && (
+          {isPrivateRoute && (
             <>
-              <a className="admin-public-link" href={publicLeaguePath} onClick={(event) => {
+              {league?.id && <a className="admin-public-link" href={publicLeaguePath} onClick={(event) => {
                 event.preventDefault();
                 navigateTo(publicLeaguePath);
               }}>
                 Vista publica
-              </a>
-              <span className={`api-pill ${apiStatus}`}>
+              </a>}
+              {isAdminRoute && <span className={`api-pill ${apiStatus}`}>
                 {apiStatus === "connected" ? "API local" : apiStatus === "local" ? "Modo local" : "Conectando"}
-              </span>
+              </span>}
               {currentUser && (
                 <Suspense fallback={<span className="auth-loading">Sesion activa</span>}>
                   <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
@@ -357,11 +394,32 @@ function App() {
             </a>
           </section>
         </main>
+      ) : isTeamRoute && currentUser?.role !== "team_delegate" ? (
+        <main className="page admin-access-page">
+          <section className="admin-access-card">
+            <span className="eyebrow">Acceso privado</span>
+            <h1>Portal de equipo</h1>
+            <p>Ingresa con el usuario delegado asignado a tu equipo para registrar plantilla.</p>
+            <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
+              <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
+            </Suspense>
+            <a href="/" onClick={(event) => {
+              event.preventDefault();
+              navigateTo("/");
+            }}>
+              Volver a la pagina publica
+            </a>
+          </section>
+        </main>
+      ) : isDelegateActivationRoute ? (
+        <Suspense fallback={<RouteFallback label="Cargando activacion" />}>
+          <LazyDelegateActivationView token={delegateActivationToken} onActivated={completeDelegateActivation} onNavigate={navigateTo} />
+        </Suspense>
       ) : isLegalRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando aviso legal" />}>
           <LazyLegalView league={league} onNavigate={navigateTo} publicLeaguePath={publicLeaguePath} />
         </Suspense>
-      ) : league.status === "suspended" && !isAdminRoute ? (
+      ) : league?.status === "suspended" && !isPrivateRoute ? (
         <main className="page">
           <section className="hero compact" style={{ "--hero-image": `url(${heroImage})` }}>
             <div className="hero-content">
@@ -390,6 +448,10 @@ function App() {
             store={store}
             userListRefreshKey={userListRefreshKey}
           />
+        </Suspense>
+      ) : isTeamRoute ? (
+        <Suspense fallback={<RouteFallback label="Cargando portal de equipo" />}>
+          <LazyTeamPortal authToken={auth.token} currentUser={currentUser} />
         </Suspense>
       ) : (
         <Suspense fallback={<RouteFallback label="Cargando liga" />}>

@@ -858,15 +858,31 @@ store = saveMatchSheet(store, league.id, {
   status: "walkover",
   resolutionType: "no_show",
   resolutionNote: "Default administrativo 5-0 por inasistencia.",
-  events: []
+  events: [
+    { type: "goal", playerId: "p8", teamId: "real", minute: 18 },
+    { type: "goal", playerId: "p8", teamId: "real", minute: 54 },
+    { type: "goal", playerId: "p1", teamId: "halcones", minute: 72 },
+    { type: "yellow", playerId: "p7", teamId: "real", minute: 80 }
+  ]
 });
 league = getCurrentLeague(store);
 const defaultActa = league.matches.find((match) => match.id === "m3");
 assert.equal(defaultActa.status, "walkover");
 assert.equal(defaultActa.homeGoals, 0);
 assert.equal(defaultActa.awayGoals, 5);
-assert.equal(defaultActa.events.length, 0);
+assert.equal(defaultActa.events.length, 4);
 assert.equal(defaultActa.resolutionType, "no_show");
+const defaultStandings = calculateStandings(league);
+const realDefaultRow = defaultStandings.find((row) => row.team.id === "real");
+const halconesDefaultRow = defaultStandings.find((row) => row.team.id === "halcones");
+assert.equal(realDefaultRow.goalsFor, 0);
+assert.equal(realDefaultRow.goalsAgainst, 5);
+assert.equal(halconesDefaultRow.goalsFor, 7);
+assert.equal(halconesDefaultRow.goalsAgainst, 1);
+const defaultStats = calculatePlayerStats(league);
+assert.equal(defaultStats.find((row) => row.player.id === "p8").goals, 2);
+assert.equal(defaultStats.find((row) => row.player.id === "p1").goals, 3);
+assert.equal(defaultStats.find((row) => row.player.id === "p7").yellowCards, 1);
 
 store = deletePlayerInjury(store, league.id, marioInjury.id);
 league = getCurrentLeague(store);

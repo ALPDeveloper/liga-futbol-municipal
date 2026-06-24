@@ -12,22 +12,38 @@ import {
   clearLoginLockData,
   countActiveSuperAdminsExcept,
   countLeagueAdmins,
+  countTeamDelegateAssignmentsData,
+  createTeamDelegateActivationData,
+  createTeamDelegateAssignmentData,
   createPasswordResetData,
+  createTeamPortalPlayerData,
   createUserData,
   DATABASE_LABEL,
   DATABASE_PROVIDER,
+  deleteTeamDelegateAssignmentData,
   deleteUserData,
   disableUserData,
   getActiveUserByEmail,
   getStoreData,
+  getTeamDelegateContextData,
+  getTeamDelegateActivationByHashData,
   getUserById,
   importStoreData,
   initializeData,
   listActivePasswordResetRequests,
+  listTeamDelegatesData,
+  listTeamPortalPlayersData,
   listUsersData,
   markPasswordResetUsed,
+  markTeamDelegateActivationUsedData,
   registerFailedLoginData,
+  setTeamRosterPermissionData,
+  revokeTeamDelegateActivationsData,
+  activateTeamDelegateUserData,
+  updateTeamDelegateStatusData,
+  updateTeamLogoData,
   updatePasswordData,
+  updateTeamPortalPlayerData,
   updateUserData
 } from "./dataLayer.js";
 import { hashPassword, verifyPassword } from "./password.js";
@@ -44,6 +60,7 @@ import {
   validateUserRole,
   validateUserStatus
 } from "./security.js";
+import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
 
 validateRuntimeConfig();
 await initializeData();
@@ -95,6 +112,65 @@ const passwordResetCompleteLimiter = createRateLimiter({
 
 function canManageLeague(user, leagueId) {
   return user.role === "super_admin" || (user.role === "league_admin" && user.leagueId === leagueId);
+}
+
+function hashActivationToken(token) {
+  return crypto.createHash("sha256").update(String(token || ""), "utf8").digest("hex");
+}
+
+function getAppBaseUrl(request) {
+  const configured = String(runtimeConfig.appBaseUrl || "").trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  return `${request.protocol}://${request.get("host")}`;
+}
+
+async function createDelegateInvitation({ request, userId, assignmentId, delegateName, teamName }) {
+  await revokeTeamDelegateActivationsData(userId);
+  const rawToken = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + runtimeConfig.delegateActivationHours * 60 * 60 * 1000).toISOString();
+  const activation = await createTeamDelegateActivationData({
+    id: `delegate-activation-${crypto.randomUUID()}`,
+    userId,
+    assignmentId,
+    tokenHash: hashActivationToken(rawToken),
+    expiresAt
+  });
+  const activationUrl = `${getAppBaseUrl(request)}/activar-delegado/${encodeURIComponent(rawToken)}`;
+  const whatsappMessage = [
+    `Hola ${delegateName}, has sido registrado como delegado del equipo ${teamName} en LIGATEC.`,
+    "Para activar tu cuenta, entra al siguiente enlace:",
+    activationUrl,
+    "Ahi podras crear tu contrasena y posteriormente administrar unicamente la plantilla de tu equipo."
+  ].join("\n");
+
+  return {
+    activationUrl,
+    expiresAt: activation?.expiresAt || expiresAt,
+    whatsappMessage
+  };
+}
+
+function getActivationProblem(activation) {
+  if (!activation) return "La invitacion no existe o el enlace es invalido.";
+  if (activation.revokedAt) return "Esta invitacion fue reemplazada por una mas reciente.";
+  if (activation.usedAt) return "Esta invitacion ya fue utilizada.";
+  if (new Date(activation.expiresAt).getTime() <= Date.now()) return "Esta invitacion expiro.";
+  if (activation.userStatus === "deleted" || activation.userStatus === "disabled" || activation.userStatus === "suspended") {
+    return "Esta cuenta no esta disponible. Solicita una nueva invitacion al administrador.";
+  }
+  if (activation.assignmentStatus === "deleted" || activation.assignmentStatus === "disabled" || activation.assignmentStatus === "suspended") {
+    return "Este acceso al equipo no esta disponible. Solicita una nueva invitacion al administrador.";
+  }
+  if (activation.userStatus !== "pending_activation") return "Esta cuenta no esta pendiente de activacion.";
+  if (activation.assignmentStatus !== "pending_activation") return "Este acceso al equipo no esta pendiente de activacion.";
+  return "";
+}
+
+async function getLeagueAndTeam(leagueId, teamId) {
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === leagueId);
+  const team = league?.teams?.find((item) => item.id === teamId);
+  return { league, team };
 }
 
 function clearPublicCache() {
@@ -223,8 +299,22 @@ app.get("/api/auth/me", async (request, response) => {
 
 app.post("/api/uploads/images", requireAuth, async (request, response) => {
   const leagueId = String(request.body.leagueId || request.user.leagueId || "").trim();
-  if (leagueId && !canManageLeague(request.user, leagueId)) {
+  let canUploadForLeague = !leagueId || canManageLeague(request.user, leagueId);
+
+  if (!canUploadForLeague && request.user.role === "team_delegate") {
+    const context = await getTeamDelegateContextData(request.user.id);
+    canUploadForLeague = Boolean(
+      context &&
+      context.leagueId === leagueId &&
+      (request.body.scope === "team-logos" || context.canManageRoster)
+    );
+  }
+
+  if (leagueId && !canUploadForLeague) {
     return response.status(403).json({ error: "No puedes subir imagenes para esta liga" });
+  }
+  if (request.user.role === "team_delegate" && !["player-photos", "team-logos"].includes(request.body.scope)) {
+    return response.status(403).json({ error: "Los delegados solo pueden subir fotos de jugadores o escudo de su equipo." });
   }
 
   const url = await uploadImageDataUrl({
@@ -316,6 +406,68 @@ app.post("/api/auth/reset-password", passwordResetCompleteLimiter, async (reques
   });
 
   response.json({ message: "Contraseña actualizada. Ya puedes iniciar sesion." });
+});
+
+app.get("/api/team-delegate-activations/:token", async (request, response) => {
+  const activation = await getTeamDelegateActivationByHashData(hashActivationToken(request.params.token));
+  const problem = getActivationProblem(activation);
+  if (problem) {
+    return response.status(400).json({
+      valid: false,
+      error: problem,
+      message: "Solicita una nueva invitacion al administrador de la liga."
+    });
+  }
+
+  response.json({
+    valid: true,
+    delegateName: activation.userName,
+    teamName: activation.teamName,
+    leagueName: activation.leagueName,
+    expiresAt: activation.expiresAt
+  });
+});
+
+app.post("/api/team-delegate-activations/:token", async (request, response) => {
+  const activation = await getTeamDelegateActivationByHashData(hashActivationToken(request.params.token));
+  const problem = getActivationProblem(activation);
+  if (problem) {
+    return response.status(400).json({
+      valid: false,
+      error: problem,
+      message: "Solicita una nueva invitacion al administrador de la liga."
+    });
+  }
+
+  const password = String(request.body.password || "");
+  const confirmPassword = String(request.body.confirmPassword || "");
+  if (password !== confirmPassword) {
+    return response.status(400).json({ error: "Las contraseñas no coinciden." });
+  }
+  const passwordError = requireStrongPassword(password);
+  if (passwordError) return response.status(400).json({ error: passwordError });
+
+  const user = await activateTeamDelegateUserData({
+    userId: activation.userId,
+    assignmentId: activation.assignmentId,
+    passwordHash: hashPassword(password)
+  });
+  await markTeamDelegateActivationUsedData(activation.id);
+
+  await logAudit({
+    user: toPublicUser(user),
+    leagueId: activation.leagueId,
+    action: "team_delegate_activation",
+    entityType: "user",
+    entityId: activation.userId,
+    detail: `Delegado activo cuenta para ${activation.teamName}`
+  });
+
+  response.json({
+    message: "Cuenta activada correctamente.",
+    token: createToken(user),
+    user: toPublicUser(user)
+  });
 });
 
 app.get("/api/store", async (request, response) => {
@@ -424,6 +576,352 @@ app.delete("/api/leagues/:leagueId", requireSuperAdmin, async (request, response
   response.json({ store: nextStore, removedAdmins });
 });
 
+app.get("/api/team-delegates", requireAuth, async (request, response) => {
+  const leagueId = String(request.query.leagueId || request.user.leagueId || "");
+  if (leagueId && !canManageLeague(request.user, leagueId)) {
+    return response.status(403).json({ error: "No puedes ver delegados de esta liga" });
+  }
+  if (!leagueId && request.user.role !== "super_admin") {
+    return response.status(403).json({ error: "Selecciona una liga valida" });
+  }
+  response.json(await listTeamDelegatesData(leagueId));
+});
+
+app.post("/api/team-delegates", requireAuth, async (request, response) => {
+  const email = String(request.body.email || "").trim().toLowerCase();
+  const phone = String(request.body.phone || "").trim();
+  const name = String(request.body.name || "").trim();
+  const leagueId = String(request.body.leagueId || request.user.leagueId || "").trim();
+  const teamId = String(request.body.teamId || "").trim();
+  const status = "pending_activation";
+
+  if (!canManageLeague(request.user, leagueId)) {
+    return response.status(403).json({ error: "No puedes crear delegados para esta liga" });
+  }
+  const { league, team } = await getLeagueAndTeam(leagueId, teamId);
+  if (!league || !team) return response.status(400).json({ error: "Equipo invalido para esta liga" });
+  if (!email || !phone || !name) return response.status(400).json({ error: "Nombre, telefono y correo son requeridos" });
+  if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido" });
+  if (!validateUserStatus(status)) return response.status(400).json({ error: "Estado invalido" });
+
+  const userId = `user-${crypto.randomUUID()}`;
+  const assignmentId = `delegate-${crypto.randomUUID()}`;
+  let user;
+  let invitation;
+  try {
+    user = await createUserData({
+      id: userId,
+      leagueId,
+      name,
+      email,
+      phone,
+      role: "team_delegate",
+      status,
+      passwordHash: null
+    });
+    await createTeamDelegateAssignmentData({ id: assignmentId, leagueId, teamId, userId, status });
+    invitation = await createDelegateInvitation({
+      request,
+      userId,
+      assignmentId,
+      delegateName: name,
+      teamName: team.name
+    });
+  } catch (error) {
+    if (String(error?.message || "").toLowerCase().includes("unique")) {
+      return response.status(409).json({ error: "Ya existe un usuario con ese correo." });
+    }
+    throw error;
+  }
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "team_delegate_create",
+    entityType: "user",
+    entityId: user.id,
+    detail: `Creo invitacion de delegado ${email} para ${team.name}`
+  });
+
+  response.status(201).json({
+    delegates: await listTeamDelegatesData(leagueId),
+    invitation
+  });
+});
+
+app.patch("/api/team-delegates/:assignmentId", requireAuth, async (request, response) => {
+  const delegates = await listTeamDelegatesData(request.user.role === "league_admin" ? request.user.leagueId : "");
+  const assignment = delegates.find((item) => item.id === request.params.assignmentId);
+  if (!assignment) return response.status(404).json({ error: "Delegado no encontrado" });
+  if (!canManageLeague(request.user, assignment.leagueId)) {
+    return response.status(403).json({ error: "No puedes modificar este delegado" });
+  }
+  const status = request.body.status || assignment.status;
+  if (!validateUserStatus(status)) return response.status(400).json({ error: "Estado invalido" });
+  if (status === "active") {
+    const user = await getUserById(assignment.userId);
+    if (!user?.password_hash) {
+      return response.status(400).json({ error: "Este delegado aun debe activar su cuenta con la invitacion." });
+    }
+  }
+  await updateTeamDelegateStatusData({ assignmentId: assignment.id, userId: assignment.userId, status });
+  await logAudit({
+    user: request.user,
+    leagueId: assignment.leagueId,
+    action: "team_delegate_update",
+    entityType: "team_user_assignment",
+    entityId: assignment.id,
+    detail: `Actualizo delegado de ${assignment.teamName}`
+  });
+  response.json(await listTeamDelegatesData(assignment.leagueId));
+});
+
+app.post("/api/team-delegates/:assignmentId/invitation", requireAuth, async (request, response) => {
+  const delegates = await listTeamDelegatesData(request.user.role === "league_admin" ? request.user.leagueId : "");
+  const assignment = delegates.find((item) => item.id === request.params.assignmentId);
+  if (!assignment) return response.status(404).json({ error: "Delegado no encontrado" });
+  if (!canManageLeague(request.user, assignment.leagueId)) {
+    return response.status(403).json({ error: "No puedes reenviar esta invitacion" });
+  }
+  if (assignment.status === "deleted") {
+    return response.status(400).json({ error: "No se puede invitar a un usuario eliminado." });
+  }
+
+  if (assignment.status !== "pending_activation") {
+    await updateTeamDelegateStatusData({
+      assignmentId: assignment.id,
+      userId: assignment.userId,
+      status: "pending_activation"
+    });
+  }
+  const invitation = await createDelegateInvitation({
+    request,
+    userId: assignment.userId,
+    assignmentId: assignment.id,
+    delegateName: assignment.userName,
+    teamName: assignment.teamName
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId: assignment.leagueId,
+    action: "team_delegate_invitation",
+    entityType: "team_user_assignment",
+    entityId: assignment.id,
+    detail: `Regenero invitacion de delegado ${assignment.userEmail} para ${assignment.teamName}`
+  });
+
+  response.json({
+    delegates: await listTeamDelegatesData(assignment.leagueId),
+    invitation
+  });
+});
+
+app.delete("/api/team-delegates/:assignmentId", requireAuth, async (request, response) => {
+  const delegates = await listTeamDelegatesData(request.user.role === "league_admin" ? request.user.leagueId : "");
+  const assignment = delegates.find((item) => item.id === request.params.assignmentId);
+  if (!assignment) return response.status(404).json({ error: "Delegado no encontrado" });
+  if (!canManageLeague(request.user, assignment.leagueId)) {
+    return response.status(403).json({ error: "No puedes eliminar este delegado" });
+  }
+
+  const mode = String(request.query.mode || "disable_user");
+  const currentAssignments = await countTeamDelegateAssignmentsData(assignment.userId);
+  if (mode === "delete_user" && currentAssignments > 1) {
+    return response.status(400).json({
+      error: "Este usuario tiene otros equipos asignados. Quita primero los demas accesos antes de eliminarlo definitivamente."
+    });
+  }
+
+  await deleteTeamDelegateAssignmentData(assignment.id);
+  const remainingAssignments = await countTeamDelegateAssignmentsData(assignment.userId);
+  let userDisabled = false;
+  let userDeleted = false;
+
+  if (mode === "delete_user" && remainingAssignments === 0) {
+    await deleteUserData(assignment.userId);
+    userDeleted = true;
+  } else if (mode === "disable_user" && remainingAssignments === 0) {
+    await disableUserData(assignment.userId);
+    userDisabled = true;
+  }
+
+  await logAudit({
+    user: request.user,
+    leagueId: assignment.leagueId,
+    action: "team_delegate_delete",
+    entityType: "team_user_assignment",
+    entityId: assignment.id,
+    detail: userDeleted
+      ? `Quito delegado ${assignment.userEmail} de ${assignment.teamName} y elimino definitivamente su usuario`
+      : userDisabled
+      ? `Quito delegado ${assignment.userEmail} de ${assignment.teamName} y deshabilito su usuario`
+      : `Quito delegado ${assignment.userEmail} de ${assignment.teamName}`
+  });
+
+  response.json({
+    delegates: await listTeamDelegatesData(assignment.leagueId),
+    userDisabled,
+    userDeleted
+  });
+});
+
+app.put("/api/team-roster-permissions/:teamId", requireAuth, async (request, response) => {
+  const teamId = String(request.params.teamId || "").trim();
+  const leagueId = String(request.body.leagueId || request.user.leagueId || "").trim();
+  if (!canManageLeague(request.user, leagueId)) {
+    return response.status(403).json({ error: "No puedes modificar permisos de esta liga" });
+  }
+  const { league, team } = await getLeagueAndTeam(leagueId, teamId);
+  if (!league || !team) return response.status(400).json({ error: "Equipo invalido para esta liga" });
+  await setTeamRosterPermissionData({
+    leagueId,
+    teamId,
+    registrationEnabled: request.body.registrationEnabled === true || request.body.registrationEnabled === "true",
+    enabledUntil: request.body.enabledUntil || null,
+    notes: request.body.notes || ""
+  });
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "team_roster_permission_update",
+    entityType: "team",
+    entityId: teamId,
+    detail: `Actualizo captura de plantilla para ${team.name}`
+  });
+  response.json(await listTeamDelegatesData(leagueId));
+});
+
+app.get("/api/team-portal/me", requireAuth, async (request, response) => {
+  if (request.user.role !== "team_delegate") {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  const context = await getTeamDelegateContextData(request.user.id);
+  if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
+  const players = await listTeamPortalPlayersData(context.teamId);
+  response.json({ context, players });
+});
+
+app.post("/api/team-portal/players", requireAuth, async (request, response) => {
+  if (request.user.role !== "team_delegate") {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  const context = await getTeamDelegateContextData(request.user.id);
+  if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
+  if (!context.canManageRoster) {
+    return response.status(403).json({ error: "El registro de plantilla esta cerrado para tu equipo." });
+  }
+
+  const payload = {
+    name: request.body.name,
+    number: request.body.number,
+    position: request.body.position,
+    photoUrl: request.body.photoUrl,
+    photoAuthorized: request.body.photoAuthorized === true || request.body.photoAuthorized === "true"
+  };
+  const nameCheck = validatePlayerFullName(payload.name);
+  if (!nameCheck.valid) return response.status(400).json({ error: nameCheck.message });
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const duplicate = league ? findDuplicatePlayer(league, payload) : null;
+  if (duplicate) return response.status(409).json({ error: `Este jugador ya esta registrado como ${duplicate.name}.` });
+
+  const players = await createTeamPortalPlayerData({
+    id: `player-${crypto.randomUUID()}`,
+    leagueId: context.leagueId,
+    competitionId: context.competitionId,
+    teamId: context.teamId,
+    ...payload
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.leagueId,
+    action: "team_portal_player_create",
+    entityType: "player",
+    detail: `Delegado registro jugador en ${context.teamName}`
+  });
+
+  clearPublicCache();
+  response.status(201).json({ context, players });
+});
+
+app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, response) => {
+  if (request.user.role !== "team_delegate") {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  const context = await getTeamDelegateContextData(request.user.id);
+  if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
+  if (!context.canManageRoster) {
+    return response.status(403).json({ error: "El registro de plantilla esta cerrado para tu equipo." });
+  }
+
+  const payload = {
+    name: request.body.name,
+    number: request.body.number,
+    position: request.body.position,
+    photoUrl: request.body.photoUrl,
+    photoAuthorized: request.body.photoAuthorized === true || request.body.photoAuthorized === "true"
+  };
+  const nameCheck = validatePlayerFullName(payload.name);
+  if (!nameCheck.valid) return response.status(400).json({ error: nameCheck.message });
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const player = league?.players?.find((item) => item.id === request.params.playerId);
+  if (!player || player.teamId !== context.teamId) {
+    return response.status(404).json({ error: "Jugador no encontrado en tu equipo." });
+  }
+  const duplicate = league ? findDuplicatePlayer(league, payload, player.id) : null;
+  if (duplicate) return response.status(409).json({ error: `Este jugador ya esta registrado como ${duplicate.name}.` });
+
+  const players = await updateTeamPortalPlayerData(player.id, {
+    teamId: context.teamId,
+    ...payload
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.leagueId,
+    action: "team_portal_player_update",
+    entityType: "player",
+    entityId: player.id,
+    detail: `Delegado actualizo jugador en ${context.teamName}`
+  });
+
+  clearPublicCache();
+  response.json({ context, players });
+});
+
+app.patch("/api/team-portal/team-logo", requireAuth, async (request, response) => {
+  if (request.user.role !== "team_delegate") {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  const context = await getTeamDelegateContextData(request.user.id);
+  if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
+
+  await updateTeamLogoData({
+    leagueId: context.leagueId,
+    teamId: context.teamId,
+    logoUrl: request.body.logoUrl || ""
+  });
+  const nextContext = await getTeamDelegateContextData(request.user.id);
+  const players = await listTeamPortalPlayersData(context.teamId);
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.leagueId,
+    action: "team_portal_team_logo_update",
+    entityType: "team",
+    entityId: context.teamId,
+    detail: `Delegado actualizo escudo de ${context.teamName}`
+  });
+
+  clearPublicCache();
+  response.json({ context: nextContext, players });
+});
+
 app.get("/api/users", requireSuperAdmin, async (_request, response) => {
   const users = await listUsersData();
   response.json(users.map(toPublicUser));
@@ -444,6 +942,7 @@ app.post("/api/users", requireSuperAdmin, async (request, response) => {
   }
   if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido" });
   if (!validateUserRole(role)) return response.status(400).json({ error: "Rol invalido" });
+  if (role === "team_delegate") return response.status(400).json({ error: "Crea delegados desde el modulo de equipos." });
   if (request.body.status && !validateUserStatus(request.body.status)) return response.status(400).json({ error: "Estado invalido" });
   if (role === "league_admin" && !leagueId) {
     return response.status(400).json({ error: "Un admin de liga debe estar asignado a una liga" });
@@ -494,6 +993,7 @@ app.patch("/api/users/:userId", requireSuperAdmin, async (request, response) => 
     : null;
   if (!validateEmail(next.email)) return response.status(400).json({ error: "Correo invalido" });
   if (!validateUserRole(next.role)) return response.status(400).json({ error: "Rol invalido" });
+  if (next.role === "team_delegate") return response.status(400).json({ error: "Edita delegados desde el modulo de equipos." });
   if (!validateUserStatus(next.status)) return response.status(400).json({ error: "Estado invalido" });
   if (next.role === "league_admin" && !next.leagueId) {
     return response.status(400).json({ error: "Un admin de liga debe estar asignado a una liga" });
@@ -701,7 +1201,7 @@ app.post("/api/matches/:matchId/walkover", requireAuth, async (request, response
             resolutionNote: request.body.note || "Triunfo administrativo por default",
             homeGoals: winnerIsHome ? rules.forfeitGoalsFor : rules.forfeitGoalsAgainst,
             awayGoals: winnerIsHome ? rules.forfeitGoalsAgainst : rules.forfeitGoalsFor,
-            events: []
+            events: request.body.clearEvents === true ? [] : item.events || []
           }
         : item
     ))
