@@ -21,19 +21,33 @@
 }
 
 html {
+  max-width: 100%;
+  overflow-x: hidden;
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
   overflow-x: hidden;
   background: var(--paper);
   color: var(--ink);
 }
 
+#app {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .app-shell {
+  width: 100%;
+  max-width: 100%;
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 .public-route-shell {
@@ -426,6 +440,8 @@ select,
 input,
 textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -6159,6 +6175,108 @@ label {
 }
 
 @media (max-width: 560px) {
+  html,
+  body,
+  #app,
+  .app-shell,
+  .topbar,
+  .page,
+  .panel,
+  .admin-shell,
+  .admin-content,
+  .content-grid,
+  .team-portal-page,
+  .activation-page {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  input,
+  select,
+  textarea,
+  .auth-panel input,
+  .public-search-box input,
+  .searchable-select input,
+  .searchable-select select,
+  .tournament-form input,
+  .tournament-form select,
+  .tournament-card input,
+  .tournament-card select,
+  .sponsor-form input,
+  .sponsor-form select,
+  .sponsor-form textarea,
+  .sponsor-admin-card input,
+  .sponsor-admin-card select,
+  .sponsor-admin-card textarea,
+  .venue-form input,
+  .venue-form select,
+  .venue-form textarea,
+  .venue-card input,
+  .venue-card select,
+  .venue-card textarea,
+  .league-create-form input,
+  .league-create-form select,
+  .membership-card input,
+  .membership-card select,
+  .membership-card textarea,
+  .user-create-form input,
+  .user-create-form select,
+  .user-card input,
+  .user-card select {
+    min-width: 0;
+    max-width: 100%;
+    font-size: 16px;
+  }
+
+  input[type="file"] {
+    font-size: 16px;
+  }
+
+  button,
+  a.primary,
+  a.secondary,
+  .admin-public-link,
+  .public-share-button,
+  .whatsapp-share-button {
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .topbar,
+  .topbar-actions,
+  .brand,
+  .brand-copy,
+  .auth-panel,
+  .public-league-badge,
+  .league-switcher,
+  .admin-league-head,
+  .admin-metrics,
+  .inline-actions,
+  .delegate-card,
+  .delegate-card-head,
+  .delegate-user-card > summary,
+  .team-portal-roster-head,
+  .team-portal-filters,
+  .team-portal-player-list article,
+  .team-player-edit-form {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .topbar-actions,
+  .admin-metrics,
+  .inline-actions {
+    justify-content: stretch;
+  }
+
+  .public-quick-nav {
+    max-width: calc(100vw - 20px);
+    overflow-x: hidden;
+  }
+
   .page {
     width: min(100% - 20px, 1180px);
     padding-top: 10px;
@@ -6192,15 +6310,27 @@ label {
   }
 
   .public-pulse-bar {
-    margin: 12px -2px 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-x: hidden;
+    margin: 12px 0 0;
   }
 
   .public-pulse-bar article {
-    padding: 11px 12px;
+    min-width: 0;
+    padding: 10px 7px;
   }
 
   .public-pulse-bar strong {
-    font-size: 0.88rem;
+    font-size: 0.78rem;
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+  }
+
+  .public-pulse-bar span,
+  .public-pulse-bar small {
+    font-size: 0.58rem;
+    line-height: 1.08;
+    overflow-wrap: anywhere;
   }
 
   .public-utility-bar {
@@ -6421,6 +6551,18 @@ label {
     padding: 0 8px;
     font-size: 0.74rem;
     text-align: center;
+  }
+
+  .team-profile-selector {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: hidden;
+  }
+
+  .team-profile-selector button {
+    min-width: 0;
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .stats-grid article {
