@@ -83,6 +83,10 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS photo_url TEXT");
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS photo_authorized BOOLEAN NOT NULL DEFAULT false");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS observations TEXT");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS central_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS discipline_scope TEXT NOT NULL DEFAULT 'competition'");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS playoff_qualifiers INTEGER NOT NULL DEFAULT 8");
   await pool.query(`
@@ -161,6 +165,41 @@ async function runPostgresMigrations(pool) {
       used_at TIMESTAMPTZ,
       revoked_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referee_profiles (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      municipality TEXT NOT NULL,
+      photo_url TEXT,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referee_activation_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referee_match_sheets (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      payload_json JSONB NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending_review',
+      review_note TEXT,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TIMESTAMPTZ
     )
   `);
   await pool.query(`
@@ -375,6 +414,10 @@ export async function getPostgresStore() {
         observations: row.observations,
         resolutionType: row.resolution_type,
         resolutionNote: row.resolution_note,
+        centralRefereeUserId: row.central_referee_user_id || "",
+        assistantReferee1UserId: row.assistant_referee1_user_id || "",
+        assistantReferee2UserId: row.assistant_referee2_user_id || "",
+        fourthRefereeUserId: row.fourth_referee_user_id || "",
         events
       });
     }
@@ -636,7 +679,7 @@ export async function importPostgresStore(store) {
         [reset.id, league.id, reset.playerId, reset.date || "", reset.reason || "", reset.notes || "", reset.status || "active"]
       )), { dateColumns: ["date"] });
 
-      await insertRows(client, "matches", ["id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg", "aggregate_home", "aggregate_away", "round", "date", "time", "venue", "home_team_id", "away_team_id", "status", "home_goals", "away_goals", "observations", "resolution_type", "resolution_note"], league.matches.map((match) => [
+      await insertRows(client, "matches", ["id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg", "aggregate_home", "aggregate_away", "round", "date", "time", "venue", "home_team_id", "away_team_id", "status", "home_goals", "away_goals", "observations", "resolution_type", "resolution_note", "central_referee_user_id", "assistant_referee1_user_id", "assistant_referee2_user_id", "fourth_referee_user_id"], league.matches.map((match) => [
           match.id,
           league.id,
           match.competitionId || league.currentCompetitionId,
@@ -656,7 +699,11 @@ export async function importPostgresStore(store) {
           match.awayGoals,
           match.observations || "",
           match.resolutionType || "normal",
-          match.resolutionNote || null
+          match.resolutionNote || null,
+          match.centralRefereeUserId || null,
+          match.assistantReferee1UserId || null,
+          match.assistantReferee2UserId || null,
+          match.fourthRefereeUserId || null
         ]), { dateColumns: ["date"] });
 
       await insertRows(client, "match_events", ["match_id", "type", "player_id", "team_id", "minute", "suspension_matches", "reason"], league.matches.flatMap((match) => (

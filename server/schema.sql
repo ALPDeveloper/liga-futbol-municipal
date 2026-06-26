@@ -113,7 +113,11 @@ CREATE TABLE IF NOT EXISTS matches (
   away_goals INTEGER,
   observations TEXT,
   resolution_type TEXT NOT NULL DEFAULT 'normal',
-  resolution_note TEXT
+  resolution_note TEXT,
+  central_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS match_events (
@@ -219,6 +223,38 @@ CREATE TABLE IF NOT EXISTS team_delegate_activation_tokens (
   used_at TEXT,
   revoked_at TEXT,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS referee_profiles (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  municipality TEXT NOT NULL,
+  photo_url TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS referee_activation_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS referee_match_sheets (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending_review',
+  review_note TEXT,
+  submitted_at TEXT NOT NULL,
+  reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS team_user_assignments (

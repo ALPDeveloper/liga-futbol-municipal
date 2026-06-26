@@ -232,23 +232,8 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
         results={publicSearchResults}
       />
 
-      <PublicHomeDashboard
-        league={activeLeague}
-        latestResults={latestResults}
-        nextMatches={nextMatches}
-        standings={standings}
-        currentRound={defaultRound}
-        stats={stats}
-      />
-
-      <PublicPulseBar
-        league={regularLeague}
-        roundMatches={selectedRoundMatches}
-        standings={standings}
-      />
-
-      <section className="panel competition-panel" aria-label="Temporadas y torneos">
-        <SectionHeading eyebrow="Temporada" title={activeCompetition?.name || "Torneo actual"} />
+      <section className="panel competition-panel public-competition-panel" aria-label="Temporadas y torneos">
+        <SectionHeading eyebrow="Elige tu torneo" title="Temporada y categoria" />
         <CompetitionSelector
           competitions={league.competitions || []}
           selectedSeason={selectedSeason}
@@ -256,13 +241,13 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
           onSelectSeason={setSelectedSeason}
           onSelectCompetition={setSelectedCompetitionId}
         />
-        {activeCompetition && (
-          <div className="competition-summary">
-            <span>{competitionTypeLabel(activeCompetition.type)}</span>
-            <strong>{activeCompetition.season}</strong>
-          </div>
-        )}
       </section>
+
+      <PublicPulseBar
+        league={regularLeague}
+        roundMatches={selectedRoundMatches}
+        standings={standings}
+      />
 
       <SpotlightStrip spotlights={spotlights} />
 

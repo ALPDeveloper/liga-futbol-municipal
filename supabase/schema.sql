@@ -119,7 +119,11 @@ CREATE TABLE IF NOT EXISTS matches (
   away_goals INTEGER,
   observations TEXT,
   resolution_type TEXT NOT NULL DEFAULT 'normal',
-  resolution_note TEXT
+  resolution_note TEXT,
+  central_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS match_events (
@@ -226,6 +230,18 @@ ALTER TABLE IF EXISTS players
 ALTER TABLE IF EXISTS matches
   ADD COLUMN IF NOT EXISTS observations TEXT;
 
+ALTER TABLE IF EXISTS matches
+  ADD COLUMN IF NOT EXISTS central_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS matches
+  ADD COLUMN IF NOT EXISTS assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS matches
+  ADD COLUMN IF NOT EXISTS assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS matches
+  ADD COLUMN IF NOT EXISTS fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+
 ALTER TABLE IF EXISTS league_rules
   ADD COLUMN IF NOT EXISTS discipline_scope TEXT NOT NULL DEFAULT 'competition';
 
@@ -297,6 +313,38 @@ CREATE TABLE IF NOT EXISTS team_delegate_activation_tokens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS referee_profiles (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  municipality TEXT NOT NULL,
+  photo_url TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS referee_activation_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS referee_match_sheets (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  payload_json JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending_review',
+  review_note TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS memberships (
   id TEXT PRIMARY KEY,
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
@@ -357,3 +405,7 @@ CREATE INDEX IF NOT EXISTS idx_users_league ON users(league_id);
 CREATE INDEX IF NOT EXISTS idx_team_user_assignments_user ON team_user_assignments(user_id);
 CREATE INDEX IF NOT EXISTS idx_team_user_assignments_league_team ON team_user_assignments(league_id, team_id);
 CREATE INDEX IF NOT EXISTS idx_team_delegate_activation_tokens_hash ON team_delegate_activation_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_referee_activation_tokens_hash ON referee_activation_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_referee_profiles_municipality ON referee_profiles(municipality);
+CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_match ON referee_match_sheets(match_id);
+CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_status ON referee_match_sheets(status);

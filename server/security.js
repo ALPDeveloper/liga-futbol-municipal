@@ -1,6 +1,6 @@
 const PASSWORD_MIN_LENGTH = 10;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const USER_ROLES = new Set(["super_admin", "league_admin", "team_delegate"]);
+const USER_ROLES = new Set(["super_admin", "league_admin", "team_delegate", "referee"]);
 const USER_STATUSES = new Set(["pending_activation", "active", "disabled", "suspended", "deleted"]);
 
 export function applySecurityHeaders(request, response, next) {
@@ -138,6 +138,7 @@ export function sanitizePublicStore(store) {
 export function scopeStoreForUser(store, user) {
   if (!user) return sanitizePublicStore(store);
   if (user.role === "super_admin") return store;
+  if (user.role === "referee") return sanitizePublicStore(store);
   if (user.role !== "league_admin" || !user.leagueId) return sanitizePublicStore(store);
 
   const leagues = (store.leagues || []).filter((league) => league.id === user.leagueId);

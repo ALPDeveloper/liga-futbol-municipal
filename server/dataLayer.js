@@ -56,6 +56,52 @@ function normalizeTeamDelegateRow(row) {
   };
 }
 
+function normalizeRefereeRow(row) {
+  if (!row) return null;
+  return {
+    userId: row.user_id ?? row.userId ?? row.id,
+    name: row.user_name ?? row.userName ?? row.name,
+    email: row.user_email ?? row.userEmail ?? row.email,
+    phone: row.user_phone ?? row.userPhone ?? row.phone ?? "",
+    status: (row.user_status ?? row.userStatus ?? row.status) || "active",
+    municipality: row.municipality || "",
+    photoUrl: row.photo_url ?? row.photoUrl ?? "",
+    notes: row.notes || "",
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    updatedAt: normalizeDateTime(row.updated_at ?? row.updatedAt)
+  };
+}
+
+function parseJsonValue(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeRefereeMatchSheetRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    leagueId: row.league_id ?? row.leagueId,
+    leagueName: row.league_name ?? row.leagueName ?? "",
+    matchId: row.match_id ?? row.matchId,
+    submittedByUserId: row.submitted_by_user_id ?? row.submittedByUserId ?? "",
+    submittedByName: row.submitted_by_name ?? row.submittedByName ?? "",
+    submittedByEmail: row.submitted_by_email ?? row.submittedByEmail ?? "",
+    payload: parseJsonValue(row.payload_json ?? row.payloadJson, {}),
+    status: row.status || "pending_review",
+    reviewNote: row.review_note ?? row.reviewNote ?? "",
+    submittedAt: normalizeDateTime(row.submitted_at ?? row.submittedAt),
+    reviewedByUserId: row.reviewed_by_user_id ?? row.reviewedByUserId ?? "",
+    reviewedByName: row.reviewed_by_name ?? row.reviewedByName ?? "",
+    reviewedAt: normalizeDateTime(row.reviewed_at ?? row.reviewedAt)
+  };
+}
+
 function isRosterOpen(row) {
   if (!toBoolean(row?.registration_enabled ?? row?.registrationEnabled)) return false;
   const enabledUntil = normalizeDateTime(row?.enabled_until ?? row?.enabledUntil);
@@ -224,6 +270,276 @@ export async function createTeamDelegateAssignmentData({ id, leagueId, teamId, u
     `).run(id, leagueId, teamId, userId, status, createdAt);
   }
   return listTeamDelegatesData(leagueId);
+}
+
+export async function listRefereesData(municipality = "") {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT
+        rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
+        u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+      FROM referee_profiles rp
+      JOIN users u ON u.id = rp.user_id
+      WHERE ($1::text = '' OR rp.municipality = $1)
+      ORDER BY rp.municipality, u.name
+    `, [municipality || ""]);
+    return rows.map(normalizeRefereeRow);
+  }
+  return db.prepare(`
+    SELECT
+      rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
+      u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+    FROM referee_profiles rp
+    JOIN users u ON u.id = rp.user_id
+    WHERE (? = '' OR rp.municipality = ?)
+    ORDER BY rp.municipality, u.name
+  `).all(municipality || "", municipality || "").map(normalizeRefereeRow);
+}
+
+export async function createRefereeProfileData({ userId, municipality, photoUrl = "", notes = "" }) {
+  const now = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO referee_profiles (user_id, municipality, photo_url, notes, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $5)
+    `, [userId, upperText(municipality), sanitizeImageUrl(photoUrl), notes, now]);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO referee_profiles (user_id, municipality, photo_url, notes, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(userId, upperText(municipality), sanitizeImageUrl(photoUrl), notes, now, now);
+}
+
+export async function updateRefereeStatusData(userId, status) {
+  if (isPostgres()) {
+    await pgQuery("UPDATE users SET status = $1 WHERE id = $2 AND role = 'referee'", [status, userId]);
+    return getUserById(userId);
+  }
+  db.prepare("UPDATE users SET status = ? WHERE id = ? AND role = 'referee'").run(status, userId);
+  return getUserById(userId);
+}
+
+export async function getRefereeProfileData(userId) {
+  const rows = isPostgres()
+    ? await pgQuery(`
+        SELECT
+          rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
+          u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+        FROM referee_profiles rp
+        JOIN users u ON u.id = rp.user_id
+        WHERE rp.user_id = $1
+      `, [userId])
+    : db.prepare(`
+        SELECT
+          rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
+          u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+        FROM referee_profiles rp
+        JOIN users u ON u.id = rp.user_id
+        WHERE rp.user_id = ?
+      `).all(userId);
+  return normalizeRefereeRow(rows[0]);
+}
+
+export async function updateMatchRefereesData(matchId, payload) {
+  const values = [
+    payload.centralRefereeUserId || null,
+    payload.assistantReferee1UserId || null,
+    payload.assistantReferee2UserId || null,
+    payload.fourthRefereeUserId || null,
+    matchId
+  ];
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE matches
+      SET central_referee_user_id = $1,
+          assistant_referee1_user_id = $2,
+          assistant_referee2_user_id = $3,
+          fourth_referee_user_id = $4
+      WHERE id = $5
+    `, values);
+    return;
+  }
+  db.prepare(`
+    UPDATE matches
+    SET central_referee_user_id = ?,
+        assistant_referee1_user_id = ?,
+        assistant_referee2_user_id = ?,
+        fourth_referee_user_id = ?
+    WHERE id = ?
+  `).run(...values);
+}
+
+export async function createRefereeMatchSheetData({
+  id,
+  leagueId,
+  matchId,
+  submittedByUserId,
+  payload,
+  status = "pending_review",
+  reviewNote = "",
+  submittedAt = new Date().toISOString(),
+  reviewedByUserId = null,
+  reviewedAt = null
+}) {
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO referee_match_sheets (
+        id, league_id, match_id, submitted_by_user_id, payload_json, status, review_note, submitted_at, reviewed_by_user_id, reviewed_at
+      )
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+      ON CONFLICT (id) DO UPDATE SET
+        league_id = EXCLUDED.league_id,
+        match_id = EXCLUDED.match_id,
+        submitted_by_user_id = EXCLUDED.submitted_by_user_id,
+        payload_json = EXCLUDED.payload_json,
+        status = EXCLUDED.status,
+        review_note = EXCLUDED.review_note,
+        submitted_at = EXCLUDED.submitted_at,
+        reviewed_by_user_id = EXCLUDED.reviewed_by_user_id,
+        reviewed_at = EXCLUDED.reviewed_at
+    `, [id, leagueId, matchId, submittedByUserId, JSON.stringify(payload || {}), status, reviewNote, submittedAt, reviewedByUserId, reviewedAt]);
+    return getRefereeMatchSheetData(id);
+  }
+  db.prepare(`
+    INSERT INTO referee_match_sheets (
+      id, league_id, match_id, submitted_by_user_id, payload_json, status, review_note, submitted_at, reviewed_by_user_id, reviewed_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      league_id = excluded.league_id,
+      match_id = excluded.match_id,
+      submitted_by_user_id = excluded.submitted_by_user_id,
+      payload_json = excluded.payload_json,
+      status = excluded.status,
+      review_note = excluded.review_note,
+      submitted_at = excluded.submitted_at,
+      reviewed_by_user_id = excluded.reviewed_by_user_id,
+      reviewed_at = excluded.reviewed_at
+  `).run(id, leagueId, matchId, submittedByUserId, JSON.stringify(payload || {}), status, reviewNote, submittedAt, reviewedByUserId, reviewedAt);
+  return getRefereeMatchSheetData(id);
+}
+
+export async function getPendingRefereeMatchSheetForMatchData(matchId) {
+  const rows = isPostgres()
+    ? await pgQuery(`
+        SELECT rms.*, submitter.name AS submitted_by_name, submitter.email AS submitted_by_email
+        FROM referee_match_sheets rms
+        LEFT JOIN users submitter ON submitter.id = rms.submitted_by_user_id
+        WHERE rms.match_id = $1 AND rms.status = 'pending_review'
+        ORDER BY rms.submitted_at DESC
+        LIMIT 1
+      `, [matchId])
+    : db.prepare(`
+        SELECT rms.*, submitter.name AS submitted_by_name, submitter.email AS submitted_by_email
+        FROM referee_match_sheets rms
+        LEFT JOIN users submitter ON submitter.id = rms.submitted_by_user_id
+        WHERE rms.match_id = ? AND rms.status = 'pending_review'
+        ORDER BY rms.submitted_at DESC
+        LIMIT 1
+      `).all(matchId);
+  return normalizeRefereeMatchSheetRow(rows[0]);
+}
+
+export async function getRefereeMatchSheetData(sheetId) {
+  const rows = isPostgres()
+    ? await pgQuery(`
+        SELECT
+          rms.*, submitter.name AS submitted_by_name, submitter.email AS submitted_by_email,
+          reviewer.name AS reviewed_by_name
+        FROM referee_match_sheets rms
+        LEFT JOIN users submitter ON submitter.id = rms.submitted_by_user_id
+        LEFT JOIN users reviewer ON reviewer.id = rms.reviewed_by_user_id
+        WHERE rms.id = $1
+      `, [sheetId])
+    : db.prepare(`
+        SELECT
+          rms.*, submitter.name AS submitted_by_name, submitter.email AS submitted_by_email,
+          reviewer.name AS reviewed_by_name
+        FROM referee_match_sheets rms
+        LEFT JOIN users submitter ON submitter.id = rms.submitted_by_user_id
+        LEFT JOIN users reviewer ON reviewer.id = rms.reviewed_by_user_id
+        WHERE rms.id = ?
+      `).all(sheetId);
+  return normalizeRefereeMatchSheetRow(rows[0]);
+}
+
+export async function listRefereeMatchSheetsData({ leagueId = "", status = "pending_review" } = {}) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT
+        rms.*, leagues.name AS league_name,
+        submitter.name AS submitted_by_name, submitter.email AS submitted_by_email,
+        reviewer.name AS reviewed_by_name
+      FROM referee_match_sheets rms
+      JOIN leagues ON leagues.id = rms.league_id
+      LEFT JOIN users submitter ON submitter.id = rms.submitted_by_user_id
+      LEFT JOIN users reviewer ON reviewer.id = rms.reviewed_by_user_id
+      WHERE ($1::text = '' OR rms.league_id = $1)
+        AND ($2::text = 'all' OR rms.status = $2)
+      ORDER BY rms.submitted_at DESC
+    `, [leagueId || "", status || "pending_review"]);
+    return rows.map(normalizeRefereeMatchSheetRow);
+  }
+  return db.prepare(`
+    SELECT
+      rms.*, leagues.name AS league_name,
+      submitter.name AS submitted_by_name, submitter.email AS submitted_by_email,
+      reviewer.name AS reviewed_by_name
+    FROM referee_match_sheets rms
+    JOIN leagues ON leagues.id = rms.league_id
+    LEFT JOIN users submitter ON submitter.id = rms.submitted_by_user_id
+    LEFT JOIN users reviewer ON reviewer.id = rms.reviewed_by_user_id
+    WHERE (? = '' OR rms.league_id = ?)
+      AND (? = 'all' OR rms.status = ?)
+    ORDER BY rms.submitted_at DESC
+  `).all(leagueId || "", leagueId || "", status || "pending_review", status || "pending_review").map(normalizeRefereeMatchSheetRow);
+}
+
+export async function updateRefereeMatchSheetReviewData({ sheetId, status, reviewNote = "", reviewedByUserId }) {
+  const now = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE referee_match_sheets
+      SET status = $1,
+          review_note = $2,
+          reviewed_by_user_id = $3,
+          reviewed_at = $4
+      WHERE id = $5
+    `, [status, reviewNote, reviewedByUserId, now, sheetId]);
+    return getRefereeMatchSheetData(sheetId);
+  }
+  db.prepare(`
+    UPDATE referee_match_sheets
+    SET status = ?,
+        review_note = ?,
+        reviewed_by_user_id = ?,
+        reviewed_at = ?
+    WHERE id = ?
+  `).run(status, reviewNote, reviewedByUserId, now, sheetId);
+  return getRefereeMatchSheetData(sheetId);
+}
+
+export async function listRefereeMatchSheetsForRefereeData(userId, { status = "pending_review" } = {}) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT rms.*, leagues.name AS league_name
+      FROM referee_match_sheets rms
+      JOIN leagues ON leagues.id = rms.league_id
+      WHERE rms.submitted_by_user_id = $1
+        AND ($2::text = 'all' OR rms.status = $2)
+      ORDER BY rms.submitted_at DESC
+    `, [userId, status || "pending_review"]);
+    return rows.map(normalizeRefereeMatchSheetRow);
+  }
+  return db.prepare(`
+    SELECT rms.*, leagues.name AS league_name
+    FROM referee_match_sheets rms
+    JOIN leagues ON leagues.id = rms.league_id
+    WHERE rms.submitted_by_user_id = ?
+      AND (? = 'all' OR rms.status = ?)
+    ORDER BY rms.submitted_at DESC
+  `).all(userId, status || "pending_review", status || "pending_review").map(normalizeRefereeMatchSheetRow);
 }
 
 export async function updateTeamDelegateAssignmentData(assignmentId, { status }) {
@@ -439,6 +755,24 @@ function normalizeActivationRow(row) {
   };
 }
 
+function normalizeRefereeActivationRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id ?? row.userId,
+    tokenHash: row.token_hash ?? row.tokenHash,
+    expiresAt: normalizeDateTime(row.expires_at ?? row.expiresAt),
+    usedAt: normalizeDateTime(row.used_at ?? row.usedAt),
+    revokedAt: normalizeDateTime(row.revoked_at ?? row.revokedAt),
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    userName: row.user_name ?? row.userName,
+    userEmail: row.user_email ?? row.userEmail,
+    userPhone: row.user_phone ?? row.userPhone,
+    userStatus: row.user_status ?? row.userStatus,
+    municipality: row.municipality || ""
+  };
+}
+
 export async function createTeamDelegateActivationData({ id, userId, assignmentId, tokenHash, expiresAt }) {
   const createdAt = new Date().toISOString();
   if (isPostgres()) {
@@ -507,6 +841,87 @@ export async function markTeamDelegateActivationUsedData(tokenId) {
     return;
   }
   db.prepare("UPDATE team_delegate_activation_tokens SET used_at = ? WHERE id = ?").run(usedAt, tokenId);
+}
+
+export async function createRefereeActivationData({ id, userId, tokenHash, expiresAt }) {
+  const createdAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO referee_activation_tokens (id, user_id, token_hash, expires_at, created_at)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [id, userId, tokenHash, expiresAt, createdAt]);
+  } else {
+    db.prepare(`
+      INSERT INTO referee_activation_tokens (id, user_id, token_hash, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, userId, tokenHash, expiresAt, createdAt);
+  }
+  return getRefereeActivationByHashData(tokenHash);
+}
+
+export async function revokeRefereeActivationsData(userId) {
+  const revokedAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE referee_activation_tokens
+      SET revoked_at = $1
+      WHERE user_id = $2 AND used_at IS NULL AND revoked_at IS NULL
+    `, [revokedAt, userId]);
+    return;
+  }
+  db.prepare(`
+    UPDATE referee_activation_tokens
+    SET revoked_at = ?
+    WHERE user_id = ? AND used_at IS NULL AND revoked_at IS NULL
+  `).run(revokedAt, userId);
+}
+
+export async function getRefereeActivationByHashData(tokenHash) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT rat.*, u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status,
+        rp.municipality
+      FROM referee_activation_tokens rat
+      JOIN users u ON u.id = rat.user_id
+      JOIN referee_profiles rp ON rp.user_id = rat.user_id
+      WHERE rat.token_hash = $1
+    `, [tokenHash]);
+    return normalizeRefereeActivationRow(rows[0]);
+  }
+  return normalizeRefereeActivationRow(db.prepare(`
+    SELECT rat.*, u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status,
+      rp.municipality
+    FROM referee_activation_tokens rat
+    JOIN users u ON u.id = rat.user_id
+    JOIN referee_profiles rp ON rp.user_id = rat.user_id
+    WHERE rat.token_hash = ?
+  `).get(tokenHash));
+}
+
+export async function markRefereeActivationUsedData(tokenId) {
+  const usedAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery("UPDATE referee_activation_tokens SET used_at = $1 WHERE id = $2", [usedAt, tokenId]);
+    return;
+  }
+  db.prepare("UPDATE referee_activation_tokens SET used_at = ? WHERE id = ?").run(usedAt, tokenId);
+}
+
+export async function activateRefereeUserData({ userId, passwordHash }) {
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE users
+      SET password_hash = $1, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
+      WHERE id = $2 AND role = 'referee'
+    `, [passwordHash, userId]);
+    return getUserById(userId);
+  }
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
+    WHERE id = ? AND role = 'referee'
+  `).run(passwordHash, userId);
+  return getUserById(userId);
 }
 
 export async function activateTeamDelegateUserData({ userId, assignmentId, passwordHash }) {

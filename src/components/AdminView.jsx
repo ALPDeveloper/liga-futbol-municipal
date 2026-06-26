@@ -7,6 +7,7 @@ import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
 import { createUser, deleteUser, disableUser, fetchUsers, updateUser } from "../lib/userApi.js";
 import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamDelegateInvitation, updateTeamDelegate, updateTeamRosterPermission } from "../lib/teamDelegateApi.js";
+import { createReferee, deleteReferee, fetchReferees, fetchRefereeMatchSheets, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
 import { updateMatchSheetEventItem } from "../lib/matchSheet.js";
 
@@ -37,6 +38,7 @@ function getPlayerPositionOptionValue(position) {
 
 export function AdminView({
   adminPanel,
+  applyApiStore,
   authToken,
   canUseSuperAdmin,
   currentUser,
@@ -112,6 +114,7 @@ export function AdminView({
           {adminPanel === "league" && (
             <LeagueAdmin
               authToken={authToken}
+              applyApiStore={applyApiStore}
               currentUser={currentUser}
               league={league}
               onAddAnnouncement={onAddAnnouncement}
@@ -179,6 +182,7 @@ export function AdminView({
 
 function LeagueAdmin({
   authToken,
+  applyApiStore,
   currentUser,
   league,
   onAddAnnouncement,
@@ -231,6 +235,7 @@ function LeagueAdmin({
     { id: "tournaments", label: "Torneos" },
     { id: "squads", label: "Plantillas" },
     { id: "delegates", label: "Delegados" },
+    { id: "referees", label: "Arbitros" },
     { id: "venues", label: "Canchas" },
     { id: "announcements", label: "Avisos" },
     { id: "lists", label: "Listados" },
@@ -304,6 +309,14 @@ function LeagueAdmin({
       {activeSection === "delegates" && (
         <TeamDelegatesPanel
           authToken={authToken}
+          league={league}
+        />
+      )}
+
+      {activeSection === "referees" && (
+        <RefereesPanel
+          authToken={authToken}
+          applyApiStore={applyApiStore}
           league={league}
         />
       )}
@@ -980,6 +993,598 @@ function TeamDelegatesPanel({ authToken, league }) {
       </div>
     </section>
   );
+}
+
+function RefereesPanel({ authToken, applyApiStore, league }) {
+  const [referees, setReferees] = useState([]);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busyAction, setBusyAction] = useState("");
+  const [lastInvitation, setLastInvitation] = useState(null);
+  const [pendingSheets, setPendingSheets] = useState([]);
+  const [refereeSearch, setRefereeSearch] = useState("");
+  const [refereeStatusFilter, setRefereeStatusFilter] = useState("all");
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState(getDefaultCompetitionId(league));
+  const [matchSearch, setMatchSearch] = useState("");
+  const [matchStatusFilter, setMatchStatusFilter] = useState("scheduled");
+  const [assignmentFeedback, setAssignmentFeedback] = useState({});
+  const [activeRefereeTask, setActiveRefereeTask] = useState("assign");
+  const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
+  const selectedCompetition = getCompetition(league, selectedCompetitionId);
+  const competitionLeague = useMemo(
+    () => scopeLeagueToCompetition(league, selectedCompetitionId || getDefaultCompetitionId(league)),
+    [league, selectedCompetitionId]
+  );
+  const activeReferees = useMemo(
+    () => referees.filter((referee) => referee.status === "active"),
+    [referees]
+  );
+  const filteredReferees = useMemo(() => {
+    const query = normalizeAdminSearchTerm(refereeSearch);
+    return referees.filter((referee) => {
+      if (refereeStatusFilter !== "all" && referee.status !== refereeStatusFilter) return false;
+      if (!query) return true;
+      return normalizeAdminSearchTerm(`${referee.name} ${referee.email} ${referee.phone || ""} ${referee.municipality}`).includes(query);
+    });
+  }, [refereeSearch, refereeStatusFilter, referees]);
+  const filteredMatches = useMemo(() => {
+    const query = normalizeAdminSearchTerm(matchSearch);
+    return [...competitionLeague.matches]
+      .filter((match) => {
+        if (matchStatusFilter === "scheduled" && match.status !== "scheduled") return false;
+        if (matchStatusFilter === "finished" && match.status !== "finished" && match.status !== "walkover") return false;
+        if (!query) return true;
+        return normalizeAdminSearchTerm(`${getMatchAdminLabel(league, match)} ${match.venue || ""} ${match.date || ""}`).includes(query);
+      })
+      .sort((a, b) => (
+        Number(a.round || 0) - Number(b.round || 0) ||
+        String(a.date || "").localeCompare(String(b.date || "")) ||
+        String(a.time || "").localeCompare(String(b.time || ""))
+      ));
+  }, [competitionLeague.matches, league, matchSearch, matchStatusFilter]);
+  const matchRounds = useMemo(() => {
+    const groups = new Map();
+    for (const match of filteredMatches) {
+      const key = (match.stage || "regular") === "playoff"
+        ? `playoff-${match.playoffRound || "liguilla"}`
+        : `round-${match.round || "sin-jornada"}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          title: (match.stage || "regular") === "playoff" ? (match.playoffRound || "Liguilla") : `Jornada ${match.round || "-"}`,
+          matches: []
+        });
+      }
+      groups.get(key).matches.push(match);
+    }
+    return [...groups.values()];
+  }, [filteredMatches]);
+
+  async function reloadReferees() {
+    setLoading(true);
+    try {
+      const [nextReferees, nextSheets] = await Promise.all([
+        fetchReferees(authToken, league.city),
+        fetchRefereeMatchSheets(authToken, { leagueId: league.id, status: "pending_review" })
+      ]);
+      setReferees(nextReferees);
+      setPendingSheets(nextSheets);
+      setError("");
+    } catch (loadError) {
+      setError(loadError.message || "No se pudieron cargar los arbitros.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    reloadReferees();
+  }, [authToken, league.city]);
+
+  useEffect(() => {
+    if (pendingSheets.length) setActiveRefereeTask("review");
+  }, [pendingSheets.length]);
+
+  useEffect(() => {
+    const fallbackId = getDefaultCompetitionId(league);
+    if (!league.competitions?.some((competition) => competition.id === selectedCompetitionId)) {
+      setSelectedCompetitionId(fallbackId);
+    }
+  }, [league, selectedCompetitionId]);
+
+  async function reviewSheet(sheet, action, note = "") {
+    const confirmed = window.confirm(action === "approve"
+      ? "¿Aprobar esta acta y aplicar marcador, goles y tarjetas al partido oficial?"
+      : "¿Rechazar esta acta para que el arbitro pueda corregirla?");
+    if (!confirmed) return;
+    const actionKey = `${action}-sheet-${sheet.id}`;
+    setBusyAction(actionKey);
+    try {
+      const response = await reviewRefereeMatchSheet(authToken, sheet.id, { action, reviewNote: note });
+      setPendingSheets(response.sheets || []);
+      if (response.store) applyApiStore?.(response.store);
+      setNotice(action === "approve" ? "Acta aprobada y aplicada al partido oficial." : "Acta rechazada. El arbitro podra enviarla nuevamente.");
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo revisar el acta.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function submitReferee(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
+    if (!window.confirm("¿Crear este arbitro y generar su invitacion de activacion?")) return;
+    try {
+      setBusyAction("create-referee");
+      const response = await createReferee(authToken, { ...payload, municipality: league.city });
+      setReferees(response.referees || []);
+      setLastInvitation(response.invitation || null);
+      setNotice(`Invitacion creada para ${payload.name}. Copia el mensaje y envialo por WhatsApp.`);
+      setError("");
+      form.reset();
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo crear el arbitro.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function changeRefereeStatus(referee, status) {
+    const actionKey = `${status}-${referee.userId}`;
+    setBusyAction(actionKey);
+    try {
+      const nextReferees = await updateReferee(authToken, referee.userId, { status });
+      setReferees(nextReferees);
+      setNotice(status === "active"
+        ? `${referee.name} activado correctamente.`
+        : status === "suspended"
+        ? `${referee.name} suspendido. No podra iniciar sesion.`
+        : `${referee.name} desactivado. No podra iniciar sesion.`);
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo actualizar el arbitro.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function regenerateRefereeInvitation(referee) {
+    const actionKey = `invite-${referee.userId}`;
+    setBusyAction(actionKey);
+    try {
+      const response = await resendRefereeInvitation(authToken, referee.userId);
+      setReferees(response.referees || []);
+      setLastInvitation(response.invitation || null);
+      setNotice("Invitacion regenerada. Copia el nuevo mensaje para enviarlo.");
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo regenerar la invitacion.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function deleteRefereeUser(referee) {
+    const typedEmail = window.prompt(
+      `Eliminar definitivamente al arbitro ${referee.name}.\n\n` +
+      `Esta accion borra la cuenta ${referee.email}, elimina su perfil de arbitro y quita sus asignaciones en partidos. No borra partidos ni actas ya capturadas.\n\n` +
+      "Para confirmar, escribe el correo completo del arbitro:"
+    );
+    if (typedEmail === null) return;
+    if (typedEmail.trim().toLowerCase() !== String(referee.email || "").toLowerCase()) {
+      setNotice("");
+      setError("No se elimino el arbitro. El correo escrito no coincide.");
+      return;
+    }
+
+    const actionKey = `delete-${referee.userId}`;
+    setBusyAction(actionKey);
+    try {
+      const response = await deleteReferee(authToken, referee.userId);
+      setReferees(response.referees || []);
+      setNotice(response.userDeleted ? "Arbitro eliminado definitivamente." : "Arbitro eliminado.");
+      setError("");
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudo eliminar definitivamente el arbitro.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function saveMatchReferees(event, match) {
+    event.preventDefault();
+    const payload = getFormPayload(event.currentTarget);
+    const selectedReferees = [
+      payload.centralRefereeUserId,
+      payload.assistantReferee1UserId,
+      payload.assistantReferee2UserId,
+      payload.fourthRefereeUserId
+    ].filter(Boolean);
+    if (new Set(selectedReferees).size !== selectedReferees.length) {
+      setNotice("");
+      setError("Un arbitro no puede ocupar dos posiciones en el mismo partido.");
+      return;
+    }
+    const actionKey = `match-referees-${match.id}`;
+    setBusyAction(actionKey);
+    setAssignmentFeedback((current) => ({ ...current, [match.id]: null }));
+    try {
+      const apiStore = await updateMatchReferees(authToken, match.id, payload);
+      applyApiStore?.(apiStore);
+      const successMessage = `Designacion guardada correctamente para ${getMatchAdminLabel(league, match)}.`;
+      setAssignmentFeedback((current) => ({
+        ...current,
+        [match.id]: { type: "ok", message: successMessage }
+      }));
+      setNotice(successMessage);
+      setError("");
+    } catch (saveError) {
+      const errorMessage = saveError.message || "No se pudo guardar la designacion arbitral.";
+      setAssignmentFeedback((current) => ({
+        ...current,
+        [match.id]: { type: "error", message: errorMessage }
+      }));
+      setNotice("");
+      setError(errorMessage);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  return (
+    <section className="panel">
+      <SectionHeading eyebrow="Arbitraje" title="Arbitros e invitaciones" />
+      <p className="helper-text">
+        Crea arbitros por municipio, envia su enlace de activacion y asigna central o auxiliares a los partidos. El panel de arbitro vive separado en /arbitro.
+      </p>
+      {notice && <p className="auth-ok">{notice}</p>}
+      {error && <p className="auth-error">{error}</p>}
+
+      <div className="referee-command-center">
+        <button className={activeRefereeTask === "review" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("review")}>
+          <span>Paso 1</span>
+          <strong>Revisar actas</strong>
+          <small>{pendingSheets.length} pendiente(s)</small>
+        </button>
+        <button className={activeRefereeTask === "invite" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("invite")}>
+          <span>Paso 2</span>
+          <strong>Crear / invitar</strong>
+          <small>{referees.filter((referee) => referee.status === "pending_activation").length} por activar</small>
+        </button>
+        <button className={activeRefereeTask === "assign" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("assign")}>
+          <span>Paso 3</span>
+          <strong>Designar partidos</strong>
+          <small>{filteredMatches.length} partido(s)</small>
+        </button>
+        <button className={activeRefereeTask === "manage" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("manage")}>
+          <span>Control</span>
+          <strong>Administrar arbitros</strong>
+          <small>{activeReferees.length} activo(s)</small>
+        </button>
+      </div>
+
+      {activeRefereeTask === "review" && (
+        <div className="referee-task-panel">
+          <div className="referee-task-head">
+            <span>Primero atiende lo urgente</span>
+            <h3>Actas enviadas por arbitros</h3>
+            <p>Aprueba para aplicar marcador, goles y tarjetas al partido oficial. Rechaza si el arbitro debe corregir el acta.</p>
+          </div>
+          <RefereeSheetReviewPanel
+            busyAction={busyAction}
+            league={league}
+            onReview={reviewSheet}
+            sheets={pendingSheets}
+          />
+        </div>
+      )}
+
+      {activeRefereeTask === "invite" && (
+        <div className="referee-task-panel">
+          <div className="referee-task-head">
+            <span>Alta de usuario</span>
+            <h3>Crear arbitro y generar invitacion</h3>
+            <p>Captura sus datos, LIGATEC genera el enlace de activacion y el mensaje listo para WhatsApp.</p>
+          </div>
+          <form className="delegate-create-form referee-create-card" onSubmit={submitReferee}>
+            <label>Municipio
+              <input name="municipality" value={league.city || ""} readOnly />
+            </label>
+            <label>Nombre del arbitro<input name="name" required placeholder="Nombre completo" /></label>
+            <label>Telefono<input name="phone" required inputMode="tel" placeholder="354..." /></label>
+            <label>Correo<input name="email" required type="email" placeholder="arbitro@correo.com" /></label>
+            <button className="primary" type="submit" disabled={busyAction === "create-referee"}>
+              {busyAction === "create-referee" ? "Creando invitacion..." : "Crear invitacion"}
+            </button>
+          </form>
+
+          {lastInvitation && (
+            <div className="delegate-invitation-box">
+              <strong>Mensaje listo para WhatsApp</strong>
+              <textarea readOnly value={lastInvitation.whatsappMessage || ""} />
+              <div className="inline-actions">
+                <button type="button" onClick={() => navigator.clipboard?.writeText(lastInvitation.whatsappMessage || "")}>Copiar mensaje</button>
+                <a href={`https://wa.me/?text=${encodeURIComponent(lastInvitation.whatsappMessage || "")}`} rel="noreferrer" target="_blank">Abrir WhatsApp</a>
+              </div>
+              <small>Expira: {lastInvitation.expiresAt ? new Date(lastInvitation.expiresAt).toLocaleString("es-MX") : "segun configuracion"}</small>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeRefereeTask === "manage" && (
+        <div className="referee-task-panel">
+          <div className="referee-task-head">
+            <span>Control de accesos</span>
+            <h3>Administrar arbitros registrados</h3>
+            <p>Busca al arbitro, regenera invitaciones o suspende acceso sin afectar partidos ya capturados.</p>
+          </div>
+          <div className="delegate-filter-bar referee-filter-bar referee-filter-bar-list">
+            <label>Buscar arbitro
+              <input
+                type="search"
+                value={refereeSearch}
+                onChange={(event) => setRefereeSearch(event.target.value)}
+                placeholder="Nombre, correo, telefono"
+              />
+            </label>
+            <label>Estado
+              <select value={refereeStatusFilter} onChange={(event) => setRefereeStatusFilter(event.target.value)}>
+                <option value="all">Todos</option>
+                <option value="pending_activation">Pendiente</option>
+                <option value="active">Activo</option>
+                <option value="disabled">Desactivado</option>
+                <option value="suspended">Suspendido</option>
+              </select>
+            </label>
+            <button type="button" onClick={() => {
+              setRefereeSearch("");
+              setRefereeStatusFilter("all");
+            }}>
+              Limpiar filtros
+            </button>
+          </div>
+          <div className="delegate-summary-strip">
+            <span><strong>{referees.length}</strong> arbitros</span>
+            <span><strong>{activeReferees.length}</strong> activos</span>
+            <span><strong>{referees.filter((referee) => referee.status === "pending_activation").length}</strong> pendientes</span>
+          </div>
+          <div className="delegate-list compact referee-compact-list">
+            {loading ? <p className="empty">Cargando arbitros...</p> : filteredReferees.map((referee) => {
+              const isActivating = busyAction === `active-${referee.userId}`;
+              const isDisabling = busyAction === `disabled-${referee.userId}`;
+              const isSuspending = busyAction === `suspended-${referee.userId}`;
+              const isInviting = busyAction === `invite-${referee.userId}`;
+              const isDeleting = busyAction === `delete-${referee.userId}`;
+              const isBusyReferee = isActivating || isDisabling || isSuspending || isInviting || isDeleting;
+              return (
+                <details className="delegate-card compact delegate-user-card referee-user-card" key={referee.userId}>
+                  <summary>
+                    <span>
+                      <strong>{referee.name}</strong>
+                      <small>{referee.municipality} | {getRefereeStatusLabel(referee.status)}</small>
+                    </span>
+                    <b>{referee.status === "active" ? "Activo" : "Sin acceso"}</b>
+                  </summary>
+                  <span>{referee.email}</span>
+                  {referee.phone && <span>{referee.phone}</span>}
+                  <div className="inline-actions delegate-action-grid">
+                    <button type="button" disabled={referee.status === "active" || referee.status === "pending_activation" || isBusyReferee} onClick={() => changeRefereeStatus(referee, "active")}>
+                      {isActivating ? "Activando..." : "Activar"}
+                    </button>
+                    <button type="button" disabled={isBusyReferee} onClick={() => regenerateRefereeInvitation(referee)}>
+                      {isInviting ? "Generando..." : referee.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
+                    </button>
+                    <button className="danger" type="button" disabled={referee.status === "disabled" || isBusyReferee} onClick={() => changeRefereeStatus(referee, "disabled")}>
+                      {isDisabling ? "Desactivando..." : "Desactivar"}
+                    </button>
+                    <button className="danger" type="button" disabled={referee.status === "suspended" || isBusyReferee} onClick={() => changeRefereeStatus(referee, "suspended")}>
+                      {isSuspending ? "Suspendiendo..." : "Suspender"}
+                    </button>
+                    <button className="danger ghost-danger" type="button" disabled={isBusyReferee} onClick={() => deleteRefereeUser(referee)}>
+                      {isDeleting ? "Eliminando..." : "Eliminar definitivo"}
+                    </button>
+                  </div>
+                </details>
+              );
+            })}
+            {!loading && !filteredReferees.length && <p className="empty">No hay arbitros que coincidan con los filtros.</p>}
+          </div>
+        </div>
+      )}
+
+      {activeRefereeTask === "assign" && (
+        <div className="referee-task-panel">
+          <div className="referee-task-head">
+            <span>Programacion arbitral</span>
+            <h3>Designar arbitros por partido</h3>
+            <p>Filtra por torneo, jornada o equipo. Solo aparecen como opcion los arbitros activos de {league.city}.</p>
+          </div>
+          <div className="delegate-filter-bar referee-filter-bar referee-filter-bar-matches">
+            <label>Torneo / categoria
+              <select value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.target.value)}>
+                {competitions.map((competition) => (
+                  <option key={competition.id} value={competition.id}>{competition.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>Estado partido
+              <select value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
+                <option value="scheduled">Programados</option>
+                <option value="finished">Capturados</option>
+                <option value="all">Todos</option>
+              </select>
+            </label>
+            <label>Buscar partido
+              <input
+                type="search"
+                value={matchSearch}
+                onChange={(event) => setMatchSearch(event.target.value)}
+                placeholder="Equipo, cancha o fecha"
+              />
+            </label>
+          </div>
+          <div className="delegate-summary-strip">
+            <span><strong>{activeReferees.length}</strong> arbitros activos</span>
+            <span><strong>{filteredMatches.length}</strong> partidos filtrados</span>
+            <span><strong>{matchRounds.length}</strong> grupos</span>
+          </div>
+          <div className="delegate-group-list referee-match-groups">
+            {matchRounds.map((group) => (
+              <details className="delegate-compact-group" key={group.id} open={Boolean(matchSearch) || matchStatusFilter !== "scheduled"}>
+                <summary>
+                  <strong>{group.title}</strong>
+                  <span>{group.matches.length} partido(s)</span>
+                </summary>
+                <div className="delegate-list compact">
+                  {group.matches.map((match) => {
+                    const feedback = assignmentFeedback[match.id];
+                    return (
+                      <form className="delegate-card compact referee-match-card" key={match.id} onSubmit={(event) => saveMatchReferees(event, match)}>
+                        <div className="delegate-card-head">
+                          <strong>{getMatchAdminLabel(league, match)}</strong>
+                          <small>{formatDate(match.date)} | {match.time || "POR DEFINIR"} | {match.venue || "CANCHA POR DEFINIR"}</small>
+                        </div>
+                        <div className="referee-assignment-form">
+                          <RefereeSelect label="Central" name="centralRefereeUserId" referees={activeReferees} defaultValue={match.centralRefereeUserId || ""} />
+                          <RefereeSelect label="Auxiliar 1" name="assistantReferee1UserId" referees={activeReferees} defaultValue={match.assistantReferee1UserId || ""} />
+                          <RefereeSelect label="Auxiliar 2" name="assistantReferee2UserId" referees={activeReferees} defaultValue={match.assistantReferee2UserId || ""} />
+                          <RefereeSelect label="Cuarto arbitro" name="fourthRefereeUserId" referees={activeReferees} defaultValue={match.fourthRefereeUserId || ""} />
+                        </div>
+                        <button className="primary" type="submit" disabled={busyAction === `match-referees-${match.id}`}>
+                          {busyAction === `match-referees-${match.id}` ? "Guardando..." : "Guardar designacion"}
+                        </button>
+                        {feedback?.message && (
+                          <p className={feedback.type === "error" ? "auth-error inline-feedback" : "auth-ok inline-feedback"}>
+                            {feedback.message}
+                          </p>
+                        )}
+                      </form>
+                    );
+                  })}
+                </div>
+              </details>
+            ))}
+            {!competitionLeague.matches.length && <p className="empty">Aun no hay partidos programados en esta categoria.</p>}
+            {competitionLeague.matches.length > 0 && !filteredMatches.length && <p className="empty">No hay partidos que coincidan con los filtros.</p>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RefereeSelect({ defaultValue = "", label, name, referees }) {
+  return (
+    <label>{label}
+      <select name={name} defaultValue={defaultValue}>
+        <option value="">Sin asignar</option>
+        {referees.map((referee) => (
+          <option key={referee.userId} value={referee.userId}>{referee.name}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function RefereeSheetReviewPanel({ busyAction, league, onReview, sheets }) {
+  const [reviewNotes, setReviewNotes] = useState({});
+
+  function updateReviewNote(sheetId, value) {
+    setReviewNotes((current) => ({ ...current, [sheetId]: value }));
+  }
+
+  return (
+    <section className="referee-review-panel">
+      <div className="referee-review-head">
+        <div>
+          <span className="eyebrow">Revision de actas</span>
+          <h3>Actas arbitrales pendientes</h3>
+        </div>
+        <strong>{sheets.length} pendiente(s)</strong>
+      </div>
+      {!sheets.length ? (
+        <p className="empty">No hay actas arbitrales pendientes de revision.</p>
+      ) : (
+        <div className="referee-review-list">
+          {sheets.map((sheet) => {
+            const match = league.matches.find((item) => item.id === sheet.matchId);
+            const homeTeam = getTeam(league, match?.homeTeamId);
+            const awayTeam = getTeam(league, match?.awayTeamId);
+            const payload = sheet.payload || {};
+            const events = payload.events || [];
+            const isApproving = busyAction === `approve-sheet-${sheet.id}`;
+            const isRejecting = busyAction === `reject-sheet-${sheet.id}`;
+            return (
+              <article className="referee-review-card" key={sheet.id}>
+                <div>
+                  <strong>{homeTeam?.name || "LOCAL"} vs {awayTeam?.name || "VISITANTE"}</strong>
+                  <small>
+                    {match ? `Jornada ${match.round || "-"} | ${formatDate(match.date)} | ${match.venue || "CANCHA POR DEFINIR"}` : "Partido no encontrado"}
+                  </small>
+                  <small>Arbitro: {sheet.submittedByName || sheet.submittedByEmail || "Sin nombre"} | Enviada: {sheet.submittedAt ? new Date(sheet.submittedAt).toLocaleString("es-MX") : "-"}</small>
+                </div>
+                <div className="referee-review-summary">
+                  <span><strong>{payload.homeGoals ?? 0}-{payload.awayGoals ?? 0}</strong> marcador</span>
+                  <span>{events.filter((event) => event.type === "goal" || event.type === "own_goal").length} gol(es)</span>
+                  <span>{events.filter((event) => event.type === "yellow").length} amarilla(s)</span>
+                  <span>{events.filter((event) => event.type === "red").length} roja(s)</span>
+                </div>
+                {payload.observations && <p>{payload.observations}</p>}
+                <details className="referee-review-events">
+                  <summary>Ver eventos capturados ({events.length})</summary>
+                  <div>
+                    {events.map((event, index) => {
+                      const player = getPlayer(league, event.playerId);
+                      const team = getTeam(league, event.teamId);
+                      return (
+                        <span key={`${sheet.id}-${index}`}>
+                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {event.minute !== "" && event.minute !== undefined ? `| Min ${event.minute}` : ""}
+                        </span>
+                      );
+                    })}
+                    {!events.length && <span>Sin eventos capturados.</span>}
+                  </div>
+                </details>
+                <label className="referee-review-note">
+                  Nota para el arbitro / revision
+                  <textarea
+                    value={reviewNotes[sheet.id] ?? sheet.reviewNote ?? ""}
+                    onChange={(event) => updateReviewNote(sheet.id, event.target.value)}
+                    placeholder="Opcional al aprobar. Recomendado si se rechaza para indicar que debe corregir."
+                    rows={2}
+                  />
+                </label>
+                <div className="inline-actions">
+                  <button className="primary" type="button" disabled={isApproving || isRejecting} onClick={() => onReview(sheet, "approve", reviewNotes[sheet.id] || "")}>
+                    {isApproving ? "Aprobando..." : "Aprobar y aplicar"}
+                  </button>
+                  <button className="danger ghost-danger" type="button" disabled={isApproving || isRejecting} onClick={() => onReview(sheet, "reject", reviewNotes[sheet.id] || "")}>
+                    {isRejecting ? "Rechazando..." : "Rechazar"}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function getMatchAdminLabel(league, match) {
+  const homeTeam = getTeam(league, match.homeTeamId)?.name || "LOCAL";
+  const awayTeam = getTeam(league, match.awayTeamId)?.name || "VISITANTE";
+  return `${homeTeam} vs ${awayTeam}`;
 }
 
 function groupDelegateItemsByCompetition(items, league, getCompetitionId) {
@@ -3195,6 +3800,10 @@ function getDelegateStatusLabel(status) {
   if (status === "suspended") return "suspendido";
   if (status === "deleted") return "eliminado";
   return "sin estado";
+}
+
+function getRefereeStatusLabel(status) {
+  return getDelegateStatusLabel(status);
 }
 
 function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction }) {

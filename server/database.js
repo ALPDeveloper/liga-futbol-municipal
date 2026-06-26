@@ -101,6 +101,18 @@ function runMigrations() {
   if (!matchColumns.includes("observations")) {
     db.prepare("ALTER TABLE matches ADD COLUMN observations TEXT").run();
   }
+  if (!matchColumns.includes("central_referee_user_id")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN central_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL").run();
+  }
+  if (!matchColumns.includes("assistant_referee1_user_id")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL").run();
+  }
+  if (!matchColumns.includes("assistant_referee2_user_id")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL").run();
+  }
+  if (!matchColumns.includes("fourth_referee_user_id")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL").run();
+  }
 
   const teamColumns = db.prepare("PRAGMA table_info(teams)").all().map((column) => column.name);
   if (teamColumns.length && !teamColumns.includes("competition_id")) {
@@ -209,6 +221,38 @@ function runMigrations() {
       used_at TEXT,
       revoked_at TEXT,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS referee_profiles (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      municipality TEXT NOT NULL,
+      photo_url TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS referee_activation_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS referee_match_sheets (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending_review',
+      review_note TEXT,
+      submitted_at TEXT NOT NULL,
+      reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS team_affiliations (
@@ -475,6 +519,10 @@ export function getStore() {
       observations: row.observations,
       resolutionType: row.resolution_type,
       resolutionNote: row.resolution_note,
+      centralRefereeUserId: row.central_referee_user_id || "",
+      assistantReferee1UserId: row.assistant_referee1_user_id || "",
+      assistantReferee2UserId: row.assistant_referee2_user_id || "",
+      fourthRefereeUserId: row.fourth_referee_user_id || "",
       events: db.prepare("SELECT * FROM match_events WHERE match_id = ? ORDER BY id").all(row.id).map((event) => ({
         type: event.type,
         playerId: event.player_id,
@@ -788,8 +836,8 @@ export function importStore(store) {
 
       for (const match of league.matches) {
         db.prepare(`
-          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, round, date, time, venue, home_team_id, away_team_id, status, home_goals, away_goals, observations, resolution_type, resolution_note)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, round, date, time, venue, home_team_id, away_team_id, status, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           match.id,
           league.id,
@@ -810,7 +858,11 @@ export function importStore(store) {
           match.awayGoals,
           match.observations || "",
           match.resolutionType || "normal",
-          match.resolutionNote || null
+          match.resolutionNote || null,
+          match.centralRefereeUserId || null,
+          match.assistantReferee1UserId || null,
+          match.assistantReferee2UserId || null,
+          match.fourthRefereeUserId || null
         );
 
         for (const event of match.events || []) {

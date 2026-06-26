@@ -10,9 +10,13 @@ import { createToken, getAuthUser, requireAuth, requireSuperAdmin, toPublicUser 
 import { sendPasswordResetEmail } from "./mailer.js";
 import {
   clearLoginLockData,
+  activateRefereeUserData,
   countActiveSuperAdminsExcept,
   countLeagueAdmins,
   countTeamDelegateAssignmentsData,
+  createRefereeMatchSheetData,
+  createRefereeActivationData,
+  createRefereeProfileData,
   createTeamDelegateActivationData,
   createTeamDelegateAssignmentData,
   createPasswordResetData,
@@ -25,22 +29,34 @@ import {
   disableUserData,
   getActiveUserByEmail,
   getStoreData,
+  getPendingRefereeMatchSheetForMatchData,
+  getRefereeActivationByHashData,
+  getRefereeMatchSheetData,
+  getRefereeProfileData,
   getTeamDelegateContextData,
   getTeamDelegateActivationByHashData,
   getUserById,
   importStoreData,
   initializeData,
   listActivePasswordResetRequests,
+  listRefereeMatchSheetsData,
+  listRefereeMatchSheetsForRefereeData,
+  listRefereesData,
   listTeamDelegatesData,
   listTeamPortalPlayersData,
   listUsersData,
   markPasswordResetUsed,
+  markRefereeActivationUsedData,
   markTeamDelegateActivationUsedData,
   registerFailedLoginData,
+  revokeRefereeActivationsData,
   setTeamRosterPermissionData,
   revokeTeamDelegateActivationsData,
   activateTeamDelegateUserData,
   updateTeamDelegateStatusData,
+  updateMatchRefereesData,
+  updateRefereeMatchSheetReviewData,
+  updateRefereeStatusData,
   updateTeamLogoData,
   updatePasswordData,
   updateTeamPortalPlayerData,
@@ -61,6 +77,8 @@ import {
   validateUserStatus
 } from "./security.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
+import { getEligiblePlayersForTeam, upperText } from "../src/lib/domain.js";
+import { saveMatchSheet } from "../src/lib/actions.js";
 
 validateRuntimeConfig();
 await initializeData();
@@ -150,6 +168,31 @@ async function createDelegateInvitation({ request, userId, assignmentId, delegat
   };
 }
 
+async function createRefereeInvitation({ request, userId, refereeName, municipality }) {
+  await revokeRefereeActivationsData(userId);
+  const rawToken = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + runtimeConfig.delegateActivationHours * 60 * 60 * 1000).toISOString();
+  const activation = await createRefereeActivationData({
+    id: `referee-activation-${crypto.randomUUID()}`,
+    userId,
+    tokenHash: hashActivationToken(rawToken),
+    expiresAt
+  });
+  const activationUrl = `${getAppBaseUrl(request)}/activar-arbitro/${encodeURIComponent(rawToken)}`;
+  const whatsappMessage = [
+    `Hola ${refereeName}, has sido registrado como arbitro de ${municipality} en LIGATEC.`,
+    "Para activar tu cuenta, entra al siguiente enlace:",
+    activationUrl,
+    "Ahi podras crear tu contrasena y posteriormente ver tus partidos asignados."
+  ].join("\n");
+
+  return {
+    activationUrl,
+    expiresAt: activation?.expiresAt || expiresAt,
+    whatsappMessage
+  };
+}
+
 function getActivationProblem(activation) {
   if (!activation) return "La invitacion no existe o el enlace es invalido.";
   if (activation.revokedAt) return "Esta invitacion fue reemplazada por una mas reciente.";
@@ -166,11 +209,118 @@ function getActivationProblem(activation) {
   return "";
 }
 
+function getRefereeActivationProblem(activation) {
+  if (!activation) return "La invitacion no existe o el enlace es invalido.";
+  if (activation.revokedAt) return "Esta invitacion fue reemplazada por una mas reciente.";
+  if (activation.usedAt) return "Esta invitacion ya fue utilizada.";
+  if (new Date(activation.expiresAt).getTime() <= Date.now()) return "Esta invitacion expiro.";
+  if (activation.userStatus === "deleted" || activation.userStatus === "disabled" || activation.userStatus === "suspended") {
+    return "Esta cuenta no esta disponible. Solicita una nueva invitacion al administrador.";
+  }
+  if (activation.userStatus !== "pending_activation") return "Esta cuenta no esta pendiente de activacion.";
+  return "";
+}
+
 async function getLeagueAndTeam(leagueId, teamId) {
   const store = await getStoreData();
   const league = (store.leagues || []).find((item) => item.id === leagueId);
   const team = league?.teams?.find((item) => item.id === teamId);
   return { league, team };
+}
+
+async function getLeagueById(leagueId) {
+  const store = await getStoreData();
+  return (store.leagues || []).find((item) => item.id === leagueId) || null;
+}
+
+async function getLeagueAdminMunicipality(user) {
+  if (user.role !== "league_admin" || !user.leagueId) return "";
+  const league = await getLeagueById(user.leagueId);
+  return String(league?.city || "").trim().toUpperCase();
+}
+
+async function canManageMunicipality(user, municipality) {
+  if (user.role === "super_admin") return true;
+  if (user.role !== "league_admin") return false;
+  return upperText(municipality) === await getLeagueAdminMunicipality(user);
+}
+
+function buildRefereePortalPayload(store, referee, userId, refereeSheets = []) {
+  const sheetByMatchId = new Map();
+  for (const sheet of refereeSheets.filter((item) => item.status === "pending_review" || item.status === "rejected")) {
+    if (!sheetByMatchId.has(sheet.matchId)) sheetByMatchId.set(sheet.matchId, sheet);
+  }
+  const assignedMatches = [];
+  for (const league of store.leagues || []) {
+    if (upperText(league.city || "") !== upperText(referee.municipality)) continue;
+    for (const match of league.matches || []) {
+      const refereeRole = match.centralRefereeUserId === userId
+        ? "central"
+        : match.assistantReferee1UserId === userId
+        ? "auxiliar_1"
+        : match.assistantReferee2UserId === userId
+        ? "auxiliar_2"
+        : match.fourthRefereeUserId === userId
+        ? "cuarto_arbitro"
+        : "";
+      if (!refereeRole) continue;
+      const competition = (league.competitions || []).find((item) => item.id === match.competitionId);
+      const homeTeam = (league.teams || []).find((item) => item.id === match.homeTeamId);
+      const awayTeam = (league.teams || []).find((item) => item.id === match.awayTeamId);
+      const reviewSheet = sheetByMatchId.get(match.id);
+      const reviewPayload = reviewSheet?.payload || {};
+      const hasPendingReview = reviewSheet?.status === "pending_review";
+      assignedMatches.push({
+        id: match.id,
+        leagueId: league.id,
+        leagueName: league.name,
+        competitionId: match.competitionId,
+        competitionName: competition?.name || "",
+        round: match.round,
+        date: match.date,
+        time: match.time,
+        venue: match.venue,
+        status: match.status,
+        homeGoals: reviewSheet ? reviewPayload.homeGoals : match.homeGoals,
+        awayGoals: reviewSheet ? reviewPayload.awayGoals : match.awayGoals,
+        observations: match.observations || "",
+        events: reviewSheet ? reviewPayload.events || [] : match.events || [],
+        sheetReviewId: reviewSheet?.id || "",
+        sheetReviewStatus: reviewSheet?.status || "",
+        sheetReviewNote: reviewSheet?.reviewNote || "",
+        sheetSubmittedAt: reviewSheet?.submittedAt || "",
+        homeTeamId: match.homeTeamId,
+        awayTeamId: match.awayTeamId,
+        homeTeamName: homeTeam?.name || "LOCAL",
+        awayTeamName: awayTeam?.name || "VISITANTE",
+        homePlayers: getEligiblePlayersForTeam(league, match.homeTeamId).map((player) => ({
+          id: player.id,
+          name: player.name,
+          number: player.number,
+          position: player.position,
+          teamId: player.teamId
+        })),
+        awayPlayers: getEligiblePlayersForTeam(league, match.awayTeamId).map((player) => ({
+          id: player.id,
+          name: player.name,
+          number: player.number,
+          position: player.position,
+          teamId: player.teamId
+        })),
+        refereeRole,
+        canCapture: refereeRole === "central" && !hasPendingReview && match.status !== "finished" && match.status !== "walkover"
+      });
+    }
+  }
+  assignedMatches.sort((a, b) => (
+    String(a.date || "").localeCompare(String(b.date || "")) ||
+    String(a.time || "").localeCompare(String(b.time || ""))
+  ));
+  return {
+    referee,
+    pendingMatches: assignedMatches.filter((match) => match.canCapture),
+    history: assignedMatches.filter((match) => !match.canCapture)
+  };
 }
 
 function clearPublicCache() {
@@ -461,6 +611,63 @@ app.post("/api/team-delegate-activations/:token", async (request, response) => {
     entityType: "user",
     entityId: activation.userId,
     detail: `Delegado activo cuenta para ${activation.teamName}`
+  });
+
+  response.json({
+    message: "Cuenta activada correctamente.",
+    token: createToken(user),
+    user: toPublicUser(user)
+  });
+});
+
+app.get("/api/referee-activations/:token", async (request, response) => {
+  const activation = await getRefereeActivationByHashData(hashActivationToken(request.params.token));
+  const problem = getRefereeActivationProblem(activation);
+  if (problem) {
+    return response.status(400).json({
+      valid: false,
+      error: problem,
+      message: "Solicita una nueva invitacion al administrador de la liga."
+    });
+  }
+
+  response.json({
+    valid: true,
+    refereeName: activation.userName,
+    municipality: activation.municipality,
+    expiresAt: activation.expiresAt
+  });
+});
+
+app.post("/api/referee-activations/:token", async (request, response) => {
+  const activation = await getRefereeActivationByHashData(hashActivationToken(request.params.token));
+  const problem = getRefereeActivationProblem(activation);
+  if (problem) {
+    return response.status(400).json({
+      valid: false,
+      error: problem,
+      message: "Solicita una nueva invitacion al administrador de la liga."
+    });
+  }
+
+  const password = String(request.body.password || "");
+  const confirmPassword = String(request.body.confirmPassword || "");
+  if (password !== confirmPassword) return response.status(400).json({ error: "Las contraseñas no coinciden." });
+  const passwordError = requireStrongPassword(password);
+  if (passwordError) return response.status(400).json({ error: passwordError });
+
+  const user = await activateRefereeUserData({
+    userId: activation.userId,
+    passwordHash: hashPassword(password)
+  });
+  await markRefereeActivationUsedData(activation.id);
+
+  await logAudit({
+    user: toPublicUser(user),
+    action: "referee_activation",
+    entityType: "user",
+    entityId: activation.userId,
+    detail: `Arbitro activo para ${activation.municipality}`
   });
 
   response.json({
@@ -766,6 +973,295 @@ app.delete("/api/team-delegates/:assignmentId", requireAuth, async (request, res
   });
 });
 
+app.get("/api/referees", requireAuth, async (request, response) => {
+  if (!["super_admin", "league_admin"].includes(request.user.role)) {
+    return response.status(403).json({ error: "No puedes ver arbitros" });
+  }
+  const requestedMunicipality = upperText(String(request.query.municipality || ""));
+  const municipality = request.user.role === "league_admin"
+    ? await getLeagueAdminMunicipality(request.user)
+    : requestedMunicipality;
+  response.json(await listRefereesData(municipality));
+});
+
+app.post("/api/referees", requireAuth, async (request, response) => {
+  if (!["super_admin", "league_admin"].includes(request.user.role)) {
+    return response.status(403).json({ error: "No puedes crear arbitros" });
+  }
+  const name = String(request.body.name || "").trim();
+  const phone = String(request.body.phone || "").trim();
+  const email = String(request.body.email || "").trim().toLowerCase();
+  const municipality = request.user.role === "league_admin"
+    ? await getLeagueAdminMunicipality(request.user)
+    : upperText(String(request.body.municipality || "").trim());
+  const status = "pending_activation";
+
+  if (!name || !phone || !email || !municipality) {
+    return response.status(400).json({ error: "Nombre, telefono, correo y municipio son requeridos." });
+  }
+  if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido" });
+  if (!await canManageMunicipality(request.user, municipality)) {
+    return response.status(403).json({ error: "No puedes crear arbitros para este municipio" });
+  }
+
+  const userId = `user-referee-${crypto.randomUUID()}`;
+  let user;
+  let invitation;
+  try {
+    user = await createUserData({
+      id: userId,
+      leagueId: null,
+      name,
+      email,
+      phone,
+      role: "referee",
+      status,
+      passwordHash: null
+    });
+    await createRefereeProfileData({ userId, municipality });
+    invitation = await createRefereeInvitation({ request, userId, refereeName: name, municipality });
+  } catch (error) {
+    if (String(error?.message || "").toLowerCase().includes("unique")) {
+      return response.status(409).json({ error: "Ya existe un usuario con ese correo." });
+    }
+    throw error;
+  }
+
+  await logAudit({
+    user: request.user,
+    action: "referee_create",
+    entityType: "user",
+    entityId: user.id,
+    detail: `Creo invitacion de arbitro ${email} para ${municipality}`
+  });
+
+  response.status(201).json({
+    referees: await listRefereesData(request.user.role === "league_admin" ? municipality : ""),
+    invitation
+  });
+});
+
+app.patch("/api/referees/:userId", requireAuth, async (request, response) => {
+  if (!["super_admin", "league_admin"].includes(request.user.role)) {
+    return response.status(403).json({ error: "No puedes modificar arbitros" });
+  }
+  const referee = await getRefereeProfileData(request.params.userId);
+  if (!referee) return response.status(404).json({ error: "Arbitro no encontrado" });
+  if (!await canManageMunicipality(request.user, referee.municipality)) {
+    return response.status(403).json({ error: "No puedes modificar arbitros de otro municipio" });
+  }
+  const status = String(request.body.status || referee.status);
+  if (!validateUserStatus(status)) return response.status(400).json({ error: "Estado invalido" });
+  if (status === "active") {
+    const user = await getUserById(referee.userId);
+    if (!user?.password_hash) {
+      return response.status(400).json({ error: "Este arbitro aun debe activar su cuenta con la invitacion." });
+    }
+  }
+  await updateRefereeStatusData(referee.userId, status);
+  await logAudit({
+    user: request.user,
+    action: "referee_update",
+    entityType: "user",
+    entityId: referee.userId,
+    detail: `Actualizo arbitro ${referee.email}`
+  });
+  response.json(await listRefereesData(request.user.role === "league_admin" ? referee.municipality : ""));
+});
+
+app.post("/api/referees/:userId/invitation", requireAuth, async (request, response) => {
+  if (!["super_admin", "league_admin"].includes(request.user.role)) {
+    return response.status(403).json({ error: "No puedes invitar arbitros" });
+  }
+  const referee = await getRefereeProfileData(request.params.userId);
+  if (!referee) return response.status(404).json({ error: "Arbitro no encontrado" });
+  if (!await canManageMunicipality(request.user, referee.municipality)) {
+    return response.status(403).json({ error: "No puedes invitar arbitros de otro municipio" });
+  }
+  if (referee.status === "deleted") return response.status(400).json({ error: "No se puede invitar a un usuario eliminado." });
+  if (referee.status !== "pending_activation") await updateRefereeStatusData(referee.userId, "pending_activation");
+  const invitation = await createRefereeInvitation({
+    request,
+    userId: referee.userId,
+    refereeName: referee.name,
+    municipality: referee.municipality
+  });
+  await logAudit({
+    user: request.user,
+    action: "referee_invitation",
+    entityType: "user",
+    entityId: referee.userId,
+    detail: `Regenero invitacion de arbitro ${referee.email}`
+  });
+  response.json({
+    referees: await listRefereesData(request.user.role === "league_admin" ? referee.municipality : ""),
+    invitation
+  });
+});
+
+app.delete("/api/referees/:userId", requireAuth, async (request, response) => {
+  if (!["super_admin", "league_admin"].includes(request.user.role)) {
+    return response.status(403).json({ error: "No puedes eliminar arbitros" });
+  }
+  const referee = await getRefereeProfileData(request.params.userId);
+  if (!referee) return response.status(404).json({ error: "Arbitro no encontrado" });
+  if (!await canManageMunicipality(request.user, referee.municipality)) {
+    return response.status(403).json({ error: "No puedes eliminar arbitros de otro municipio" });
+  }
+
+  await deleteUserData(referee.userId);
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    action: "referee_delete",
+    entityType: "user",
+    entityId: referee.userId,
+    detail: `Elimino definitivamente arbitro ${referee.email} de ${referee.municipality}`
+  });
+
+  response.json({
+    referees: await listRefereesData(request.user.role === "league_admin" ? referee.municipality : ""),
+    userDeleted: true
+  });
+});
+
+app.get("/api/referee-match-sheets", requireAuth, async (request, response) => {
+  if (!["super_admin", "league_admin"].includes(request.user.role)) {
+    return response.status(403).json({ error: "No puedes ver actas arbitrales" });
+  }
+  const requestedLeagueId = String(request.query.leagueId || request.user.leagueId || "").trim();
+  const status = String(request.query.status || "pending_review");
+  if (requestedLeagueId && !canManageLeague(request.user, requestedLeagueId)) {
+    return response.status(403).json({ error: "No puedes ver actas de esta liga" });
+  }
+  if (!requestedLeagueId && request.user.role !== "super_admin") {
+    return response.status(403).json({ error: "Selecciona una liga valida" });
+  }
+  response.json(await listRefereeMatchSheetsData({ leagueId: requestedLeagueId, status }));
+});
+
+app.patch("/api/referee-match-sheets/:sheetId/review", requireAuth, async (request, response) => {
+  if (!["super_admin", "league_admin"].includes(request.user.role)) {
+    return response.status(403).json({ error: "No puedes revisar actas arbitrales" });
+  }
+  const sheet = await getRefereeMatchSheetData(request.params.sheetId);
+  if (!sheet) return response.status(404).json({ error: "Acta arbitral no encontrada" });
+  if (!canManageLeague(request.user, sheet.leagueId)) {
+    return response.status(403).json({ error: "No puedes revisar actas de esta liga" });
+  }
+  if (sheet.status !== "pending_review") {
+    return response.status(400).json({ error: "Esta acta ya fue revisada." });
+  }
+
+  const action = String(request.body.action || "").trim();
+  const reviewNote = String(request.body.reviewNote || "").trim();
+  if (action === "reject") {
+    const rejectedSheet = await updateRefereeMatchSheetReviewData({
+      sheetId: sheet.id,
+      status: "rejected",
+      reviewNote,
+      reviewedByUserId: request.user.id
+    });
+    await logAudit({
+      user: request.user,
+      leagueId: sheet.leagueId,
+      action: "referee_match_sheet_reject",
+      entityType: "referee_match_sheet",
+      entityId: sheet.id,
+      detail: `Rechazo acta arbitral de partido ${sheet.matchId}`
+    });
+    return response.json({
+      sheet: rejectedSheet,
+      sheets: await listRefereeMatchSheetsData({ leagueId: sheet.leagueId, status: "pending_review" })
+    });
+  }
+
+  if (action !== "approve") {
+    return response.status(400).json({ error: "Accion de revision invalida." });
+  }
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === sheet.leagueId);
+  const match = league?.matches?.find((item) => item.id === sheet.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado para esta acta." });
+  if (match.status === "finished" || match.status === "walkover") {
+    return response.status(400).json({ error: "Este partido ya tiene acta oficial guardada." });
+  }
+
+  const nextStore = saveMatchSheet(store, sheet.leagueId, sheet.payload);
+  await importStoreData(nextStore);
+  clearPublicCache();
+  const approvedSheet = await createRefereeMatchSheetData({
+    id: sheet.id,
+    leagueId: sheet.leagueId,
+    matchId: sheet.matchId,
+    submittedByUserId: sheet.submittedByUserId,
+    payload: sheet.payload,
+    status: "approved",
+    reviewNote,
+    submittedAt: sheet.submittedAt,
+    reviewedByUserId: request.user.id,
+    reviewedAt: new Date().toISOString()
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId: sheet.leagueId,
+    action: "referee_match_sheet_approve",
+    entityType: "referee_match_sheet",
+    entityId: sheet.id,
+    detail: `Aprobo acta arbitral de partido ${sheet.matchId}`
+  });
+
+  response.json({
+    sheet: approvedSheet,
+    sheets: await listRefereeMatchSheetsData({ leagueId: sheet.leagueId, status: "pending_review" }),
+    store: await getStoreData()
+  });
+});
+
+app.patch("/api/matches/:matchId/referees", requireAuth, async (request, response) => {
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.matches.some((match) => match.id === request.params.matchId));
+  const match = league?.matches.find((item) => item.id === request.params.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
+  if (!canManageLeague(request.user, league.id)) return response.status(403).json({ error: "No puedes modificar esta liga" });
+
+  const refereeIds = [
+    request.body.centralRefereeUserId,
+    request.body.assistantReferee1UserId,
+    request.body.assistantReferee2UserId,
+    request.body.fourthRefereeUserId
+  ].filter(Boolean);
+  if (new Set(refereeIds).size !== refereeIds.length) {
+    return response.status(400).json({ error: "Un arbitro no puede ocupar dos posiciones en el mismo partido." });
+  }
+  const allowedReferees = await listRefereesData(upperText(league.city || ""));
+  const allowedIds = new Set(allowedReferees.filter((item) => item.status === "active").map((item) => item.userId));
+  const invalid = refereeIds.find((userId) => !allowedIds.has(userId));
+  if (invalid) return response.status(400).json({ error: "Solo puedes asignar arbitros activos del municipio de la liga." });
+
+  await updateMatchRefereesData(match.id, {
+    centralRefereeUserId: request.body.centralRefereeUserId || "",
+    assistantReferee1UserId: request.body.assistantReferee1UserId || "",
+    assistantReferee2UserId: request.body.assistantReferee2UserId || "",
+    fourthRefereeUserId: request.body.fourthRefereeUserId || ""
+  });
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId: league.id,
+    action: "match_referees_update",
+    entityType: "match",
+    entityId: match.id,
+    detail: "Actualizo designacion arbitral"
+  });
+
+  response.json(await getStoreData());
+});
+
 app.put("/api/team-roster-permissions/:teamId", requireAuth, async (request, response) => {
   const teamId = String(request.params.teamId || "").trim();
   const leagueId = String(request.body.leagueId || request.user.leagueId || "").trim();
@@ -800,6 +1296,78 @@ app.get("/api/team-portal/me", requireAuth, async (request, response) => {
   if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
   const players = await listTeamPortalPlayersData(context.teamId);
   response.json({ context, players });
+});
+
+app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
+  if (request.user.role !== "referee") {
+    return response.status(403).json({ error: "Permiso de arbitro requerido" });
+  }
+  const referee = await getRefereeProfileData(request.user.id);
+  if (!referee || referee.status !== "active") {
+    return response.status(403).json({ error: "Tu cuenta de arbitro no esta activa." });
+  }
+  const store = await getStoreData();
+  const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
+  response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets));
+});
+
+app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (request, response) => {
+  if (request.user.role !== "referee") {
+    return response.status(403).json({ error: "Permiso de arbitro requerido" });
+  }
+  const referee = await getRefereeProfileData(request.user.id);
+  if (!referee || referee.status !== "active") {
+    return response.status(403).json({ error: "Tu cuenta de arbitro no esta activa." });
+  }
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.matches?.some((match) => match.id === request.params.matchId));
+  const match = league?.matches?.find((item) => item.id === request.params.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
+  if (upperText(league.city || "") !== upperText(referee.municipality)) {
+    return response.status(403).json({ error: "No puedes capturar partidos de otro municipio." });
+  }
+  if (match.centralRefereeUserId !== request.user.id) {
+    return response.status(403).json({ error: "Solo el arbitro central asignado puede capturar esta acta." });
+  }
+  if (match.status === "finished" || match.status === "walkover") {
+    return response.status(400).json({ error: "Esta acta ya fue capturada. Solicita correccion al administrador." });
+  }
+  const pendingSheet = await getPendingRefereeMatchSheetForMatchData(match.id);
+  if (pendingSheet) {
+    return response.status(400).json({ error: "Esta acta ya fue enviada y esta pendiente de revision." });
+  }
+
+  const sheetPayload = {
+    matchId: match.id,
+    homeGoals: request.body.homeGoals,
+    awayGoals: request.body.awayGoals,
+    observations: request.body.observations || "",
+    status: request.body.status === "walkover" ? "walkover" : "finished",
+    resolutionType: request.body.resolutionType || (request.body.status === "walkover" ? "no_show" : "normal"),
+    resolutionNote: request.body.resolutionNote || "",
+    events: Array.isArray(request.body.events) ? request.body.events : []
+  };
+  saveMatchSheet(store, league.id, sheetPayload);
+  const sheet = await createRefereeMatchSheetData({
+    id: `referee-sheet-${crypto.randomUUID()}`,
+    leagueId: league.id,
+    matchId: match.id,
+    submittedByUserId: request.user.id,
+    payload: sheetPayload
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId: league.id,
+    action: "referee_match_sheet_submit",
+    entityType: "referee_match_sheet",
+    entityId: sheet.id,
+    detail: `Arbitro central envio acta de ${match.id} a revision`
+  });
+
+  const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
+  response.status(201).json(buildRefereePortalPayload(await getStoreData(), referee, request.user.id, refereeSheets));
 });
 
 app.post("/api/team-portal/players", requireAuth, async (request, response) => {

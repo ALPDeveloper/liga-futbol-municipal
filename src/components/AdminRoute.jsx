@@ -230,6 +230,7 @@ export function AdminRoute({
       onMergeDuplicatePlayer={(payload) => commit(mergeDuplicatePlayer(store, league.id, payload))}
       onUpdateTeamAffiliationPlayerNumber={(affiliationId, payload) => commit(updateTeamAffiliationPlayerNumber(store, league.id, affiliationId, payload))}
       onUpdateVenue={(venueId, payload) => commit(updateVenue(store, league.id, venueId, payload))}
+      applyApiStore={applyApiStore}
       store={store}
       userListRefreshKey={userListRefreshKey}
     />
