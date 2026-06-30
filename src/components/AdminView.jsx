@@ -4468,8 +4468,9 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [temporaryPasswords, setTemporaryPasswords] = useState({});
-  const adminUsers = users.filter((user) => user.role !== "team_delegate");
-  const delegateUserCount = users.length - adminUsers.length;
+  const adminUsers = users.filter((user) => !["team_delegate", "referee"].includes(user.role));
+  const delegateUserCount = users.filter((user) => user.role === "team_delegate").length;
+  const refereeUserCount = users.filter((user) => user.role === "referee").length;
 
   async function loadUsers() {
     if (!authToken) return;
@@ -4605,7 +4606,13 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
       {error && <p className="auth-error">{error}</p>}
       {notice && <p className="auth-ok">{notice}</p>}
       <p className="helper-text">Usa correos reales y accesibles. La recuperacion por codigo se envia por correo cuando el proveedor de email esta configurado en produccion; mientras tanto el super admin puede asignar una clave temporal.</p>
-      {delegateUserCount > 0 && <p className="helper-text">{delegateUserCount} usuario(s) delegado se administran desde Admin de liga &gt; Delegados.</p>}
+      {(delegateUserCount > 0 || refereeUserCount > 0) && (
+        <p className="helper-text">
+          {delegateUserCount} usuario(s) delegado se administran desde Admin de liga &gt; Delegados.
+          {" "}
+          {refereeUserCount} usuario(s) arbitro se administran desde Admin de liga &gt; Arbitros.
+        </p>
+      )}
 
       <div className="user-list">
         {adminUsers.map((user) => {

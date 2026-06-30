@@ -128,8 +128,24 @@ const passwordResetCompleteLimiter = createRateLimiter({
   keyGenerator: (request) => `reset-complete:${request.ip}:${String(request.body?.email || "").trim().toLowerCase()}`
 });
 
+const activationLimiter = createRateLimiter({
+  windowMs: runtimeConfig.activationWindowMinutes * 60 * 1000,
+  max: runtimeConfig.activationMaxRequests,
+  keyGenerator: (request) => `activation:${request.ip}`
+});
+
+const uploadLimiter = createRateLimiter({
+  windowMs: runtimeConfig.uploadWindowMinutes * 60 * 1000,
+  max: runtimeConfig.uploadMaxRequests,
+  keyGenerator: (request) => `upload:${request.ip}:${request.user?.id || "anonymous"}`
+});
+
 function canManageLeague(user, leagueId) {
   return user.role === "super_admin" || (user.role === "league_admin" && user.leagueId === leagueId);
+}
+
+function isPortalOnlyRole(role) {
+  return role === "team_delegate" || role === "referee";
 }
 
 function hashActivationToken(token) {
@@ -219,6 +235,16 @@ function getRefereeActivationProblem(activation) {
   }
   if (activation.userStatus !== "pending_activation") return "Esta cuenta no esta pendiente de activacion.";
   return "";
+}
+
+function parseIntegerInRange(value, fallback, { min, max, label }) {
+  const next = Number(value ?? fallback);
+  if (!Number.isInteger(next) || next < min || next > max) {
+    const error = new Error(`${label} debe ser un numero entero entre ${min} y ${max}.`);
+    error.status = 400;
+    throw error;
+  }
+  return next;
 }
 
 async function getLeagueAndTeam(leagueId, teamId) {
@@ -447,7 +473,7 @@ app.get("/api/auth/me", async (request, response) => {
   response.json({ user });
 });
 
-app.post("/api/uploads/images", requireAuth, async (request, response) => {
+app.post("/api/uploads/images", requireAuth, uploadLimiter, async (request, response) => {
   const leagueId = String(request.body.leagueId || request.user.leagueId || "").trim();
   let canUploadForLeague = !leagueId || canManageLeague(request.user, leagueId);
 
@@ -558,7 +584,7 @@ app.post("/api/auth/reset-password", passwordResetCompleteLimiter, async (reques
   response.json({ message: "Contraseña actualizada. Ya puedes iniciar sesion." });
 });
 
-app.get("/api/team-delegate-activations/:token", async (request, response) => {
+app.get("/api/team-delegate-activations/:token", activationLimiter, async (request, response) => {
   const activation = await getTeamDelegateActivationByHashData(hashActivationToken(request.params.token));
   const problem = getActivationProblem(activation);
   if (problem) {
@@ -578,7 +604,7 @@ app.get("/api/team-delegate-activations/:token", async (request, response) => {
   });
 });
 
-app.post("/api/team-delegate-activations/:token", async (request, response) => {
+app.post("/api/team-delegate-activations/:token", activationLimiter, async (request, response) => {
   const activation = await getTeamDelegateActivationByHashData(hashActivationToken(request.params.token));
   const problem = getActivationProblem(activation);
   if (problem) {
@@ -620,7 +646,7 @@ app.post("/api/team-delegate-activations/:token", async (request, response) => {
   });
 });
 
-app.get("/api/referee-activations/:token", async (request, response) => {
+app.get("/api/referee-activations/:token", activationLimiter, async (request, response) => {
   const activation = await getRefereeActivationByHashData(hashActivationToken(request.params.token));
   const problem = getRefereeActivationProblem(activation);
   if (problem) {
@@ -639,7 +665,7 @@ app.get("/api/referee-activations/:token", async (request, response) => {
   });
 });
 
-app.post("/api/referee-activations/:token", async (request, response) => {
+app.post("/api/referee-activations/:token", activationLimiter, async (request, response) => {
   const activation = await getRefereeActivationByHashData(hashActivationToken(request.params.token));
   const problem = getRefereeActivationProblem(activation);
   if (problem) {
@@ -1511,6 +1537,7 @@ app.post("/api/users", requireSuperAdmin, async (request, response) => {
   if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido" });
   if (!validateUserRole(role)) return response.status(400).json({ error: "Rol invalido" });
   if (role === "team_delegate") return response.status(400).json({ error: "Crea delegados desde el modulo de equipos." });
+  if (role === "referee") return response.status(400).json({ error: "Crea arbitros desde el modulo de arbitros." });
   if (request.body.status && !validateUserStatus(request.body.status)) return response.status(400).json({ error: "Estado invalido" });
   if (role === "league_admin" && !leagueId) {
     return response.status(400).json({ error: "Un admin de liga debe estar asignado a una liga" });
@@ -1562,6 +1589,7 @@ app.patch("/api/users/:userId", requireSuperAdmin, async (request, response) => 
   if (!validateEmail(next.email)) return response.status(400).json({ error: "Correo invalido" });
   if (!validateUserRole(next.role)) return response.status(400).json({ error: "Rol invalido" });
   if (next.role === "team_delegate") return response.status(400).json({ error: "Edita delegados desde el modulo de equipos." });
+  if (next.role === "referee") return response.status(400).json({ error: "Edita arbitros desde el modulo de arbitros." });
   if (!validateUserStatus(next.status)) return response.status(400).json({ error: "Estado invalido" });
   if (next.role === "league_admin" && !next.leagueId) {
     return response.status(400).json({ error: "Un admin de liga debe estar asignado a una liga" });
@@ -1612,6 +1640,9 @@ app.delete("/api/users/:userId", requireSuperAdmin, async (request, response) =>
   if (user.role === "super_admin" && await countActiveSuperAdminsExcept(user.id) < 1) {
     return response.status(400).json({ error: "Debe quedar al menos un super admin activo" });
   }
+  if (isPortalOnlyRole(user.role)) {
+    return response.status(400).json({ error: "Los delegados y arbitros se eliminan desde su modulo correspondiente." });
+  }
 
   if (request.query.mode === "permanent") {
     await deleteUserData(user.id);
@@ -1654,17 +1685,22 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
   const currentLeague = store.leagues.find((item) => item.id === request.params.leagueId);
   if (!currentLeague) return response.status(404).json({ error: "Liga no encontrada" });
   const current = currentLeague.rules || {};
+  const withdrawalPolicy = request.body.withdrawalPolicy || current.withdrawalPolicy || "award_walkover";
+  if (!["award_walkover", "manual"].includes(withdrawalPolicy)) {
+    return response.status(400).json({ error: "Politica de baja invalida." });
+  }
+  const notes = String(request.body.notes ?? current.notes ?? "").slice(0, 1000);
 
   const next = {
-    withdrawalPolicy: request.body.withdrawalPolicy || current.withdrawalPolicy,
-    forfeitPoints: Number(request.body.forfeitPoints ?? current.forfeitPoints),
-    forfeitGoalsFor: Number(request.body.forfeitGoalsFor ?? current.forfeitGoalsFor),
-    forfeitGoalsAgainst: Number(request.body.forfeitGoalsAgainst ?? current.forfeitGoalsAgainst),
-    yellowSuspensionLimit: Number(request.body.yellowSuspensionLimit ?? current.yellowSuspensionLimit),
-    defaultRedSuspensionMatches: Number(request.body.defaultRedSuspensionMatches ?? current.defaultRedSuspensionMatches ?? 1),
+    withdrawalPolicy,
+    forfeitPoints: parseIntegerInRange(request.body.forfeitPoints, current.forfeitPoints ?? 3, { min: 0, max: 10, label: "Puntos por default" }),
+    forfeitGoalsFor: parseIntegerInRange(request.body.forfeitGoalsFor, current.forfeitGoalsFor ?? 3, { min: 0, max: 30, label: "Goles a favor por default" }),
+    forfeitGoalsAgainst: parseIntegerInRange(request.body.forfeitGoalsAgainst, current.forfeitGoalsAgainst ?? 0, { min: 0, max: 30, label: "Goles en contra por default" }),
+    yellowSuspensionLimit: parseIntegerInRange(request.body.yellowSuspensionLimit, current.yellowSuspensionLimit ?? 3, { min: 1, max: 10, label: "Limite de amarillas" }),
+    defaultRedSuspensionMatches: parseIntegerInRange(request.body.defaultRedSuspensionMatches, current.defaultRedSuspensionMatches ?? 1, { min: 1, max: 20, label: "Partidos de suspension por roja" }),
     disciplineScope: request.body.disciplineScope === "league" ? "league" : "competition",
-    playoffQualifiers: Number(request.body.playoffQualifiers ?? current.playoffQualifiers ?? 8),
-    notes: request.body.notes ?? current.notes
+    playoffQualifiers: parseIntegerInRange(request.body.playoffQualifiers, current.playoffQualifiers ?? 8, { min: 2, max: 64, label: "Clasificados a liguilla" }),
+    notes
   };
 
   const nextStore = await importStoreData({
@@ -1833,6 +1869,10 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`API lista en http://${HOST}:${PORT}`);
   console.log(`Datos: ${DATABASE_PROVIDER} (${DATABASE_LABEL})`);
 });
+
+server.requestTimeout = 30_000;
+server.headersTimeout = 35_000;
+server.keepAliveTimeout = 5_000;
 
 server.on("error", (error) => {
   console.error("No se pudo iniciar la API:", error.message);

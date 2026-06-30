@@ -57,6 +57,10 @@ export const runtimeConfig = {
   loginIpMaxAttempts: Number(process.env.LOGIN_IP_MAX_ATTEMPTS || 40),
   passwordResetWindowMinutes: Number(process.env.PASSWORD_RESET_WINDOW_MINUTES || 30),
   passwordResetMaxRequests: Number(process.env.PASSWORD_RESET_MAX_REQUESTS || 5),
+  activationWindowMinutes: Number(process.env.ACTIVATION_WINDOW_MINUTES || 15),
+  activationMaxRequests: Number(process.env.ACTIVATION_MAX_REQUESTS || 60),
+  uploadWindowMinutes: Number(process.env.UPLOAD_WINDOW_MINUTES || 15),
+  uploadMaxRequests: Number(process.env.UPLOAD_MAX_REQUESTS || 30),
   delegateActivationHours: Number(process.env.DELEGATE_ACTIVATION_HOURS || 48),
   showRecoveryCodeInResponse: parseBoolean(
     process.env.SHOW_RECOVERY_CODE_IN_RESPONSE,
@@ -115,6 +119,19 @@ export function validateRuntimeConfig() {
 
   if (runtimeConfig.showRecoveryCodeInResponse) {
     problems.push("SHOW_RECOVERY_CODE_IN_RESPONSE debe ser false en produccion.");
+  }
+
+  if (!Number.isFinite(runtimeConfig.activationWindowMinutes) || runtimeConfig.activationWindowMinutes <= 0) {
+    problems.push("ACTIVATION_WINDOW_MINUTES debe ser mayor a 0.");
+  }
+  if (!Number.isFinite(runtimeConfig.activationMaxRequests) || runtimeConfig.activationMaxRequests < 10) {
+    problems.push("ACTIVATION_MAX_REQUESTS debe ser al menos 10.");
+  }
+  if (!Number.isFinite(runtimeConfig.uploadWindowMinutes) || runtimeConfig.uploadWindowMinutes <= 0) {
+    problems.push("UPLOAD_WINDOW_MINUTES debe ser mayor a 0.");
+  }
+  if (!Number.isFinite(runtimeConfig.uploadMaxRequests) || runtimeConfig.uploadMaxRequests < 5) {
+    problems.push("UPLOAD_MAX_REQUESTS debe ser al menos 5.");
   }
 
   if (runtimeConfig.emailProvider && runtimeConfig.emailProvider !== "resend") {

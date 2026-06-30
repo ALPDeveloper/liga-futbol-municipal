@@ -202,6 +202,19 @@ async function runPostgresMigrations(pool) {
       reviewed_at TIMESTAMPTZ
     )
   `);
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users(lower(email))");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_team_delegate_activation_tokens_hash ON team_delegate_activation_tokens(token_hash)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_referee_activation_tokens_hash ON referee_activation_tokens(token_hash)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_expires ON password_reset_requests(user_id, expires_at)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_team_user_assignments_user ON team_user_assignments(user_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_team_user_assignments_league_team ON team_user_assignments(league_id, team_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_referee_profiles_municipality ON referee_profiles(municipality)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_match ON referee_match_sheets(match_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_status ON referee_match_sheets(status)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_matches_referee_central ON matches(central_referee_user_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_matches_referee_assistant1 ON matches(assistant_referee1_user_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_matches_referee_assistant2 ON matches(assistant_referee2_user_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_matches_referee_fourth ON matches(fourth_referee_user_id)");
   await pool.query(`
     UPDATE teams
     SET competition_id = leagues.current_competition_id

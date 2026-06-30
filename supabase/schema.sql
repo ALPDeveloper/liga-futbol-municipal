@@ -402,6 +402,7 @@ CREATE INDEX IF NOT EXISTS idx_player_sanctions_league ON player_sanctions(leagu
 CREATE INDEX IF NOT EXISTS idx_player_injuries_league ON player_injuries(league_id, competition_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_league_created ON audit_logs(league_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_league ON users(league_id);
+CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users(lower(email));
 CREATE INDEX IF NOT EXISTS idx_team_user_assignments_user ON team_user_assignments(user_id);
 CREATE INDEX IF NOT EXISTS idx_team_user_assignments_league_team ON team_user_assignments(league_id, team_id);
 CREATE INDEX IF NOT EXISTS idx_team_delegate_activation_tokens_hash ON team_delegate_activation_tokens(token_hash);
@@ -409,3 +410,8 @@ CREATE INDEX IF NOT EXISTS idx_referee_activation_tokens_hash ON referee_activat
 CREATE INDEX IF NOT EXISTS idx_referee_profiles_municipality ON referee_profiles(municipality);
 CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_match ON referee_match_sheets(match_id);
 CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_status ON referee_match_sheets(status);
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_expires ON password_reset_requests(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_matches_referee_central ON matches(central_referee_user_id);
+CREATE INDEX IF NOT EXISTS idx_matches_referee_assistant1 ON matches(assistant_referee1_user_id);
+CREATE INDEX IF NOT EXISTS idx_matches_referee_assistant2 ON matches(assistant_referee2_user_id);
+CREATE INDEX IF NOT EXISTS idx_matches_referee_fourth ON matches(fourth_referee_user_id);

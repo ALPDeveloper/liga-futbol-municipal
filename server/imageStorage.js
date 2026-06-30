@@ -13,6 +13,36 @@ const MIME_EXTENSIONS = {
 
 const DATA_URL_PATTERN = /^data:(image\/(?:png|jpe?g|webp|gif));base64,([a-z0-9+/=\s]+)$/i;
 
+function hasValidImageSignature(buffer, mimeType) {
+  if (mimeType === "image/png") {
+    return buffer.length >= 8 &&
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47 &&
+      buffer[4] === 0x0d &&
+      buffer[5] === 0x0a &&
+      buffer[6] === 0x1a &&
+      buffer[7] === 0x0a;
+  }
+  if (mimeType === "image/jpeg") {
+    return buffer.length >= 3 &&
+      buffer[0] === 0xff &&
+      buffer[1] === 0xd8 &&
+      buffer[2] === 0xff;
+  }
+  if (mimeType === "image/webp") {
+    return buffer.length >= 12 &&
+      buffer.toString("ascii", 0, 4) === "RIFF" &&
+      buffer.toString("ascii", 8, 12) === "WEBP";
+  }
+  if (mimeType === "image/gif") {
+    return buffer.length >= 6 &&
+      (buffer.toString("ascii", 0, 6) === "GIF87a" || buffer.toString("ascii", 0, 6) === "GIF89a");
+  }
+  return false;
+}
+
 function cleanSegment(value, fallback) {
   return String(value || fallback)
     .toLowerCase()
@@ -36,6 +66,9 @@ export function parseImageDataUrl(dataUrl) {
   if (!buffer.length) throw new Error("Imagen vacia.");
   if (buffer.length > runtimeConfig.imageUploadMaxBytes) {
     throw new Error(`La imagen debe pesar menos de ${Math.round(runtimeConfig.imageUploadMaxBytes / 1024 / 1024)} MB.`);
+  }
+  if (!hasValidImageSignature(buffer, mimeType)) {
+    throw new Error("El archivo no coincide con un formato de imagen permitido.");
   }
 
   return {
