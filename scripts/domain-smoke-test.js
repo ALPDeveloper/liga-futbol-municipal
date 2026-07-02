@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { seedData } from "../src/data/seedData.js";
 import {
   addCompetition,
+  addAppearanceAdjustment,
+  addDisciplineAdjustment,
   addDisciplineLink,
   addDisciplineReset,
   addPlayerInjury,
@@ -12,6 +14,7 @@ import {
   addTeam,
   addTeamAffiliation,
   deleteLeague,
+  deleteAppearanceAdjustment,
   deleteAnnouncement,
   deletePlayer,
   deletePlayerInjury,
@@ -32,11 +35,13 @@ import {
 } from "../src/lib/actions.js";
 import {
   calculatePlayerStats,
+  calculatePlayerAppearanceEligibility,
   calculateStandings,
   calculateSuspensionNotices,
   calculateYellowCardDiscipline,
   buildSmartHighlights,
   getCurrentLeague,
+  getEligibleTeamIdsForPlayer,
   getEligiblePlayersForTeam,
   getPlayerNumberForTeam,
   getPlayerSeasonBreakdown,
@@ -118,10 +123,13 @@ let disciplineStore = normalizeStore({
 disciplineStore = addDisciplineLink(disciplineStore, "liga-disciplina", { playerId: "juan-primera", linkedPlayerId: "juan-segunda" });
 let disciplineLeague = getCurrentLeague(disciplineStore);
 let disciplineRows = calculateYellowCardDiscipline(disciplineLeague);
-assert.equal(disciplineRows.length, 1);
-assert.equal(disciplineRows[0].yellowCards, 3);
-assert.equal(disciplineRows[0].status, "suspended");
-assert.equal(disciplineRows[0].linkedPlayers.length, 2);
+assert.equal(disciplineRows.length, 2);
+const segundaDiscipline = disciplineRows.find((row) => row.competition?.id === "segunda");
+const primeraDiscipline = disciplineRows.find((row) => row.competition?.id === "primera");
+assert.equal(segundaDiscipline.yellowCards, 2);
+assert.equal(segundaDiscipline.status, "warning");
+assert.equal(primeraDiscipline.yellowCards, 1);
+assert.equal(primeraDiscipline.status, "tracking");
 disciplineStore = addDisciplineReset(disciplineStore, "liga-disciplina", { playerId: "juan-primera", date: "2026-01-03", reason: "Cumplio sancion" });
 disciplineLeague = getCurrentLeague(disciplineStore);
 disciplineRows = calculateYellowCardDiscipline(disciplineLeague);
@@ -172,6 +180,16 @@ let affiliationStore = normalizeStore({
           homeTeamId: "fresno",
           awayTeamId: "primera-rival",
           events: []
+        },
+        {
+          id: "aff-proximo",
+          competitionId: "segunda",
+          round: 3,
+          date: "2026-02-04",
+          status: "scheduled",
+          homeTeamId: "guascuaro",
+          awayTeamId: "segunda-rival",
+          events: []
         }
       ],
       sanctions: [],
@@ -221,7 +239,22 @@ const affiliationBreakdown = getPlayerSeasonBreakdown(affiliationLeague, "juan-g
 assert.equal(affiliationBreakdown.hasAffiliation, true);
 assert.equal(affiliationBreakdown.totals.goals, 2);
 assert.equal(affiliationBreakdown.totals.yellowCards, 3);
-assert.equal(calculateYellowCardDiscipline(affiliationLeague)[0].status, "suspended");
+let affiliationDisciplineRows = calculateYellowCardDiscipline(affiliationLeague);
+assert.equal(affiliationDisciplineRows.length, 2);
+assert.equal(affiliationDisciplineRows.find((row) => row.competition?.id === "segunda").status, "warning");
+assert.equal(affiliationDisciplineRows.find((row) => row.competition?.id === "primera").status, "tracking");
+affiliationStore = addDisciplineAdjustment(affiliationStore, "liga-afiliacion", {
+  playerId: "juan-guascuaro",
+  competitionId: "segunda",
+  value: 1,
+  date: "2026-02-03",
+  reason: "Ajuste de prueba"
+});
+affiliationLeague = getCurrentLeague(affiliationStore);
+affiliationDisciplineRows = calculateYellowCardDiscipline(affiliationLeague);
+assert.equal(affiliationDisciplineRows.find((row) => row.competition?.id === "segunda").status, "suspended");
+assert.equal(calculateSuspensionNotices(affiliationLeague).find((notice) => notice.player.id === "juan-guascuaro").status, "active");
+assert.equal(getEligibleTeamIdsForPlayer(affiliationLeague, "juan-guascuaro").length, 2);
 affiliationStore = addDisciplineReset(affiliationStore, "liga-afiliacion", { playerId: "juan-guascuaro", date: "2026-02-03", reason: "Cumplio sancion" });
 assert.equal(calculateYellowCardDiscipline(getCurrentLeague(affiliationStore)).length, 0);
 
@@ -893,5 +926,17 @@ league = getCurrentLeague(store);
 assert.equal(league.players.some((player) => player.id === "p5"), false);
 assert.equal(league.sanctions.some((sanction) => sanction.playerId === "p5"), false);
 assert.equal(league.matches.find((match) => match.id === "m4").events.some((event) => event.playerId === "p5"), false);
+
+store = updateLeagueRules(store, league.id, { ...league.rules, minimumPlayoffAppearances: 3 });
+store = addAppearanceAdjustment(store, league.id, { playerId: "p1", value: 2, reason: "Correccion de asistencia" });
+league = getCurrentLeague(store);
+let appearanceEligibility = calculatePlayerAppearanceEligibility(league).get("p1");
+assert.equal(appearanceEligibility.recognizedAppearances, 2);
+assert.equal(appearanceEligibility.remaining, 1);
+assert.equal(appearanceEligibility.eligible, false);
+store = deleteAppearanceAdjustment(store, league.id, league.appearanceAdjustments[0].id);
+league = getCurrentLeague(store);
+appearanceEligibility = calculatePlayerAppearanceEligibility(league).get("p1");
+assert.equal(appearanceEligibility.recognizedAppearances, 0);
 
 console.log("Dominio deportivo OK");

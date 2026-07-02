@@ -3,7 +3,7 @@ import { DEFAULT_IDENTITY, seedData } from "../data/seedData.js";
 export const YELLOW_SUSPENSION_LIMIT = 3;
 export const MAX_IMAGE_DATA_URL_LENGTH = 1_800_000;
 
-const ALLOWED_IMAGE_DATA_URL_PATTERN = /^data:image\/(png|jpe?g|webp|gif);base64,[a-z0-9+/=\s]+$/i;
+const ALLOWED_IMAGE_DATA_URL_PATTERN = /^data:image\/(png|jpe?g|webp);base64,[a-z0-9+/=\s]+$/i;
 
 export function sanitizeExternalUrl(value) {
   const text = String(value || "").trim();
@@ -143,8 +143,10 @@ export function normalizeStore(data) {
           defaultRedSuspensionMatches: 1,
           disciplineScope: "competition",
           playoffQualifiers: 8,
+          minimumPlayoffAppearances: 0,
           notes: "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.",
           ...(league.rules || {}),
+          minimumPlayoffAppearances: Math.max(0, Number(league.rules?.minimumPlayoffAppearances ?? 0)),
           disciplineScope: league.rules?.disciplineScope === "league" ? "league" : "competition",
           notes: upperText(league.rules?.notes || "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.")
         },
@@ -233,6 +235,16 @@ export function normalizeStore(data) {
           notes: upperText(adjustment.notes || ""),
           status: adjustment.status || "active"
         })).filter((adjustment) => adjustment.playerId && adjustment.value),
+        appearanceAdjustments: (league.appearanceAdjustments || []).map((adjustment) => ({
+          ...adjustment,
+          id: adjustment.id || makeId("appearance-adjustment"),
+          playerId: adjustment.playerId || "",
+          value: Number(adjustment.value || 0),
+          date: adjustment.date || "",
+          reason: upperText(adjustment.reason || ""),
+          notes: upperText(adjustment.notes || ""),
+          status: adjustment.status || "active"
+        })).filter((adjustment) => adjustment.playerId && adjustment.value),
         disciplineResets: (league.disciplineResets || []).map((reset) => ({
           ...reset,
           id: reset.id || makeId("discipline-reset"),
@@ -270,7 +282,23 @@ export function normalizeStore(data) {
             ...event,
             reason: upperText(event.reason)
           }))
-        }))
+        })),
+        matchRosters: (league.matchRosters || []).map((roster) => ({
+          ...roster,
+          id: roster.id || makeId("match-roster"),
+          matchId: roster.matchId || "",
+          teamId: roster.teamId || "",
+          submittedByUserId: roster.submittedByUserId || "",
+          captainPlayerId: roster.captainPlayerId || "",
+          captainPin: String(roster.captainPin || ""),
+          players: (roster.players || [])
+            .map((entry) => (typeof entry === "string" ? { playerId: entry } : { playerId: entry.playerId || "" }))
+            .filter((entry) => entry.playerId),
+          status: roster.status || "submitted",
+          notes: upperText(roster.notes || ""),
+          submittedAt: roster.submittedAt || "",
+          updatedAt: roster.updatedAt || roster.submittedAt || ""
+        })).filter((roster) => roster.matchId && roster.teamId)
       };
     })
   };
@@ -588,8 +616,66 @@ export function calculatePlayerStats(league) {
   });
 }
 
-function buildDisciplineContext(league) {
+export function calculatePlayerAppearanceEligibility(league) {
+  const required = Math.max(0, Number(league.rules?.minimumPlayoffAppearances || 0));
+  const rows = new Map(
+    (league.players || []).map((player) => [
+      player.id,
+      {
+        playerId: player.id,
+        required,
+        officialAppearances: 0,
+        manualAdjustment: 0,
+        recognizedAppearances: 0,
+        remaining: required,
+        percentage: required > 0 ? 0 : 100,
+        eligible: required <= 0,
+        applies: required > 0
+      }
+    ])
+  );
+
+  for (const roster of league.matchRosters || []) {
+    if (!["submitted", "approved", "locked"].includes(roster.status || "")) continue;
+    const match = (league.matches || []).find((item) => item.id === roster.matchId);
+    if (!match || !["finished", "walkover"].includes(match.status)) continue;
+    const rosterTeamId = roster.teamId || "";
+
+    for (const entry of roster.players || []) {
+      const playerId = typeof entry === "string" ? entry : entry.playerId;
+      const player = getPlayer(league, playerId);
+      const row = rows.get(playerId);
+      if (!player || !row) continue;
+      if (player.teamId !== rosterTeamId) continue;
+      row.officialAppearances += 1;
+    }
+  }
+
+  for (const adjustment of league.appearanceAdjustments || []) {
+    if (adjustment.status === "revoked") continue;
+    const row = rows.get(adjustment.playerId);
+    if (!row) continue;
+    row.manualAdjustment += Number(adjustment.value || 0);
+  }
+
+  for (const row of rows.values()) {
+    row.recognizedAppearances = Math.max(0, row.officialAppearances + row.manualAdjustment);
+    row.remaining = Math.max(required - row.recognizedAppearances, 0);
+    row.percentage = required > 0 ? Math.min(100, Math.round((row.recognizedAppearances / required) * 100)) : 100;
+    row.eligible = required <= 0 || row.recognizedAppearances >= required;
+    row.applies = required > 0;
+  }
+
+  return rows;
+}
+
+export function getPlayerAppearanceEligibility(league, playerId) {
+  return calculatePlayerAppearanceEligibility(league).get(playerId) || null;
+}
+
+function buildDisciplineContext(league, options = {}) {
   const shared = league.rules?.disciplineScope === "league";
+  const byCompetition = options.byCompetition === true;
   const linkByPlayerId = new Map();
 
   for (const link of league.disciplineLinks || []) {
@@ -599,20 +685,21 @@ function buildDisciplineContext(league) {
     for (const playerId of playerIds) linkByPlayerId.set(playerId, { key, playerIds });
   }
 
-  function getKey(playerId) {
-    if (!shared) return `player:${playerId}`;
-    return linkByPlayerId.get(playerId)?.key || `player:${playerId}`;
+  function getKey(playerId, competitionId = "") {
+    const baseKey = shared ? linkByPlayerId.get(playerId)?.key || `player:${playerId}` : `player:${playerId}`;
+    return byCompetition ? `${baseKey}:competition:${competitionId || "general"}` : baseKey;
   }
 
   function getPlayerIds(playerId) {
     return linkByPlayerId.get(playerId)?.playerIds || [playerId];
   }
 
-  function getState(states, playerId) {
-    const key = getKey(playerId);
+  function getState(states, playerId, competitionId = "") {
+    const key = getKey(playerId, competitionId);
     if (!states.has(key)) {
       states.set(key, {
         key,
+        competitionId,
         playerId,
         playerIds: getPlayerIds(playerId),
         yellowCards: 0,
@@ -630,6 +717,7 @@ function buildDisciplineContext(league) {
 }
 
 function groupInvolvesMatch(league, state, match) {
+  if (state.competitionId && match.competitionId && state.competitionId !== match.competitionId) return false;
   return state.playerIds.some((playerId) => {
     const teamIds = getEligibleTeamIdsForPlayer(league, playerId);
     return teamIds.some((teamId) => involvesTeam(match, teamId));
@@ -648,7 +736,7 @@ function getDisplayTeamForState(league, state) {
 export function calculateYellowCardDiscipline(league) {
   const yellowLimit = Number(league.rules?.yellowSuspensionLimit || YELLOW_SUSPENSION_LIMIT);
   const states = new Map();
-  const discipline = buildDisciplineContext(league);
+  const discipline = buildDisciplineContext(league, { byCompetition: true });
 
   const timeline = [
     ...sortMatches(finishedMatches(league)).flatMap((match) => [
@@ -688,7 +776,7 @@ export function calculateYellowCardDiscipline(league) {
       const player = getPlayer(league, event.playerId);
       if (!player || !involvesTeam(match, event.teamId) || !isPlayerEligibleForTeam(league, event.playerId, event.teamId)) continue;
 
-      const state = discipline.getState(states, event.playerId);
+      const state = discipline.getState(states, event.playerId, match.competitionId || player.competitionId || "");
       if (state.suspensionOrigin) continue;
 
       state.yellowCards += 1;
@@ -702,12 +790,16 @@ export function calculateYellowCardDiscipline(league) {
 
     const player = getPlayer(league, movement.playerId);
     if (!player) continue;
-    const state = discipline.getState(states, movement.playerId);
+    const state = discipline.getState(states, movement.playerId, movement.competitionId || player.competitionId || "");
 
     if (movement.movementType === "reset") {
-      state.yellowCards = 0;
-      state.suspensionOrigin = null;
-      state.sources = [];
+      for (const item of states.values()) {
+        if (!item.playerIds.includes(movement.playerId)) continue;
+        if (movement.competitionId && item.competitionId !== movement.competitionId) continue;
+        item.yellowCards = 0;
+        item.suspensionOrigin = null;
+        item.sources = [];
+      }
       continue;
     }
 
@@ -731,6 +823,7 @@ export function calculateYellowCardDiscipline(league) {
       return {
         player,
         team,
+        competition: getCompetition(league, state.competitionId),
         linkedPlayers: state.playerIds.map((playerId) => getPlayer(league, playerId)).filter(Boolean),
         yellowCards: state.yellowCards,
         yellowLimit,

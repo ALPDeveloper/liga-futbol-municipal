@@ -111,6 +111,7 @@ export function sanitizePublicStore(store) {
       renewalDate: "",
       membershipNotes: "",
       plan: "",
+      matchRosters: [],
       sponsors: (league.sponsors || [])
         .filter((sponsor) => sponsor.status === "active")
         .map((sponsor) => ({
@@ -129,7 +130,8 @@ export function sanitizePublicStore(store) {
         forfeitGoalsAgainst: league.rules?.forfeitGoalsAgainst,
         yellowSuspensionLimit: league.rules?.yellowSuspensionLimit,
         defaultRedSuspensionMatches: league.rules?.defaultRedSuspensionMatches,
-        playoffQualifiers: league.rules?.playoffQualifiers
+        playoffQualifiers: league.rules?.playoffQualifiers,
+        minimumPlayoffAppearances: league.rules?.minimumPlayoffAppearances
       }
     }))
   };

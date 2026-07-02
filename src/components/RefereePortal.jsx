@@ -21,6 +21,38 @@ function normalizeSearch(value) {
     .trim();
 }
 
+function normalizePin(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 8);
+}
+
+function formatClock(seconds) {
+  const safeSeconds = Math.max(0, Number(seconds || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function notifyClockWarning() {
+  if (typeof window === "undefined") return;
+  try {
+    if (window.navigator?.vibrate) window.navigator.vibrate([180, 90, 180]);
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = new AudioContext();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 880;
+    gain.gain.value = 0.05;
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.22);
+  } catch {
+    // Audio/vibration can be blocked by the browser; the visual alert still works.
+  }
+}
+
 function getMatchStatus(match, history) {
   if (match.sheetReviewStatus === "pending_review") return { className: "review", label: "En revision" };
   if (match.sheetReviewStatus === "rejected") return { className: "rejected", label: "Correccion solicitada" };
@@ -65,6 +97,10 @@ function MatchCard({ match, history = false, onCapture }) {
         <span>{match.competitionName || "Categoria"}</span>
         <span>{match.venue || "Cancha por definir"}</span>
       </div>
+      <div className="referee-roster-status-row">
+        <span>{match.homeRosterSubmitted ? `${match.homeTeamName}: convocatoria enviada` : `${match.homeTeamName}: sin convocatoria`}</span>
+        <span>{match.awayRosterSubmitted ? `${match.awayTeamName}: convocatoria enviada` : `${match.awayTeamName}: sin convocatoria`}</span>
+      </div>
       {match.sheetReviewStatus === "pending_review" ? (
         <p className="referee-card-note">Acta enviada. El administrador debe aprobarla para hacerla oficial.</p>
       ) : match.sheetReviewStatus === "rejected" ? (
@@ -88,19 +124,69 @@ function getPlayersForEvent(match, event) {
   return eventTeamId === match.homeTeamId ? match.homePlayers || [] : match.awayPlayers || [];
 }
 
-function createEvent(match, type, teamId) {
+function createEvent(match, type, teamId, minute = "") {
   const draft = {
     id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     type,
     teamId,
     lockedTeamId: teamId,
     playerId: "",
-    minute: "",
+    minute,
     suspensionMatches: type === "red" ? 1 : 0,
     reason: ""
   };
   const players = getPlayersForEvent(match, draft);
   return { ...draft, playerId: players[0]?.id || "" };
+}
+
+function readRefereeDraft(key) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const draft = JSON.parse(raw);
+    return draft && typeof draft === "object" ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRefereeDraft(key, value) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(key, JSON.stringify({ ...value, savedAt: new Date().toISOString() }));
+}
+
+function clearRefereeDraft(key) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(key);
+}
+
+function getRefereePortalCacheKey(userId) {
+  return `ligatec-referee-portal-cache-${userId || "anonymous"}`;
+}
+
+function readRefereePortalCache(userId) {
+  if (typeof window === "undefined" || !userId) return null;
+  try {
+    const raw = window.localStorage.getItem(getRefereePortalCacheKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.payload || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRefereePortalCache(userId, payload) {
+  if (typeof window === "undefined" || !userId || !payload) return;
+  try {
+    window.localStorage.setItem(getRefereePortalCacheKey(userId), JSON.stringify({
+      payload,
+      savedAt: new Date().toISOString()
+    }));
+  } catch {
+    // El panel sigue funcionando aunque el navegador no permita cache local.
+  }
 }
 
 function getEventLabel(type) {
@@ -112,20 +198,56 @@ function getEventLabel(type) {
 }
 
 function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
-  const [homeGoals, setHomeGoals] = useState(match.homeGoals ?? 0);
-  const [awayGoals, setAwayGoals] = useState(match.awayGoals ?? 0);
-  const [sheetMode, setSheetMode] = useState("played");
-  const [defaultWinner, setDefaultWinner] = useState("home");
-  const [defaultScore, setDefaultScore] = useState("3");
-  const [observations, setObservations] = useState(match.observations || "");
-  const [events, setEvents] = useState((match.events || []).map((event, index) => ({
+  const draftKey = `ligatec-referee-draft-${match.id}`;
+  const savedEvents = (match.events || []).map((event, index) => ({
     id: `saved-${match.id}-${index}-${event.type}-${event.playerId}`,
     lockedTeamId: event.teamId || match.homeTeamId,
     ...event
-  })));
+  }));
+  const draft = readRefereeDraft(draftKey);
+  const [homeGoals, setHomeGoals] = useState(draft?.homeGoals ?? match.homeGoals ?? 0);
+  const [awayGoals, setAwayGoals] = useState(draft?.awayGoals ?? match.awayGoals ?? 0);
+  const [sheetMode, setSheetMode] = useState(draft?.sheetMode || "played");
+  const [defaultWinner, setDefaultWinner] = useState(draft?.defaultWinner || "home");
+  const [defaultScore, setDefaultScore] = useState(draft?.defaultScore || "3");
+  const [observations, setObservations] = useState(draft?.observations ?? match.observations ?? "");
+  const [events, setEvents] = useState(draft?.events || savedEvents);
+  const [homeCaptainPin, setHomeCaptainPin] = useState(draft?.homeCaptainPin || "");
+  const [awayCaptainPin, setAwayCaptainPin] = useState(draft?.awayCaptainPin || "");
+  const [liveStarted, setLiveStarted] = useState(Boolean(draft?.liveStarted));
+  const [liveRunning, setLiveRunning] = useState(false);
+  const [livePeriod, setLivePeriod] = useState(Number(draft?.livePeriod || 1));
+  const [liveDuration, setLiveDuration] = useState(Number(draft?.liveDuration || 45));
+  const [liveElapsedSeconds, setLiveElapsedSeconds] = useState(Number(draft?.liveElapsedSeconds || 0));
+  const [liveAddedMinutes, setLiveAddedMinutes] = useState(Number(draft?.liveAddedMinutes || 0));
+  const [liveAlerted, setLiveAlerted] = useState(Boolean(draft?.liveAlerted));
   const [playerSearches, setPlayerSearches] = useState({});
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!liveRunning) return undefined;
+    const interval = window.setInterval(() => {
+      setLiveElapsedSeconds((seconds) => seconds + 1);
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [liveRunning]);
+
+  useEffect(() => {
+    if (!liveStarted || liveAlerted) return;
+    const remainingSeconds = Number(liveDuration || 45) * 60 - liveElapsedSeconds;
+    if (remainingSeconds > 0 && remainingSeconds <= 120) {
+      setLiveAlerted(true);
+      setMessage("Cronometro: faltan 2 minutos para terminar el tiempo. Puedes preparar tiempo agregado.");
+      notifyClockWarning();
+    }
+  }, [liveAlerted, liveDuration, liveElapsedSeconds, liveStarted]);
+
+  useEffect(() => {
+    if (!liveStarted) return;
+    if (liveElapsedSeconds % 10 !== 0) return;
+    persistDraftSilently();
+  }, [liveElapsedSeconds, liveStarted]);
 
   function applyDefault(nextMode, winner = defaultWinner) {
     setSheetMode(nextMode);
@@ -141,24 +263,104 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     setMessage("Marcador por default aplicado. Puedes conservar eventos reales solo para estadisticas de jugadores.");
   }
 
+  function adjustScore(teamId, delta) {
+    const setter = teamId === match.homeTeamId ? setHomeGoals : setAwayGoals;
+    setter((value) => String(Math.max(0, Number(value || 0) + delta)));
+  }
+
+  function isGoalEventType(type) {
+    return type === "goal" || type === "own_goal";
+  }
+
+  function buildDraftPayload() {
+    return {
+      homeGoals,
+      awayGoals,
+      sheetMode,
+      defaultWinner,
+      defaultScore,
+      observations,
+      events,
+      homeCaptainPin,
+      awayCaptainPin,
+      liveStarted,
+      livePeriod,
+      liveDuration,
+      liveElapsedSeconds,
+      liveAddedMinutes,
+      liveAlerted
+    };
+  }
+
+  function persistDraftSilently() {
+    writeRefereeDraft(draftKey, buildDraftPayload());
+  }
+
+  function getLiveEventMinute() {
+    if (!liveStarted) return "";
+    const periodBase = livePeriod === 2 ? Number(liveDuration || 45) : 0;
+    const elapsedMinute = Math.max(1, Math.ceil(Math.max(1, liveElapsedSeconds) / 60));
+    return String(periodBase + elapsedMinute);
+  }
+
+  function startLiveMatch() {
+    setLiveStarted(true);
+    setLiveRunning(true);
+    setLivePeriod(1);
+    setLiveElapsedSeconds(0);
+    setLiveAddedMinutes(0);
+    setLiveAlerted(false);
+    setMessage("Cronometro iniciado. Los eventos tomaran el minuto automaticamente.");
+  }
+
+  function pauseLiveClock() {
+    setLiveRunning(false);
+    setMessage("Cronometro pausado.");
+  }
+
+  function resumeLiveClock() {
+    setLiveRunning(true);
+    setMessage("Cronometro reanudado.");
+  }
+
+  function startSecondHalf() {
+    if (!window.confirm("¿Iniciar segundo tiempo? El cronometro volvera a 00:00 y los eventos sumaran el tiempo del primer periodo.")) return;
+    setLiveStarted(true);
+    setLiveRunning(true);
+    setLivePeriod(2);
+    setLiveElapsedSeconds(0);
+    setLiveAddedMinutes(0);
+    setLiveAlerted(false);
+    setMessage("Segundo tiempo iniciado.");
+  }
+
+  function stopLiveClock() {
+    setLiveRunning(false);
+    setMessage("Cronometro detenido. Puedes seguir editando el acta manualmente.");
+  }
+
   function addEvent(type, teamId) {
-    setEvents((current) => [...current, createEvent(match, type, teamId)]);
+    setMessage("");
+    if (sheetMode === "played" && isGoalEventType(type)) adjustScore(teamId, 1);
+    setEvents((current) => [...current, createEvent(match, type, teamId, getLiveEventMinute())]);
   }
 
   function updateEvent(eventId, field, value) {
-    setEvents((current) => current.map((event) => {
-      if (event.id !== eventId) return event;
-      const nextEvent = {
-        ...event,
-        [field]: value,
-        suspensionMatches: field === "type" && value === "red" ? Math.max(Number(event.suspensionMatches || 1), 1) : event.suspensionMatches,
-        reason: field === "type" && value !== "red" ? "" : event.reason
-      };
-      if (field === "type") {
-        nextEvent.playerId = getPlayersForEvent(match, nextEvent)[0]?.id || "";
-      }
-      return nextEvent;
-    }));
+    const currentEvent = events.find((event) => event.id === eventId);
+    if (!currentEvent) return;
+    const wasGoal = isGoalEventType(currentEvent.type);
+    const nextEvent = {
+      ...currentEvent,
+      [field]: value,
+      suspensionMatches: field === "type" && value === "red" ? Math.max(Number(currentEvent.suspensionMatches || 1), 1) : currentEvent.suspensionMatches,
+      reason: field === "type" && value !== "red" ? "" : currentEvent.reason
+    };
+    if (field === "type") {
+      nextEvent.playerId = getPlayersForEvent(match, nextEvent)[0]?.id || "";
+    }
+    const isGoal = isGoalEventType(nextEvent.type);
+    if (sheetMode === "played" && wasGoal !== isGoal) adjustScore(nextEvent.teamId, isGoal ? 1 : -1);
+    setEvents((current) => current.map((event) => (event.id === eventId ? nextEvent : event)));
   }
 
   function updatePlayerSearch(eventId, value) {
@@ -166,12 +368,19 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
   }
 
   function removeEvent(eventId) {
+    const eventToRemove = events.find((event) => event.id === eventId);
+    if (sheetMode === "played" && eventToRemove && isGoalEventType(eventToRemove.type)) adjustScore(eventToRemove.teamId, -1);
     setEvents((current) => current.filter((event) => event.id !== eventId));
     setPlayerSearches((current) => {
       const next = { ...current };
       delete next[eventId];
       return next;
     });
+  }
+
+  function saveDraft() {
+    writeRefereeDraft(draftKey, buildDraftPayload());
+    onSaved(null, { draft: true, message: "Acta guardada temporalmente. Puedes continuar editandola desde partidos pendientes." });
   }
 
   async function submitSheet(event) {
@@ -192,9 +401,17 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       setMessage("Toda tarjeta roja debe tener motivo.");
       return;
     }
+    if (!isDefault && match.homePinRequired && normalizePin(homeCaptainPin).length < 4) {
+      setMessage(`Captura el PIN del capitan de ${match.homeTeamName}.`);
+      return;
+    }
+    if (!isDefault && match.awayPinRequired && normalizePin(awayCaptainPin).length < 4) {
+      setMessage(`Captura el PIN del capitan de ${match.awayTeamName}.`);
+      return;
+    }
 
     const confirmed = window.confirm(
-      `¿Enviar acta a revision?\n\nPartido: ${match.homeTeamName} vs ${match.awayTeamName}\nMarcador reportado: ${homeGoals}-${awayGoals}\nEventos: ${cleanEvents.length}\n\nEl administrador debera aprobarla para que sea oficial.`
+      `¿Enviar acta a revision?\n\nPartido: ${match.homeTeamName} vs ${match.awayTeamName}\nMarcador reportado: ${homeGoals}-${awayGoals}\nEventos: ${cleanEvents.length}\nPIN local: ${!isDefault && match.homePinRequired ? "capturado" : "no requerido"}\nPIN visitante: ${!isDefault && match.awayPinRequired ? "capturado" : "no requerido"}\n\nEl administrador debera aprobarla para que sea oficial.`
     );
     if (!confirmed) return;
 
@@ -207,6 +424,10 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
         status: isDefault ? "walkover" : "finished",
         resolutionType: isDefault ? "no_show" : "normal",
         resolutionNote: isDefault ? `Default administrativo ${defaultScore}-0. Eventos capturados solo para estadisticas individuales.` : "",
+        approvals: {
+          homePin: normalizePin(homeCaptainPin),
+          awayPin: normalizePin(awayCaptainPin)
+        },
         events: cleanEvents.map((item) => ({
           type: item.type,
           teamId: item.teamId,
@@ -216,6 +437,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           reason: item.type === "red" ? item.reason : ""
         }))
       });
+      clearRefereeDraft(draftKey);
       onSaved(nextPayload);
     } catch (saveError) {
       setMessage(saveError.message || "No se pudo guardar el acta.");
@@ -236,7 +458,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       </div>
 
       <div className="referee-sheet-head">
-        <div>
+        <div className="referee-score-team home">
           <span>Local</span>
           <strong>{match.homeTeamName}</strong>
         </div>
@@ -245,7 +467,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           <span>-</span>
           <input aria-label="Goles visitante" min="0" type="number" value={awayGoals} onChange={(event) => setAwayGoals(event.target.value)} />
         </div>
-        <div>
+        <div className="referee-score-team away">
           <span>Visitante</span>
           <strong>{match.awayTeamName}</strong>
         </div>
@@ -268,6 +490,54 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           </label>
         )}
       </div>
+
+      {sheetMode === "played" && (
+        <section className={`referee-live-panel ${liveStarted ? "is-active" : ""}`} aria-label="Modo partido en vivo">
+          <div className="referee-live-head">
+            <div>
+              <span>Modo en vivo opcional</span>
+              <strong>{liveStarted ? `${livePeriod}T en curso` : "Cronometro del partido"}</strong>
+              <small>Si lo activas, goles y tarjetas toman el minuto actual automaticamente.</small>
+            </div>
+            <div className="referee-live-clock">
+              <b>{formatClock(liveElapsedSeconds)}</b>
+              <span>{liveStarted ? (liveRunning ? "Corriendo" : "Pausado") : "Sin iniciar"}</span>
+            </div>
+          </div>
+          <div className="referee-live-meta">
+            <label>Duracion por tiempo
+              <select value={liveDuration} onChange={(event) => setLiveDuration(Number(event.target.value))} disabled={liveRunning}>
+                <option value={35}>35 min</option>
+                <option value={40}>40 min</option>
+                <option value={45}>45 min</option>
+                <option value={50}>50 min</option>
+              </select>
+            </label>
+            <label>Tiempo agregado
+              <input
+                value={liveAddedMinutes}
+                onChange={(event) => setLiveAddedMinutes(event.target.value)}
+                inputMode="numeric"
+                min="0"
+                max="20"
+                type="number"
+                placeholder="Minutos"
+              />
+            </label>
+            <div className="referee-live-added">
+              <span>Minuto para nuevo evento</span>
+              <strong>{liveStarted ? `${getLiveEventMinute()}${Number(liveAddedMinutes || 0) > 0 ? ` +${liveAddedMinutes}` : ""}` : "Manual"}</strong>
+            </div>
+          </div>
+          <div className="referee-live-controls">
+            {!liveStarted && <button className="primary" type="button" onClick={startLiveMatch}>Iniciar partido</button>}
+            {liveStarted && liveRunning && <button type="button" onClick={pauseLiveClock}>Pausar</button>}
+            {liveStarted && !liveRunning && <button className="primary" type="button" onClick={resumeLiveClock}>Reanudar</button>}
+            {liveStarted && livePeriod === 1 && <button type="button" onClick={startSecondHalf}>Iniciar 2T</button>}
+            {liveStarted && <button type="button" onClick={stopLiveClock}>Detener</button>}
+          </div>
+        </section>
+      )}
 
       <div className="referee-event-buttons">
         <button className="event-goal" type="button" onClick={() => addEvent("goal", match.homeTeamId)}>Gol local</button>
@@ -328,7 +598,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
                 <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label="Jugador">
                   <option value="">{filteredPlayers.length ? "Selecciona jugador" : "Sin coincidencias, mostrando plantilla"}</option>
                   {visiblePlayers.map((player) => (
-                    <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
+                    <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isCaptain ? " | CAPITAN" : ""}</option>
                   ))}
                 </select>
               </label>
@@ -351,11 +621,43 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
         {!events.length && <p className="empty">Agrega goles, tarjetas o autogoles con los botones superiores.</p>}
       </div>
 
+      {sheetMode === "played" && (match.homePinRequired || match.awayPinRequired) && (
+        <div className="referee-pin-panel">
+          <div>
+            <strong>Autorizacion de capitanes</strong>
+            <span>Solicita el PIN al capitan o delegado antes de enviar el acta.</span>
+          </div>
+          {match.homePinRequired && (
+            <label>PIN local | {match.homeTeamName}
+              <input
+                inputMode="numeric"
+                maxLength={8}
+                value={homeCaptainPin}
+                onChange={(event) => setHomeCaptainPin(normalizePin(event.target.value))}
+                placeholder="6 digitos"
+              />
+            </label>
+          )}
+          {match.awayPinRequired && (
+            <label>PIN visitante | {match.awayTeamName}
+              <input
+                inputMode="numeric"
+                maxLength={8}
+                value={awayCaptainPin}
+                onChange={(event) => setAwayCaptainPin(normalizePin(event.target.value))}
+                placeholder="6 digitos"
+              />
+            </label>
+          )}
+        </div>
+      )}
+
       <label>Observaciones
         <textarea value={observations} onChange={(event) => setObservations(event.target.value)} placeholder="Notas del partido, incidentes o acuerdos." />
       </label>
-      {message && <p className={message.startsWith("No se") || message.startsWith("Revisa") || message.startsWith("Toda") ? "auth-error" : "auth-ok"}>{message}</p>}
+      {message && <p className={message.startsWith("No se") || message.startsWith("Revisa") || message.startsWith("Toda") || message.startsWith("Captura") ? "auth-error" : "auth-ok"}>{message}</p>}
       <div className="inline-actions">
+        <button type="button" onClick={saveDraft} disabled={saving}>Guardar temporalmente</button>
         <button className="primary" type="submit" disabled={saving}>{saving ? "Enviando acta..." : "Enviar a revision"}</button>
         <button type="button" onClick={onCancel} disabled={saving}>Cancelar</button>
       </div>
@@ -369,6 +671,7 @@ export function RefereePortal({ authToken, currentUser }) {
   const [loading, setLoading] = useState(true);
   const [captureMatchId, setCaptureMatchId] = useState("");
   const [activeView, setActiveView] = useState("pending");
+  const [portalNotice, setPortalNotice] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -377,11 +680,20 @@ export function RefereePortal({ authToken, currentUser }) {
       .then((nextPayload) => {
         if (!cancelled) {
           setPayload(nextPayload);
+          writeRefereePortalCache(currentUser?.id, nextPayload);
           setError("");
         }
       })
       .catch((portalError) => {
-        if (!cancelled) setError(portalError.message);
+        if (cancelled) return;
+        const cachedPayload = readRefereePortalCache(currentUser?.id);
+        if (cachedPayload) {
+          setPayload(cachedPayload);
+          setPortalNotice("Sin conexion. Mostrando la ultima informacion guardada en este dispositivo.");
+          setError("");
+          return;
+        }
+        setError(portalError.message);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -389,7 +701,7 @@ export function RefereePortal({ authToken, currentUser }) {
     return () => {
       cancelled = true;
     };
-  }, [authToken]);
+  }, [authToken, currentUser?.id]);
 
   const groupedHistory = useMemo(() => {
     const groups = new Map();
@@ -422,6 +734,10 @@ export function RefereePortal({ authToken, currentUser }) {
   const referee = payload?.referee;
   const pendingMatches = payload?.pendingMatches || [];
   const captureMatch = pendingMatches.find((match) => match.id === captureMatchId);
+  const openCapture = (matchId) => {
+    setPortalNotice("");
+    setCaptureMatchId(matchId);
+  };
 
   if (captureMatch) {
     return (
@@ -431,10 +747,14 @@ export function RefereePortal({ authToken, currentUser }) {
             authToken={authToken}
             match={captureMatch}
             onCancel={() => setCaptureMatchId("")}
-            onSaved={(nextPayload) => {
-              setPayload(nextPayload);
+            onSaved={(nextPayload, options = {}) => {
+              if (nextPayload) {
+                setPayload(nextPayload);
+                writeRefereePortalCache(currentUser?.id, nextPayload);
+              }
               setCaptureMatchId("");
               setActiveView("pending");
+              setPortalNotice(options.message || "Acta enviada a revision. El partido se movio a historial.");
             }}
           />
         </section>
@@ -455,6 +775,7 @@ export function RefereePortal({ authToken, currentUser }) {
           <span><strong>{payload?.history?.length || 0}</strong> historial</span>
         </div>
       </section>
+      {portalNotice && <p className="auth-ok referee-portal-notice">{portalNotice}</p>}
 
       <section className="panel referee-section">
         <div className="referee-view-tabs" role="tablist" aria-label="Vistas del arbitro">
@@ -486,7 +807,7 @@ export function RefereePortal({ authToken, currentUser }) {
         <div className="referee-match-list">
           {pendingMatches.map((match) => (
             <div className="referee-capture-wrap" key={match.id}>
-              <MatchCard match={match} onCapture={setCaptureMatchId} />
+              <MatchCard match={match} onCapture={openCapture} />
             </div>
           ))}
           {!pendingMatches.length && <p className="empty">Cuando te asignen a partidos pendientes, apareceran aqui.</p>}

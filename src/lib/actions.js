@@ -168,6 +168,7 @@ export function deletePlayer(store, leagueId, playerId) {
       .filter((link) => link.playerIds.length > 1),
     disciplineAdjustments: (league.disciplineAdjustments || []).filter((adjustment) => adjustment.playerId !== playerId),
     disciplineResets: (league.disciplineResets || []).filter((reset) => reset.playerId !== playerId),
+    appearanceAdjustments: (league.appearanceAdjustments || []).filter((adjustment) => adjustment.playerId !== playerId),
     injuries: (league.injuries || []).filter((injury) => injury.playerId !== playerId),
     matches: league.matches.map((match) => ({
       ...match,
@@ -269,6 +270,33 @@ export function deleteDisciplineAdjustment(store, leagueId, adjustmentId) {
   return updateLeague(store, leagueId, (league) => ({
     ...league,
     disciplineAdjustments: (league.disciplineAdjustments || []).filter((adjustment) => adjustment.id !== adjustmentId)
+  }));
+}
+
+export function addAppearanceAdjustment(store, leagueId, payload) {
+  const value = payload.direction === "subtract" ? -Math.abs(Number(payload.value || 1)) : Math.abs(Number(payload.value || 1));
+
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    appearanceAdjustments: [
+      ...(league.appearanceAdjustments || []),
+      {
+        id: makeId("appearance-adjustment"),
+        playerId: payload.playerId,
+        value,
+        date: payload.date || new Date().toISOString().slice(0, 10),
+        reason: upperText(payload.reason || "Ajuste manual de partidos jugados"),
+        notes: upperText(payload.notes || ""),
+        status: "active"
+      }
+    ]
+  }));
+}
+
+export function deleteAppearanceAdjustment(store, leagueId, adjustmentId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    appearanceAdjustments: (league.appearanceAdjustments || []).filter((adjustment) => adjustment.id !== adjustmentId)
   }));
 }
 
@@ -408,6 +436,10 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
         ...reset,
         playerId: replacePlayerId(reset.playerId)
       })),
+      appearanceAdjustments: (league.appearanceAdjustments || []).map((adjustment) => ({
+        ...adjustment,
+        playerId: replacePlayerId(adjustment.playerId)
+      })),
       disciplineLinks: (league.disciplineLinks || [])
         .map((link) => ({
           ...link,
@@ -421,6 +453,13 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
             ? { ...event, playerId: targetPlayer.id, teamId: event.teamId || duplicatePlayer.teamId }
             : event
         ))
+      })),
+      matchRosters: (league.matchRosters || []).map((roster) => ({
+        ...roster,
+        captainPlayerId: replacePlayerId(roster.captainPlayerId),
+        players: [...new Set((roster.players || []).map((entry) => replacePlayerId(typeof entry === "string" ? entry : entry.playerId)))]
+          .filter(Boolean)
+          .map((playerId) => ({ playerId }))
       }))
     };
   });
@@ -1017,6 +1056,7 @@ export function updateLeagueRules(store, leagueId, payload) {
       defaultRedSuspensionMatches: Number(payload.defaultRedSuspensionMatches ?? league.rules?.defaultRedSuspensionMatches ?? 1),
       disciplineScope: payload.disciplineScope === "league" ? "league" : "competition",
       playoffQualifiers: Number(payload.playoffQualifiers ?? league.rules?.playoffQualifiers ?? 8),
+      minimumPlayoffAppearances: Number(payload.minimumPlayoffAppearances ?? league.rules?.minimumPlayoffAppearances ?? 0),
       notes: upperText(payload.notes || "")
     }
   }));

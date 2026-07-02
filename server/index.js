@@ -41,6 +41,7 @@ import {
   listActivePasswordResetRequests,
   listRefereeMatchSheetsData,
   listRefereeMatchSheetsForRefereeData,
+  listMatchRostersForLeagueData,
   listRefereesData,
   listTeamDelegatesData,
   listTeamPortalPlayersData,
@@ -60,6 +61,7 @@ import {
   updateTeamLogoData,
   updatePasswordData,
   updateTeamPortalPlayerData,
+  upsertMatchRosterData,
   updateUserData
 } from "./dataLayer.js";
 import { hashPassword, verifyPassword } from "./password.js";
@@ -77,7 +79,7 @@ import {
   validateUserStatus
 } from "./security.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
-import { getEligiblePlayersForTeam, upperText } from "../src/lib/domain.js";
+import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, upperText } from "../src/lib/domain.js";
 import { saveMatchSheet } from "../src/lib/actions.js";
 
 validateRuntimeConfig();
@@ -271,11 +273,95 @@ async function canManageMunicipality(user, municipality) {
   return upperText(municipality) === await getLeagueAdminMunicipality(user);
 }
 
-function buildRefereePortalPayload(store, referee, userId, refereeSheets = []) {
+async function buildTeamPortalPayload(userId) {
+  const context = await getTeamDelegateContextData(userId);
+  if (!context) return null;
+  const players = await listTeamPortalPlayersData(context.teamId);
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const matchRosters = league ? await listMatchRostersForLeagueData(league.id) : [];
+  const leagueWithRosters = league ? { ...league, matchRosters } : null;
+  const eligibilityByPlayerId = leagueWithRosters ? calculatePlayerAppearanceEligibility(leagueWithRosters) : new Map();
+  const activeSuspensionByPlayerId = new Map();
+  if (league) {
+    for (const notice of calculateSuspensionNotices(league)) {
+      if (notice.status === "active" && notice.player?.id) activeSuspensionByPlayerId.set(notice.player.id, notice);
+    }
+  }
+  const eligiblePlayers = league ? getEligiblePlayersForTeam(league, context.teamId).map((player) => ({
+    id: player.id,
+    name: player.name,
+    number: player.number,
+    position: player.position,
+    teamId: player.teamId,
+    playoffEligibility: eligibilityByPlayerId.get(player.id) || null,
+    suspension: activeSuspensionByPlayerId.has(player.id)
+      ? {
+        type: activeSuspensionByPlayerId.get(player.id).type,
+        reason: activeSuspensionByPlayerId.get(player.id).reason,
+        remainingMatches: activeSuspensionByPlayerId.get(player.id).remainingMatches,
+        returnRound: activeSuspensionByPlayerId.get(player.id).returnRound
+      }
+      : null
+  })) : [];
+  const rosterByMatchTeam = new Map(matchRosters.map((roster) => [`${roster.matchId}:${roster.teamId}`, roster]));
+  const matches = league ? (league.matches || [])
+    .filter((match) => match.status === "scheduled" && (match.homeTeamId === context.teamId || match.awayTeamId === context.teamId))
+    .sort((a, b) => (
+      String(a.date || "").localeCompare(String(b.date || "")) ||
+      String(a.time || "").localeCompare(String(b.time || ""))
+    ))
+    .map((match) => {
+      const opponentTeamId = match.homeTeamId === context.teamId ? match.awayTeamId : match.homeTeamId;
+      const opponent = (league.teams || []).find((team) => team.id === opponentTeamId);
+      const roster = rosterByMatchTeam.get(`${match.id}:${context.teamId}`);
+      return {
+        id: match.id,
+        date: match.date,
+        time: match.time,
+        round: match.round,
+        venue: match.venue,
+        competitionId: match.competitionId,
+        isPlayoff: match.stage === "playoff" || Boolean(match.playoffRound),
+        isHome: match.homeTeamId === context.teamId,
+        opponentName: opponent?.name || "RIVAL",
+        roster: roster || null
+      };
+    }) : [];
+
+  return {
+    context,
+    players: players.map((player) => ({
+      ...player,
+      playoffEligibility: eligibilityByPlayerId.get(player.id) || null
+    })),
+    eligiblePlayers,
+    matches
+  };
+}
+
+async function listMatchRostersForStore(store) {
+  const rosters = [];
+  for (const league of store.leagues || []) {
+    rosters.push(...await listMatchRostersForLeagueData(league.id));
+  }
+  return rosters;
+}
+
+function generateCaptainPin() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+function normalizePin(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 8);
+}
+
+function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], matchRosters = []) {
   const sheetByMatchId = new Map();
   for (const sheet of refereeSheets.filter((item) => item.status === "pending_review" || item.status === "rejected")) {
     if (!sheetByMatchId.has(sheet.matchId)) sheetByMatchId.set(sheet.matchId, sheet);
   }
+  const rosterByMatchTeam = new Map(matchRosters.map((roster) => [`${roster.matchId}:${roster.teamId}`, roster]));
   const assignedMatches = [];
   for (const league of store.leagues || []) {
     if (upperText(league.city || "") !== upperText(referee.municipality)) continue;
@@ -296,6 +382,22 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = []) {
       const reviewSheet = sheetByMatchId.get(match.id);
       const reviewPayload = reviewSheet?.payload || {};
       const hasPendingReview = reviewSheet?.status === "pending_review";
+      const homeRoster = rosterByMatchTeam.get(`${match.id}:${match.homeTeamId}`);
+      const awayRoster = rosterByMatchTeam.get(`${match.id}:${match.awayTeamId}`);
+      const homeEligiblePlayers = getEligiblePlayersForTeam(league, match.homeTeamId);
+      const awayEligiblePlayers = getEligiblePlayersForTeam(league, match.awayTeamId);
+      const buildRosterPlayers = (players, roster) => {
+        const rosterPlayerIds = new Set((roster?.players || []).map((entry) => typeof entry === "string" ? entry : entry.playerId));
+        const source = roster ? players.filter((player) => rosterPlayerIds.has(player.id)) : players;
+        return source.map((player) => ({
+          id: player.id,
+          name: player.name,
+          number: player.number,
+          position: player.position,
+          teamId: player.teamId,
+          isCaptain: roster?.captainPlayerId === player.id
+        }));
+      };
       assignedMatches.push({
         id: match.id,
         leagueId: league.id,
@@ -319,20 +421,14 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = []) {
         awayTeamId: match.awayTeamId,
         homeTeamName: homeTeam?.name || "LOCAL",
         awayTeamName: awayTeam?.name || "VISITANTE",
-        homePlayers: getEligiblePlayersForTeam(league, match.homeTeamId).map((player) => ({
-          id: player.id,
-          name: player.name,
-          number: player.number,
-          position: player.position,
-          teamId: player.teamId
-        })),
-        awayPlayers: getEligiblePlayersForTeam(league, match.awayTeamId).map((player) => ({
-          id: player.id,
-          name: player.name,
-          number: player.number,
-          position: player.position,
-          teamId: player.teamId
-        })),
+        homePlayers: buildRosterPlayers(homeEligiblePlayers, homeRoster),
+        awayPlayers: buildRosterPlayers(awayEligiblePlayers, awayRoster),
+        homeRosterSubmitted: Boolean(homeRoster),
+        awayRosterSubmitted: Boolean(awayRoster),
+        homePinRequired: Boolean(homeRoster?.captainPin),
+        awayPinRequired: Boolean(awayRoster?.captainPin),
+        homeCaptainPlayerId: homeRoster?.captainPlayerId || "",
+        awayCaptainPlayerId: awayRoster?.captainPlayerId || "",
         refereeRole,
         canCapture: refereeRole === "central" && !hasPendingReview && match.status !== "finished" && match.status !== "walkover"
       });
@@ -1318,10 +1414,9 @@ app.get("/api/team-portal/me", requireAuth, async (request, response) => {
   if (request.user.role !== "team_delegate") {
     return response.status(403).json({ error: "Permiso de delegado requerido" });
   }
-  const context = await getTeamDelegateContextData(request.user.id);
-  if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
-  const players = await listTeamPortalPlayersData(context.teamId);
-  response.json({ context, players });
+  const payload = await buildTeamPortalPayload(request.user.id);
+  if (!payload) return response.status(404).json({ error: "No tienes equipo asignado" });
+  response.json(payload);
 });
 
 app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
@@ -1334,7 +1429,8 @@ app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
   }
   const store = await getStoreData();
   const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
-  response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets));
+  const matchRosters = await listMatchRostersForStore(store);
+  response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets, matchRosters));
 });
 
 app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (request, response) => {
@@ -1364,15 +1460,34 @@ app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (reque
     return response.status(400).json({ error: "Esta acta ya fue enviada y esta pendiente de revision." });
   }
 
+  const isWalkoverSheet = request.body.status === "walkover";
+  const matchRosters = await listMatchRostersForLeagueData(league.id);
+  const homeRoster = matchRosters.find((roster) => roster.matchId === match.id && roster.teamId === match.homeTeamId);
+  const awayRoster = matchRosters.find((roster) => roster.matchId === match.id && roster.teamId === match.awayTeamId);
+  const approvals = request.body.approvals && typeof request.body.approvals === "object" ? request.body.approvals : {};
+  if (!isWalkoverSheet) {
+    if (homeRoster?.captainPin && normalizePin(approvals.homePin) !== normalizePin(homeRoster.captainPin)) {
+      return response.status(400).json({ error: "PIN de capitan incorrecto para equipo local." });
+    }
+    if (awayRoster?.captainPin && normalizePin(approvals.awayPin) !== normalizePin(awayRoster.captainPin)) {
+      return response.status(400).json({ error: "PIN de capitan incorrecto para equipo visitante." });
+    }
+  }
+
   const sheetPayload = {
     matchId: match.id,
     homeGoals: request.body.homeGoals,
     awayGoals: request.body.awayGoals,
     observations: request.body.observations || "",
-    status: request.body.status === "walkover" ? "walkover" : "finished",
-    resolutionType: request.body.resolutionType || (request.body.status === "walkover" ? "no_show" : "normal"),
+    status: isWalkoverSheet ? "walkover" : "finished",
+    resolutionType: request.body.resolutionType || (isWalkoverSheet ? "no_show" : "normal"),
     resolutionNote: request.body.resolutionNote || "",
-    events: Array.isArray(request.body.events) ? request.body.events : []
+    events: Array.isArray(request.body.events) ? request.body.events : [],
+    captainApprovals: {
+      home: !homeRoster?.captainPin || !isWalkoverSheet,
+      away: !awayRoster?.captainPin || !isWalkoverSheet,
+      approvedAt: !isWalkoverSheet ? new Date().toISOString() : ""
+    }
   };
   saveMatchSheet(store, league.id, sheetPayload);
   const sheet = await createRefereeMatchSheetData({
@@ -1393,7 +1508,8 @@ app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (reque
   });
 
   const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
-  response.status(201).json(buildRefereePortalPayload(await getStoreData(), referee, request.user.id, refereeSheets));
+  const nextStore = await getStoreData();
+  response.status(201).json(buildRefereePortalPayload(nextStore, referee, request.user.id, refereeSheets, await listMatchRostersForStore(nextStore)));
 });
 
 app.post("/api/team-portal/players", requireAuth, async (request, response) => {
@@ -1421,7 +1537,7 @@ app.post("/api/team-portal/players", requireAuth, async (request, response) => {
   const duplicate = league ? findDuplicatePlayer(league, payload) : null;
   if (duplicate) return response.status(409).json({ error: `Este jugador ya esta registrado como ${duplicate.name}.` });
 
-  const players = await createTeamPortalPlayerData({
+  await createTeamPortalPlayerData({
     id: `player-${crypto.randomUUID()}`,
     leagueId: context.leagueId,
     competitionId: context.competitionId,
@@ -1438,7 +1554,7 @@ app.post("/api/team-portal/players", requireAuth, async (request, response) => {
   });
 
   clearPublicCache();
-  response.status(201).json({ context, players });
+  response.status(201).json(await buildTeamPortalPayload(request.user.id));
 });
 
 app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, response) => {
@@ -1470,7 +1586,7 @@ app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, res
   const duplicate = league ? findDuplicatePlayer(league, payload, player.id) : null;
   if (duplicate) return response.status(409).json({ error: `Este jugador ya esta registrado como ${duplicate.name}.` });
 
-  const players = await updateTeamPortalPlayerData(player.id, {
+  await updateTeamPortalPlayerData(player.id, {
     teamId: context.teamId,
     ...payload
   });
@@ -1485,7 +1601,7 @@ app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, res
   });
 
   clearPublicCache();
-  response.json({ context, players });
+  response.json(await buildTeamPortalPayload(request.user.id));
 });
 
 app.patch("/api/team-portal/team-logo", requireAuth, async (request, response) => {
@@ -1500,9 +1616,6 @@ app.patch("/api/team-portal/team-logo", requireAuth, async (request, response) =
     teamId: context.teamId,
     logoUrl: request.body.logoUrl || ""
   });
-  const nextContext = await getTeamDelegateContextData(request.user.id);
-  const players = await listTeamPortalPlayersData(context.teamId);
-
   await logAudit({
     user: request.user,
     leagueId: context.leagueId,
@@ -1513,7 +1626,90 @@ app.patch("/api/team-portal/team-logo", requireAuth, async (request, response) =
   });
 
   clearPublicCache();
-  response.json({ context: nextContext, players });
+  response.json(await buildTeamPortalPayload(request.user.id));
+});
+
+app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request, response) => {
+  if (request.user.role !== "team_delegate") {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  const context = await getTeamDelegateContextData(request.user.id);
+  if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const match = league?.matches?.find((item) => item.id === request.params.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado." });
+  if (match.homeTeamId !== context.teamId && match.awayTeamId !== context.teamId) {
+    return response.status(403).json({ error: "Solo puedes enviar convocatoria de tu propio equipo." });
+  }
+  if (match.status !== "scheduled") {
+    return response.status(400).json({ error: "Solo se puede enviar convocatoria de partidos programados." });
+  }
+
+  const requestedPlayerIds = [...new Set((Array.isArray(request.body.playerIds) ? request.body.playerIds : [])
+    .map((playerId) => String(playerId || "").trim())
+    .filter(Boolean))];
+  if (!requestedPlayerIds.length) return response.status(400).json({ error: "Selecciona al menos un jugador para la convocatoria." });
+  if (requestedPlayerIds.length > 40) return response.status(400).json({ error: "La convocatoria no puede exceder 40 jugadores." });
+
+  const eligiblePlayerIds = new Set(getEligiblePlayersForTeam(league, context.teamId).map((player) => player.id));
+  const invalidPlayerId = requestedPlayerIds.find((playerId) => !eligiblePlayerIds.has(playerId));
+  if (invalidPlayerId) return response.status(400).json({ error: "La convocatoria incluye un jugador que no pertenece a este equipo." });
+
+  const activeSuspensionByPlayerId = new Map();
+  for (const notice of calculateSuspensionNotices(league)) {
+    if (notice.status === "active" && notice.player?.id) activeSuspensionByPlayerId.set(notice.player.id, notice);
+  }
+  const suspendedPlayerId = requestedPlayerIds.find((playerId) => activeSuspensionByPlayerId.has(playerId));
+  if (suspendedPlayerId) {
+    const player = league.players.find((item) => item.id === suspendedPlayerId);
+    return response.status(400).json({ error: `${player?.name || "Un jugador"} esta suspendido y no puede ser convocado.` });
+  }
+
+  const rosters = await listMatchRostersForLeagueData(league.id);
+  const existingRoster = rosters.find((roster) => roster.matchId === match.id && roster.teamId === context.teamId);
+  const eligibilityByPlayerId = calculatePlayerAppearanceEligibility({ ...league, matchRosters: rosters });
+  const isPlayoffMatch = match.stage === "playoff" || Boolean(match.playoffRound);
+  if (isPlayoffMatch) {
+    const ineligiblePlayerId = requestedPlayerIds.find((playerId) => {
+      const eligibility = eligibilityByPlayerId.get(playerId);
+      return eligibility?.applies && !eligibility.eligible;
+    });
+    if (ineligiblePlayerId) {
+      const player = league.players.find((item) => item.id === ineligiblePlayerId);
+      return response.status(400).json({ error: `${player?.name || "Un jugador"} no cumple partidos minimos para liguilla.` });
+    }
+  }
+
+  const captainPlayerId = String(request.body.captainPlayerId || "").trim();
+  if (!captainPlayerId || !requestedPlayerIds.includes(captainPlayerId)) {
+    return response.status(400).json({ error: "Selecciona un capitan dentro de la convocatoria." });
+  }
+
+  await upsertMatchRosterData({
+    id: `match-roster-${crypto.randomUUID()}`,
+    leagueId: league.id,
+    matchId: match.id,
+    teamId: context.teamId,
+    submittedByUserId: request.user.id,
+    captainPlayerId,
+    captainPin: existingRoster?.captainPin || generateCaptainPin(),
+    players: requestedPlayerIds.map((playerId) => ({ playerId })),
+    status: "submitted",
+    notes: request.body.notes || ""
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId: league.id,
+    action: "team_match_roster_submit",
+    entityType: "match_roster",
+    entityId: match.id,
+    detail: `Delegado envio convocatoria de ${context.teamName} para partido ${match.id}`
+  });
+
+  response.status(201).json(await buildTeamPortalPayload(request.user.id));
 });
 
 app.get("/api/users", requireSuperAdmin, async (_request, response) => {
@@ -1700,6 +1896,7 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
     defaultRedSuspensionMatches: parseIntegerInRange(request.body.defaultRedSuspensionMatches, current.defaultRedSuspensionMatches ?? 1, { min: 1, max: 20, label: "Partidos de suspension por roja" }),
     disciplineScope: request.body.disciplineScope === "league" ? "league" : "competition",
     playoffQualifiers: parseIntegerInRange(request.body.playoffQualifiers, current.playoffQualifiers ?? 8, { min: 2, max: 64, label: "Clasificados a liguilla" }),
+    minimumPlayoffAppearances: parseIntegerInRange(request.body.minimumPlayoffAppearances, current.minimumPlayoffAppearances ?? 0, { min: 0, max: 64, label: "Partidos minimos por jugador para liguilla" }),
     notes
   };
 
@@ -1717,7 +1914,7 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
     action: "rules_update",
     entityType: "league_rules",
     entityId: request.params.leagueId,
-    detail: `Actualizo reglas: default ${next.forfeitGoalsFor}-${next.forfeitGoalsAgainst}, amarillas ${next.yellowSuspensionLimit}, roja ${next.defaultRedSuspensionMatches}, liguilla ${next.playoffQualifiers}`
+    detail: `Actualizo reglas: default ${next.forfeitGoalsFor}-${next.forfeitGoalsAgainst}, amarillas ${next.yellowSuspensionLimit}, roja ${next.defaultRedSuspensionMatches}, liguilla ${next.playoffQualifiers}, minimo jugador ${next.minimumPlayoffAppearances}`
   });
 
   response.json(nextStore);

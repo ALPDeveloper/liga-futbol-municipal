@@ -47,6 +47,10 @@ export async function fetchSessionFromApi(token) {
     headers: { Authorization: `Bearer ${token}` }
   });
 
-  if (!response.ok) throw new Error(await getApiErrorMessage(response, "Sesion invalida"));
+  if (!response.ok) {
+    const error = new Error(await getApiErrorMessage(response, "Sesion invalida"));
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }

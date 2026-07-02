@@ -1747,7 +1747,7 @@ function TeamMark({ team, className = "" }) {
   const style = { background: team?.colors || "var(--field)" };
 
   return (
-    <span className={`team-mark ${className}`} style={style} title={label}>
+    <span aria-hidden="true" className={`team-mark ${className}`} style={style} title={label}>
       {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : getTeamInitials(label)}
     </span>
   );

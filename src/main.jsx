@@ -28,11 +28,127 @@ function registerPwaServiceWorker() {
   });
 }
 
-const initialIsPrivateRoute = window.location.pathname.startsWith("/admin") || window.location.pathname.startsWith("/equipo") || window.location.pathname.startsWith("/arbitro");
+const ACCESS_SELECTION_KEY = "ligatec:selected-access";
+
+function isAdminPath(path) {
+  return path.startsWith("/admin") || path.startsWith("/panel/admin");
+}
+
+function isTeamPath(path) {
+  return path.startsWith("/equipo") || path.startsWith("/panel/delegado");
+}
+
+function isRefereePath(path) {
+  return path.startsWith("/arbitro") || path.startsWith("/panel/arbitro");
+}
+
+function isAccessPath(path) {
+  return path === "/acceso";
+}
+
+function isAccessSelectionPath(path) {
+  return path === "/seleccionar-acceso";
+}
+
+function getRoleLabel(role) {
+  if (role === "super_admin") return "Super administrador";
+  if (role === "league_admin") return "Administrador de liga";
+  if (role === "team_delegate") return "Delegado de equipo";
+  if (role === "referee") return "Arbitro";
+  return "Usuario LIGATEC";
+}
+
+function getPanelPathForRole(role) {
+  if (role === "team_delegate") return "/panel/delegado";
+  if (role === "referee") return "/panel/arbitro";
+  if (role === "super_admin" || role === "league_admin") return "/panel/admin";
+  return "/seleccionar-acceso";
+}
+
+function findLeague(store, leagueId) {
+  if (!leagueId) return null;
+  return store.leagues.find((item) => item.id === leagueId) || null;
+}
+
+function buildAccessOptions(user, store) {
+  if (!user || ["disabled", "suspended", "deleted"].includes(user.status)) return [];
+  const rawAccesses = Array.isArray(user.accesses) ? user.accesses : [];
+  if (!rawAccesses.length && user.role === "super_admin" && store.leagues.length > 1) {
+    return store.leagues.map((league) => ({
+      id: `super_admin-${league.id}`,
+      role: "super_admin",
+      roleLabel: getRoleLabel("super_admin"),
+      leagueId: league.id,
+      leagueName: league.name,
+      teamId: "",
+      teamName: "",
+      path: "/panel/admin"
+    }));
+  }
+  const sourceAccesses = rawAccesses.length
+    ? rawAccesses
+    : [{
+        role: user.role,
+        leagueId: user.leagueId || store.currentLeagueId || "",
+        teamId: user.teamId || "",
+        teamName: user.teamName || ""
+      }];
+
+  return sourceAccesses
+    .map((access, index) => {
+      const role = access.role || user.role;
+      const league = findLeague(store, access.leagueId || user.leagueId || "");
+      const leagueName = league?.name || (role === "super_admin" ? "Todas las ligas" : access.leagueName || "Liga asignada");
+      const teamName = access.teamName || user.teamName || "";
+      return {
+        id: access.id || `${role}-${access.leagueId || user.leagueId || "global"}-${access.teamId || index}`,
+        role,
+        roleLabel: getRoleLabel(role),
+        leagueId: access.leagueId || user.leagueId || "",
+        leagueName,
+        teamId: access.teamId || user.teamId || "",
+        teamName,
+        path: getPanelPathForRole(role)
+      };
+    })
+    .filter((option) => option.path !== "/seleccionar-acceso" || rawAccesses.length);
+}
+
+function loadSelectedAccess() {
+  try {
+    const raw = localStorage.getItem(ACCESS_SELECTION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSelectedAccess(access) {
+  try {
+    localStorage.setItem(ACCESS_SELECTION_KEY, JSON.stringify(access));
+  } catch {
+    // La seleccion solo mejora navegacion; si no se puede guardar, la sesion sigue viva.
+  }
+}
+
+function clearSelectedAccess() {
+  try {
+    localStorage.removeItem(ACCESS_SELECTION_KEY);
+  } catch {
+    // Sin localStorage disponible no hay nada que limpiar.
+  }
+}
+
+const initialIsPrivateRoute = isAdminPath(window.location.pathname) ||
+  isTeamPath(window.location.pathname) ||
+  isRefereePath(window.location.pathname) ||
+  isAccessPath(window.location.pathname) ||
+  isAccessSelectionPath(window.location.pathname);
 const cachedStore = initialIsPrivateRoute ? loadStore() : null;
 const emptyStore = normalizeStore({ currentLeagueId: "", leagues: [] });
 const initialStore = cachedStore || emptyStore;
 const initialAuth = loadAuth();
+const initialSelectedAccess = loadSelectedAccess();
 
 function getPublicLeagueIdFromPath(path) {
   const [, section, leagueId] = path.split("/");
@@ -96,6 +212,103 @@ function InlineFallback({ label = "Cargando" }) {
   return <div className="inline-loading">{label}</div>;
 }
 
+function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePath, store, onSelectAccess }) {
+  const accessOptions = buildAccessOptions(currentUser, store);
+
+  return (
+    <main className="page access-page">
+      <section className="access-card">
+        <div className="access-card-head">
+          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
+          <div>
+            <span className="eyebrow">Acceso privado</span>
+            <h1>Acceso LIGATEC</h1>
+            <p>Un solo inicio de sesion para administradores, arbitros y delegados.</p>
+          </div>
+        </div>
+
+        <div className="access-lock-banner" aria-hidden="true">
+          <span className="access-lock-icon" />
+          <div>
+            <strong>Plataforma deportiva</strong>
+            <small>Tu rol se detecta automaticamente despues de iniciar sesion.</small>
+          </div>
+        </div>
+
+        <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
+          <LazyAuthPanel currentUser={currentUser} onLogin={onLogin} onLogout={onLogout} />
+        </Suspense>
+
+        {currentUser && accessOptions.length > 0 && (
+          <div className="access-current-session">
+            <span>Sesion activa</span>
+            <button className="primary" type="button" onClick={() => {
+              if (accessOptions.length === 1) onSelectAccess(accessOptions[0]);
+              else onNavigate("/seleccionar-acceso");
+            }}>
+              Continuar
+            </button>
+          </div>
+        )}
+
+        <button className="link-button" type="button" onClick={() => onNavigate(publicLeaguePath)}>
+          Volver a la liga publica
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function AccessSelectionPage({ currentUser, onNavigate, onSelectAccess, store }) {
+  const accessOptions = buildAccessOptions(currentUser, store);
+
+  if (!currentUser) {
+    return (
+      <main className="page access-page">
+        <section className="access-card">
+          <span className="eyebrow">Acceso requerido</span>
+          <h1>Inicia sesion para elegir tu acceso</h1>
+          <p>Primero entra con tu correo y contrasena. Despues LIGATEC mostrara los roles disponibles.</p>
+          <button className="primary" type="button" onClick={() => onNavigate("/acceso")}>Ir a Acceso LIGATEC</button>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="page access-page">
+      <section className="access-card access-selection-card">
+        <div className="access-card-head">
+          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
+          <div>
+            <span className="eyebrow">Sesion activa</span>
+            <h1>Selecciona como deseas ingresar</h1>
+            <p>Elige el rol, liga o equipo con el que vas a trabajar en esta sesion.</p>
+          </div>
+        </div>
+
+        {accessOptions.length ? (
+          <div className="access-option-grid">
+            {accessOptions.map((option) => (
+              <article className="access-option-card" key={option.id}>
+                <span>{option.roleLabel}</span>
+                <strong>{option.leagueName}</strong>
+                {option.teamName && <small>Equipo: {option.teamName}</small>}
+                {!option.teamName && option.role === "team_delegate" && <small>Equipo asignado</small>}
+                <button className="primary" type="button" onClick={() => onSelectAccess(option)}>Entrar</button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="auth-error inline-feedback">Tu usuario no tiene accesos activos. Solicita revision al administrador de la liga.</p>
+        )}
+
+        <button className="link-button" type="button" onClick={() => onNavigate("/acceso")}>Volver al acceso</button>
+      </section>
+    </main>
+  );
+}
+
 function App() {
   const [store, setStore] = useState(initialStore);
   const [routePath, setRoutePath] = useState(window.location.pathname);
@@ -103,13 +316,16 @@ function App() {
   const [apiStatus, setApiStatus] = useState("checking");
   const [initialApiLoaded, setInitialApiLoaded] = useState(false);
   const [auth, setAuth] = useState(initialAuth);
+  const [selectedAccess, setSelectedAccess] = useState(initialSelectedAccess);
   const [userListRefreshKey, setUserListRefreshKey] = useState(0);
   const pendingPersistRef = useRef(null);
   const persistRunningRef = useRef(false);
-  const isAdminRoute = routePath.startsWith("/admin");
-  const isTeamRoute = routePath.startsWith("/equipo");
-  const isRefereeRoute = routePath.startsWith("/arbitro");
-  const isPrivateRoute = isAdminRoute || isTeamRoute || isRefereeRoute;
+  const isAdminRoute = isAdminPath(routePath);
+  const isTeamRoute = isTeamPath(routePath);
+  const isRefereeRoute = isRefereePath(routePath);
+  const isAccessRoute = isAccessPath(routePath);
+  const isAccessSelectionRoute = isAccessSelectionPath(routePath);
+  const isPrivateRoute = isAdminRoute || isTeamRoute || isRefereeRoute || isAccessRoute || isAccessSelectionRoute;
   const publicLeagueId = !isPrivateRoute ? getPublicLeagueIdFromPath(routePath) : "";
   const legalLeagueId = !isPrivateRoute ? getLegalLeagueIdFromPath(routePath) : "";
   const delegateActivationToken = !isPrivateRoute ? getDelegateActivationTokenFromPath(routePath) : "";
@@ -126,8 +342,8 @@ function App() {
   const canUseAdmin = canUseSuperAdmin || canUseLeagueAdmin;
   const shouldRedirectAdminToTeamPortal = isAdminRoute && currentUser?.role === "team_delegate";
   const shouldRedirectAdminToRefereePortal = isAdminRoute && currentUser?.role === "referee";
-  const shouldRedirectTeamPortalToAdmin = isTeamRoute && currentUser && currentUser.role !== "team_delegate";
-  const shouldRedirectRefereePortalToAdmin = isRefereeRoute && currentUser && currentUser.role !== "referee";
+  const shouldRedirectTeamPortalToOwnPanel = isTeamRoute && currentUser && currentUser.role !== "team_delegate";
+  const shouldRedirectRefereePortalToOwnPanel = isRefereeRoute && currentUser && currentUser.role !== "referee";
   const publicLeaguePath = league?.id ? getPublicLeaguePath(league.id) : "/";
   const legalLeaguePath = league?.id ? getLegalLeaguePath(league.id) : "/legal";
   const isLegalRoute = routePath === "/legal" || routePath.startsWith("/legal/");
@@ -152,7 +368,10 @@ function App() {
       .then((apiStore) => {
         if (cancelled) return;
         const rememberedLeagueId = loadLastPublicLeagueId();
+        const sessionLeagueId = initialSelectedAccess?.leagueId ||
+          (initialAuth.user?.role === "league_admin" ? initialAuth.user.leagueId : "");
         const preferredLeagueId = routeLeagueId ||
+          (apiStore.leagues?.some((item) => item.id === sessionLeagueId) ? sessionLeagueId : "") ||
           (apiStore.leagues?.some((item) => item.id === rememberedLeagueId) ? rememberedLeagueId : apiStore.currentLeagueId);
         const normalized = normalizeStore({ ...apiStore, currentLeagueId: preferredLeagueId });
         setStore(normalized);
@@ -181,7 +400,11 @@ function App() {
         setAuth(nextAuth);
         saveAuth(nextAuth);
       })
-      .catch(() => {
+      .catch((sessionError) => {
+        if (![401, 403].includes(sessionError.status) && auth.user) {
+          setApiStatus("offline");
+          return;
+        }
         setAuth({ token: "", user: null });
         clearAuth();
       });
@@ -192,11 +415,11 @@ function App() {
   }, [adminPanel, canUseSuperAdmin]);
 
   useEffect(() => {
-    if (shouldRedirectAdminToTeamPortal) navigateTo("/equipo");
-    if (shouldRedirectAdminToRefereePortal) navigateTo("/arbitro");
-    if (shouldRedirectTeamPortalToAdmin) navigateTo("/admin");
-    if (shouldRedirectRefereePortalToAdmin) navigateTo("/admin");
-  }, [shouldRedirectAdminToTeamPortal, shouldRedirectAdminToRefereePortal, shouldRedirectTeamPortalToAdmin, shouldRedirectRefereePortalToAdmin]);
+    if (shouldRedirectAdminToTeamPortal) navigateTo("/panel/delegado");
+    if (shouldRedirectAdminToRefereePortal) navigateTo("/panel/arbitro");
+    if (shouldRedirectTeamPortalToOwnPanel) navigateTo(getPanelPathForRole(currentUser.role));
+    if (shouldRedirectRefereePortalToOwnPanel) navigateTo(getPanelPathForRole(currentUser.role));
+  }, [shouldRedirectAdminToTeamPortal, shouldRedirectAdminToRefereePortal, shouldRedirectTeamPortalToOwnPanel, shouldRedirectRefereePortalToOwnPanel, currentUser?.role]);
 
   async function flushPersistQueue() {
     if (persistRunningRef.current || !auth.token) return;
@@ -250,6 +473,19 @@ function App() {
     if (!isPrivateRoute) navigateTo(getPublicLeaguePath(leagueId));
   }
 
+  function selectAccess(option, sourceStore = store) {
+    if (!option) return;
+    const nextAccess = { ...option, selectedAt: new Date().toISOString() };
+    setSelectedAccess(nextAccess);
+    saveSelectedAccess(nextAccess);
+    if (option.leagueId && sourceStore.leagues.some((item) => item.id === option.leagueId)) {
+      const normalized = normalizeStore({ ...sourceStore, currentLeagueId: option.leagueId });
+      setStore(normalized);
+      saveStore(normalized);
+    }
+    navigateTo(option.path || getPanelPathForRole(option.role));
+  }
+
   useEffect(() => {
     if (!isPrivateRoute && league?.id) saveLastPublicLeagueId(league.id);
   }, [isPrivateRoute, league?.id]);
@@ -266,12 +502,13 @@ function App() {
     setStore(normalizedStore);
     saveStore(normalizedStore);
     setApiStatus("connected");
-    if (nextAuth.user.role === "team_delegate") {
-      navigateTo("/equipo");
-    } else if (nextAuth.user.role === "referee") {
-      navigateTo("/arbitro");
-    } else if (!isAdminRoute) {
-      navigateTo("/admin");
+    const accessOptions = buildAccessOptions(nextAuth.user, normalizedStore);
+    if (accessOptions.length === 1) {
+      selectAccess(accessOptions[0], normalizedStore);
+    } else if (accessOptions.length > 1) {
+      navigateTo("/seleccionar-acceso");
+    } else {
+      navigateTo("/acceso");
     }
   }
 
@@ -283,7 +520,8 @@ function App() {
     setStore(normalizedStore);
     saveStore(normalizedStore);
     setApiStatus("connected");
-    navigateTo("/equipo");
+    const accessOptions = buildAccessOptions(nextAuth.user, normalizedStore);
+    selectAccess(accessOptions[0] || { role: "team_delegate", path: "/panel/delegado" }, normalizedStore);
   }
 
   async function completeRefereeActivation(nextAuth) {
@@ -294,12 +532,15 @@ function App() {
     setStore(normalizedStore);
     saveStore(normalizedStore);
     setApiStatus("connected");
-    navigateTo("/arbitro");
+    const accessOptions = buildAccessOptions(nextAuth.user, normalizedStore);
+    selectAccess(accessOptions[0] || { role: "referee", path: "/panel/arbitro" }, normalizedStore);
   }
 
   function logout() {
     setAuth({ token: "", user: null });
+    setSelectedAccess(null);
     clearAuth();
+    clearSelectedAccess();
     navigateTo(publicLeaguePath);
     setAdminPanel("league");
   }
@@ -340,16 +581,16 @@ function App() {
     return <RouteFallback label="Cargando datos reales" />;
   }
 
-  if (shouldRedirectAdminToTeamPortal || shouldRedirectAdminToRefereePortal || shouldRedirectTeamPortalToAdmin || shouldRedirectRefereePortalToAdmin) {
+  if (shouldRedirectAdminToTeamPortal || shouldRedirectAdminToRefereePortal || shouldRedirectTeamPortalToOwnPanel || shouldRedirectRefereePortalToOwnPanel) {
     return <RouteFallback label="Redirigiendo acceso" />;
   }
 
   return (
     <div className={isPrivateRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} style={themeStyle}>
       <header className={`topbar ${isPrivateRoute ? "admin-topbar" : "public-topbar"}`}>
-        <a className="brand" href={isAdminRoute ? "/admin" : publicLeaguePath} aria-label="Ir al inicio" onClick={(event) => {
+        <a className="brand" href={isAdminRoute ? "/panel/admin" : publicLeaguePath} aria-label="Ir al inicio" onClick={(event) => {
           event.preventDefault();
-          navigateTo(isAdminRoute ? "/admin" : isTeamRoute ? "/equipo" : isRefereeRoute ? "/arbitro" : publicLeaguePath);
+          navigateTo(isAdminRoute ? "/panel/admin" : isTeamRoute ? "/panel/delegado" : isRefereeRoute ? "/panel/arbitro" : publicLeaguePath);
         }}>
           <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
           <span className="brand-copy">
@@ -358,6 +599,18 @@ function App() {
           </span>
         </a>
         <div className="topbar-actions">
+          {!isPrivateRoute && (
+            <a className="access-ligatec-link" href="/acceso" onClick={(event) => {
+              event.preventDefault();
+              navigateTo("/acceso");
+            }}>
+              <span className="access-link-mark" aria-hidden="true" />
+              <span>
+                <strong>Acceso LIGATEC</strong>
+                <small>Iniciar sesion</small>
+              </span>
+            </a>
+          )}
           {isAdminRoute ? (
             <label className="league-switcher">
               <span>Liga</span>
@@ -404,57 +657,53 @@ function App() {
         </div>
       </header>
 
-      {isAdminRoute && !canUseAdmin ? (
-        <main className="page admin-access-page">
-          <section className="admin-access-card">
-            <span className="eyebrow">Acceso privado</span>
-            <h1>Panel administrativo</h1>
-            <p>Ingresa con el usuario asignado para administrar la liga o con una cuenta de super administrador.</p>
-            <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
-              <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
-            </Suspense>
-            <a href="/" onClick={(event) => {
-              event.preventDefault();
-              navigateTo("/");
-            }}>
-              Volver a la pagina publica
-            </a>
-          </section>
-        </main>
+      {isAccessRoute ? (
+        <AccessPage
+          currentUser={currentUser}
+          onLogin={login}
+          onLogout={logout}
+          onNavigate={navigateTo}
+          onSelectAccess={selectAccess}
+          publicLeaguePath={publicLeaguePath}
+          store={store}
+        />
+      ) : isAccessSelectionRoute ? (
+        <AccessSelectionPage
+          currentUser={currentUser}
+          onNavigate={navigateTo}
+          onSelectAccess={selectAccess}
+          store={store}
+        />
+      ) : isAdminRoute && !canUseAdmin ? (
+        <AccessPage
+          currentUser={currentUser}
+          onLogin={login}
+          onLogout={logout}
+          onNavigate={navigateTo}
+          onSelectAccess={selectAccess}
+          publicLeaguePath={publicLeaguePath}
+          store={store}
+        />
       ) : isTeamRoute && currentUser?.role !== "team_delegate" ? (
-        <main className="page admin-access-page">
-          <section className="admin-access-card">
-            <span className="eyebrow">Acceso privado</span>
-            <h1>Portal de equipo</h1>
-            <p>Ingresa con el usuario delegado asignado a tu equipo para registrar plantilla.</p>
-            <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
-              <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
-            </Suspense>
-            <a href="/" onClick={(event) => {
-              event.preventDefault();
-              navigateTo("/");
-            }}>
-              Volver a la pagina publica
-            </a>
-          </section>
-        </main>
+        <AccessPage
+          currentUser={currentUser}
+          onLogin={login}
+          onLogout={logout}
+          onNavigate={navigateTo}
+          onSelectAccess={selectAccess}
+          publicLeaguePath={publicLeaguePath}
+          store={store}
+        />
       ) : isRefereeRoute && currentUser?.role !== "referee" ? (
-        <main className="page admin-access-page">
-          <section className="admin-access-card">
-            <span className="eyebrow">Acceso privado</span>
-            <h1>Panel de arbitro</h1>
-            <p>Ingresa con tu cuenta de arbitro para consultar partidos asignados.</p>
-            <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
-              <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
-            </Suspense>
-            <a href="/" onClick={(event) => {
-              event.preventDefault();
-              navigateTo("/");
-            }}>
-              Volver a la pagina publica
-            </a>
-          </section>
-        </main>
+        <AccessPage
+          currentUser={currentUser}
+          onLogin={login}
+          onLogout={logout}
+          onNavigate={navigateTo}
+          onSelectAccess={selectAccess}
+          publicLeaguePath={publicLeaguePath}
+          store={store}
+        />
       ) : isDelegateActivationRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando activacion" />}>
           <LazyDelegateActivationView token={delegateActivationToken} onActivated={completeDelegateActivation} onNavigate={navigateTo} />

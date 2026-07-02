@@ -7,11 +7,10 @@ import { runtimeConfig } from "./runtimeConfig.js";
 const MIME_EXTENSIONS = {
   "image/png": "png",
   "image/jpeg": "jpg",
-  "image/webp": "webp",
-  "image/gif": "gif"
+  "image/webp": "webp"
 };
 
-const DATA_URL_PATTERN = /^data:(image\/(?:png|jpe?g|webp|gif));base64,([a-z0-9+/=\s]+)$/i;
+const DATA_URL_PATTERN = /^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=\s]+)$/i;
 
 function hasValidImageSignature(buffer, mimeType) {
   if (mimeType === "image/png") {
@@ -35,10 +34,6 @@ function hasValidImageSignature(buffer, mimeType) {
     return buffer.length >= 12 &&
       buffer.toString("ascii", 0, 4) === "RIFF" &&
       buffer.toString("ascii", 8, 12) === "WEBP";
-  }
-  if (mimeType === "image/gif") {
-    return buffer.length >= 6 &&
-      (buffer.toString("ascii", 0, 6) === "GIF87a" || buffer.toString("ascii", 0, 6) === "GIF89a");
   }
   return false;
 }

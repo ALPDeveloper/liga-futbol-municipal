@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS league_rules (
   default_red_suspension_matches INTEGER NOT NULL DEFAULT 1,
   discipline_scope TEXT NOT NULL DEFAULT 'competition',
   playoff_qualifiers INTEGER NOT NULL DEFAULT 8,
+  minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0,
   notes TEXT
 );
 
@@ -200,6 +201,17 @@ CREATE TABLE IF NOT EXISTS discipline_resets (
   status TEXT NOT NULL DEFAULT 'active'
 );
 
+CREATE TABLE IF NOT EXISTS player_appearance_adjustments (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+  value INTEGER NOT NULL,
+  date TEXT,
+  reason TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   league_id TEXT REFERENCES leagues(id) ON DELETE SET NULL,
@@ -255,6 +267,22 @@ CREATE TABLE IF NOT EXISTS referee_match_sheets (
   submitted_at TEXT NOT NULL,
   reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   reviewed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS match_rosters (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  captain_pin TEXT,
+  players_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'submitted',
+  notes TEXT,
+  submitted_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(match_id, team_id)
 );
 
 CREATE TABLE IF NOT EXISTS team_user_assignments (

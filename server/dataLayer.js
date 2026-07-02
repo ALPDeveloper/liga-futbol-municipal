@@ -102,6 +102,24 @@ function normalizeRefereeMatchSheetRow(row) {
   };
 }
 
+function normalizeMatchRosterRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    leagueId: row.league_id ?? row.leagueId,
+    matchId: row.match_id ?? row.matchId,
+    teamId: row.team_id ?? row.teamId,
+    submittedByUserId: row.submitted_by_user_id ?? row.submittedByUserId ?? "",
+    captainPlayerId: row.captain_player_id ?? row.captainPlayerId ?? "",
+    captainPin: row.captain_pin ?? row.captainPin ?? "",
+    players: parseJsonValue(row.players_json ?? row.playersJson, []),
+    status: row.status || "submitted",
+    notes: row.notes || "",
+    submittedAt: normalizeDateTime(row.submitted_at ?? row.submittedAt),
+    updatedAt: normalizeDateTime(row.updated_at ?? row.updatedAt)
+  };
+}
+
 function isRosterOpen(row) {
   if (!toBoolean(row?.registration_enabled ?? row?.registrationEnabled)) return false;
   const enabledUntil = normalizeDateTime(row?.enabled_until ?? row?.enabledUntil);
@@ -668,6 +686,56 @@ export async function listTeamPortalPlayersData(teamId) {
     WHERE team_id = ?
     ORDER BY number, name
   `).all(teamId).map(normalizePlayerRow);
+}
+
+export async function listMatchRostersForLeagueData(leagueId) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at
+      FROM match_rosters
+      WHERE league_id = $1
+      ORDER BY submitted_at DESC
+    `, [leagueId]);
+    return rows.map(normalizeMatchRosterRow);
+  }
+  return db.prepare(`
+    SELECT id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at
+    FROM match_rosters
+    WHERE league_id = ?
+    ORDER BY submitted_at DESC
+  `).all(leagueId).map(normalizeMatchRosterRow);
+}
+
+export async function upsertMatchRosterData({ id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId, captainPin = "", players, status = "submitted", notes = "" }) {
+  const now = new Date().toISOString();
+  const payload = JSON.stringify(players || []);
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $11)
+      ON CONFLICT (match_id, team_id) DO UPDATE SET
+        submitted_by_user_id = EXCLUDED.submitted_by_user_id,
+        captain_player_id = EXCLUDED.captain_player_id,
+        captain_pin = EXCLUDED.captain_pin,
+        players_json = EXCLUDED.players_json,
+        status = EXCLUDED.status,
+        notes = EXCLUDED.notes,
+        updated_at = EXCLUDED.updated_at
+    `, [id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId || null, captainPin, payload, status, notes, now]);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(match_id, team_id) DO UPDATE SET
+      submitted_by_user_id = excluded.submitted_by_user_id,
+      captain_player_id = excluded.captain_player_id,
+      captain_pin = excluded.captain_pin,
+      players_json = excluded.players_json,
+      status = excluded.status,
+      notes = excluded.notes,
+      updated_at = excluded.updated_at
+  `).run(id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId || null, captainPin, payload, status, notes, now, now);
 }
 
 export async function createTeamPortalPlayerData({ id, leagueId, competitionId, teamId, name, number, position, photoUrl, photoAuthorized }) {

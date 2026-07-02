@@ -71,8 +71,8 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
     >
       <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Correo" aria-label="Correo" />
       <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Contraseña" aria-label="Contraseña" />
-      <button className="primary" type="submit">Entrar</button>
-      <button type="button" onClick={() => setMode("recover")}>Recuperar</button>
+      <button className="primary" type="submit">Iniciar sesion</button>
+      <button type="button" onClick={() => setMode("recover")}>Olvide mi contraseña</button>
       {error && <small className="auth-error">{error}</small>}
     </form>
   );

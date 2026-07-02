@@ -5,13 +5,11 @@ const LAST_UPDATED = "21 de junio de 2026";
 const LEGAL_PROFILE = {
   owner: "Ing. Antonio Linares Pulido / ALP DEV",
   brand: "LIGATEC",
-  address: "C. Nueva Espana 36, Guascuaro de Mujica, Michoacan, Mexico",
   email: "contacto@ligatec.mx",
   phone: "3541073146",
   phoneHref: "tel:+523541073146",
   domain: "www.ligatec.mx",
-  domainHref: "https://www.ligatec.mx",
-  basePrice: "$70.00 MXN por equipo registrado por semana de torneo"
+  domainHref: "https://www.ligatec.mx"
 };
 
 const legalSections = [
@@ -20,7 +18,7 @@ const legalSections = [
     eyebrow: "Privacidad",
     title: "Aviso de privacidad integral",
     body: [
-      `${LEGAL_PROFILE.owner}, responsable de la plataforma ${LEGAL_PROFILE.brand}, con domicilio en ${LEGAL_PROFILE.address}, correo ${LEGAL_PROFILE.email}, telefono ${LEGAL_PROFILE.phone} y sitio ${LEGAL_PROFILE.domain}, pone a disposicion este aviso de privacidad para explicar como se tratan los datos personales dentro de la plataforma.`,
+      `${LEGAL_PROFILE.owner}, responsable de la plataforma ${LEGAL_PROFILE.brand}, con correo ${LEGAL_PROFILE.email}, telefono ${LEGAL_PROFILE.phone} y sitio ${LEGAL_PROFILE.domain}, pone a disposicion este aviso de privacidad para explicar como se tratan los datos personales dentro de la plataforma.`,
       `${LEGAL_PROFILE.brand} funciona como plataforma tecnologica para administrar ligas, equipos, jugadores, calendarios, resultados, sanciones, estadisticas, fotografias autorizadas, comunicados y accesos administrativos. La liga contratante y sus administradores autorizados son responsables de que la informacion que capturen sea veraz, licita, pertinente y cuente con las autorizaciones necesarias.`
     ],
     items: [
@@ -68,8 +66,8 @@ const legalSections = [
     eyebrow: "Contratacion",
     title: "Politica de pagos, renovaciones y cancelaciones",
     body: [
-      `${LEGAL_PROFILE.brand} se contrata por torneo completo con cada liga, salvo pacto distinto por escrito. El precio base del servicio es de ${LEGAL_PROFILE.basePrice}. El monto final se calcula segun los equipos registrados o activos en la plataforma durante las semanas del torneo contratado.`,
-      "La cotizacion, contrato, mensaje de aceptacion o documento comercial de cada liga puede establecer fechas de inicio y fin, numero estimado de equipos, forma de pago, calendario de pagos, cortes semanales, descuentos, cargos por configuracion, impuestos aplicables y alcances incluidos."
+      `${LEGAL_PROFILE.brand} se contrata directamente con cada liga, salvo pacto distinto por escrito. El costo, forma de pago, vigencia, alcances, descuentos, impuestos y calendario de pago se establecen en la cotizacion, contrato, orden de servicio, mensaje de aceptacion o documento comercial vigente con cada liga contratante.`,
+      "El acuerdo comercial de cada liga puede establecer fechas de inicio y fin, numero estimado de equipos, forma de pago, calendario de pagos, cortes, descuentos, cargos por configuracion, impuestos aplicables y alcances incluidos."
     ],
     items: [
       "Equipo registrado: se considera equipo registrado todo equipo dado de alta en la liga, categoria o torneo dentro de la plataforma, aunque tenga jornada de descanso, partido pendiente, baja administrativa posterior o actividad irregular, salvo que el contrato indique otra cosa.",
@@ -205,10 +203,6 @@ export function LegalView({ league, onNavigate, publicLeaguePath = "/" }) {
           <strong>{LEGAL_PROFILE.owner}</strong>
         </article>
         <article>
-          <span>Domicilio</span>
-          <strong>{LEGAL_PROFILE.address}</strong>
-        </article>
-        <article>
           <span>Correo</span>
           <a href={`mailto:${LEGAL_PROFILE.email}`}>{LEGAL_PROFILE.email}</a>
         </article>
@@ -219,10 +213,6 @@ export function LegalView({ league, onNavigate, publicLeaguePath = "/" }) {
         <article>
           <span>Sitio</span>
           <a href={LEGAL_PROFILE.domainHref} target="_blank" rel="noreferrer">{LEGAL_PROFILE.domain}</a>
-        </article>
-        <article>
-          <span>Precio base</span>
-          <strong>{LEGAL_PROFILE.basePrice}</strong>
         </article>
       </section>
 

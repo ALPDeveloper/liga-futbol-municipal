@@ -64,6 +64,9 @@ function runMigrations() {
   if (!ruleColumns.includes("playoff_qualifiers")) {
     db.prepare("ALTER TABLE league_rules ADD COLUMN playoff_qualifiers INTEGER NOT NULL DEFAULT 8").run();
   }
+  if (!ruleColumns.includes("minimum_playoff_appearances")) {
+    db.prepare("ALTER TABLE league_rules ADD COLUMN minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0").run();
+  }
 
   const sponsorColumns = db.prepare("PRAGMA table_info(sponsors)").all().map((column) => column.name);
   if (!sponsorColumns.includes("image_url")) {
@@ -255,6 +258,22 @@ function runMigrations() {
       reviewed_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS match_rosters (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      captain_pin TEXT,
+      players_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'submitted',
+      notes TEXT,
+      submitted_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(match_id, team_id)
+    );
+
     CREATE TABLE IF NOT EXISTS team_affiliations (
       id TEXT PRIMARY KEY,
       league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
@@ -296,6 +315,17 @@ function runMigrations() {
       status TEXT NOT NULL DEFAULT 'active'
     );
 
+    CREATE TABLE IF NOT EXISTS player_appearance_adjustments (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      value INTEGER NOT NULL,
+      date TEXT,
+      reason TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+
     CREATE TABLE IF NOT EXISTS team_user_assignments (
       id TEXT PRIMARY KEY,
       league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
@@ -315,6 +345,11 @@ function runMigrations() {
       updated_at TEXT NOT NULL
     );
   `);
+
+  const matchRosterColumns = db.prepare("PRAGMA table_info(match_rosters)").all().map((column) => column.name);
+  if (matchRosterColumns.length && !matchRosterColumns.includes("captain_pin")) {
+    db.prepare("ALTER TABLE match_rosters ADD COLUMN captain_pin TEXT").run();
+  }
 
   seedMissingCompetitions();
 }
@@ -489,6 +524,15 @@ export function getStore() {
       notes: row.notes,
       status: row.status
     }));
+    const appearanceAdjustments = db.prepare("SELECT * FROM player_appearance_adjustments WHERE league_id = ? ORDER BY date DESC, id DESC").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      playerId: row.player_id,
+      value: row.value,
+      date: row.date,
+      reason: row.reason,
+      notes: row.notes,
+      status: row.status
+    }));
     const sponsors = db.prepare("SELECT * FROM sponsors WHERE league_id = ? ORDER BY sort_order, name").all(leagueRow.id).map((row) => ({
       id: row.id,
       name: row.name,
@@ -532,6 +576,19 @@ export function getStore() {
         reason: event.reason
       }))
     }));
+    const matchRosters = db.prepare("SELECT * FROM match_rosters WHERE league_id = ? ORDER BY submitted_at DESC").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      matchId: row.match_id,
+      teamId: row.team_id,
+      submittedByUserId: row.submitted_by_user_id || "",
+      captainPlayerId: row.captain_player_id || "",
+      captainPin: row.captain_pin || "",
+      players: row.players_json ? JSON.parse(row.players_json) : [],
+      status: row.status,
+      notes: row.notes || "",
+      submittedAt: row.submitted_at,
+      updatedAt: row.updated_at
+    }));
 
     return {
       id: leagueRow.id,
@@ -563,6 +620,7 @@ export function getStore() {
         defaultRedSuspensionMatches: rules.default_red_suspension_matches,
         disciplineScope: rules.discipline_scope,
         playoffQualifiers: rules.playoff_qualifiers,
+        minimumPlayoffAppearances: rules.minimum_playoff_appearances,
         notes: rules.notes
       },
       highlights,
@@ -575,8 +633,10 @@ export function getStore() {
       disciplineLinks,
       disciplineAdjustments,
       disciplineResets,
+      appearanceAdjustments,
       sponsors,
-      matches
+      matches,
+      matchRosters
     };
   });
 
@@ -589,7 +649,20 @@ export function getStore() {
 export function importStore(store) {
   const normalized = normalizeStore(store);
   const userLeagueAssignments = db.prepare("SELECT id, league_id FROM users").all();
+  const preservedTeamAssignments = db.prepare(`
+    SELECT id, league_id, team_id, user_id, role, status, created_at
+    FROM team_user_assignments
+  `).all();
+  const preservedTeamRosterPermissions = db.prepare(`
+    SELECT team_id, league_id, registration_enabled, enabled_until, notes, updated_at
+    FROM team_roster_permissions
+  `).all();
+  const preservedDelegateActivationTokens = db.prepare(`
+    SELECT id, user_id, assignment_id, token_hash, expires_at, used_at, revoked_at, created_at
+    FROM team_delegate_activation_tokens
+  `).all();
   const nextLeagueIds = new Set(normalized.leagues.map((league) => league.id));
+  const nextTeamIds = new Set(normalized.leagues.flatMap((league) => (league.teams || []).map((team) => team.id)));
   const removedLeagueIds = new Set(
     userLeagueAssignments
       .map((assignment) => assignment.league_id)
@@ -603,9 +676,11 @@ export function importStore(store) {
 
     db.exec(`
       DELETE FROM match_events;
+      DELETE FROM match_rosters;
       DELETE FROM discipline_resets;
       DELETE FROM discipline_adjustments;
       DELETE FROM discipline_links;
+      DELETE FROM player_appearance_adjustments;
       DELETE FROM player_injuries;
       DELETE FROM player_sanctions;
       DELETE FROM matches;
@@ -671,8 +746,8 @@ export function importStore(store) {
       );
 
       db.prepare(`
-        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, minimum_playoff_appearances, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         league.id,
         league.rules?.withdrawalPolicy || "award_walkover",
@@ -683,6 +758,7 @@ export function importStore(store) {
         Number(league.rules?.defaultRedSuspensionMatches ?? 1),
         league.rules?.disciplineScope === "league" ? "league" : "competition",
         Number(league.rules?.playoffQualifiers ?? 8),
+        Number(league.rules?.minimumPlayoffAppearances ?? 0),
         league.rules?.notes || "Si un equipo se da de baja, la liga puede otorgar triunfo por default segun sus estatutos."
       );
 
@@ -834,6 +910,22 @@ export function importStore(store) {
         `).run(reset.id, league.id, reset.playerId, reset.date || "", reset.reason || "", reset.notes || "", reset.status || "active");
       }
 
+      for (const adjustment of league.appearanceAdjustments || []) {
+        db.prepare(`
+          INSERT INTO player_appearance_adjustments (id, league_id, player_id, value, date, reason, notes, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          adjustment.id,
+          league.id,
+          adjustment.playerId,
+          Number(adjustment.value || 0),
+          adjustment.date || "",
+          adjustment.reason || "",
+          adjustment.notes || "",
+          adjustment.status || "active"
+        );
+      }
+
       for (const match of league.matches) {
         db.prepare(`
           INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, round, date, time, venue, home_team_id, away_team_id, status, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id)
@@ -872,6 +964,78 @@ export function importStore(store) {
           `).run(match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, event.reason);
         }
       }
+
+      for (const roster of league.matchRosters || []) {
+        db.prepare(`
+          INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          roster.id,
+          league.id,
+          roster.matchId,
+          roster.teamId,
+          roster.submittedByUserId || null,
+          roster.captainPlayerId || null,
+          roster.captainPin || "",
+          JSON.stringify(roster.players || []),
+          roster.status || "submitted",
+          roster.notes || "",
+          roster.submittedAt || new Date().toISOString(),
+          roster.updatedAt || roster.submittedAt || new Date().toISOString()
+        );
+      }
+    }
+
+    const userIds = new Set(db.prepare("SELECT id FROM users").all().map((user) => user.id));
+    const restoredAssignmentIds = new Set();
+
+    for (const permission of preservedTeamRosterPermissions) {
+      if (!nextLeagueIds.has(permission.league_id) || !nextTeamIds.has(permission.team_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO team_roster_permissions (team_id, league_id, registration_enabled, enabled_until, notes, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        permission.team_id,
+        permission.league_id,
+        permission.registration_enabled ? 1 : 0,
+        permission.enabled_until || null,
+        permission.notes || "",
+        permission.updated_at || new Date().toISOString()
+      );
+    }
+
+    for (const assignment of preservedTeamAssignments) {
+      if (!nextLeagueIds.has(assignment.league_id) || !nextTeamIds.has(assignment.team_id) || !userIds.has(assignment.user_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO team_user_assignments (id, league_id, team_id, user_id, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        assignment.id,
+        assignment.league_id,
+        assignment.team_id,
+        assignment.user_id,
+        assignment.role || "delegate",
+        assignment.status || "active",
+        assignment.created_at || new Date().toISOString()
+      );
+      restoredAssignmentIds.add(assignment.id);
+    }
+
+    for (const token of preservedDelegateActivationTokens) {
+      if (!userIds.has(token.user_id) || !restoredAssignmentIds.has(token.assignment_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO team_delegate_activation_tokens (id, user_id, assignment_id, token_hash, expires_at, used_at, revoked_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        token.id,
+        token.user_id,
+        token.assignment_id,
+        token.token_hash,
+        token.expires_at,
+        token.used_at || null,
+        token.revoked_at || null,
+        token.created_at || new Date().toISOString()
+      );
     }
 
     for (const assignment of userLeagueAssignments) {

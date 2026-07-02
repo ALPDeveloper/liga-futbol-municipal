@@ -1,7 +1,7 @@
 import "../server/env.js";
 import { runtimeConfig } from "../server/runtimeConfig.js";
 
-const allowedMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const allowedMimeTypes = ["image/png", "image/jpeg", "image/webp"];
 
 function requireValue(name, value) {
   if (!value) throw new Error(`${name} es obligatorio para configurar Supabase Storage.`);

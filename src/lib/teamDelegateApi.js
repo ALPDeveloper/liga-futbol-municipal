@@ -109,3 +109,15 @@ export async function updateTeamPortalLogo(token, payload) {
   });
   return parseResponse(response, "No se pudo actualizar el escudo");
 }
+
+export async function submitTeamMatchRoster(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/team-portal/matches/${matchId}/roster`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo enviar la convocatoria");
+}

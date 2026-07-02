@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_IDENTITY } from "../data/seedData.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
-import { MAX_IMAGE_DATA_URL_LENGTH, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, scopeLeagueToCompetition } from "../lib/domain.js";
+import { MAX_IMAGE_DATA_URL_LENGTH, calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, scopeLeagueToCompetition } from "../lib/domain.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
@@ -20,7 +20,8 @@ const PLAYOFF_PHASE_OPTIONS = [
 ];
 
 const PLAYER_POSITION_OPTIONS = ["Arquero", "Defensor", "Mediocampista", "Delantero"];
-const ALLOWED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const ALLOWED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const IMAGE_UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp";
 const MAX_UPLOAD_SIZE_MB = Math.round((MAX_IMAGE_DATA_URL_LENGTH / 1024 / 1024) * 10) / 10;
 
 function getPlayoffPhaseValueByTeams(teams) {
@@ -44,6 +45,7 @@ export function AdminView({
   currentUser,
   league,
   onAddAnnouncement,
+  onAddAppearanceAdjustment,
   onAddLeague,
   onAddCompetition,
   onAddDisciplineAdjustment,
@@ -60,6 +62,7 @@ export function AdminView({
   onDeleteMatch,
   onDeletePlayoffMatches,
   onDeleteAnnouncement,
+  onDeleteAppearanceAdjustment,
   onDeleteDisciplineAdjustment,
   onDeleteDisciplineLink,
   onDeleteDisciplineReset,
@@ -118,6 +121,7 @@ export function AdminView({
               currentUser={currentUser}
               league={league}
               onAddAnnouncement={onAddAnnouncement}
+              onAddAppearanceAdjustment={onAddAppearanceAdjustment}
               onAddCompetition={onAddCompetition}
               onAddDisciplineAdjustment={onAddDisciplineAdjustment}
               onAddDisciplineLink={onAddDisciplineLink}
@@ -132,6 +136,7 @@ export function AdminView({
               onDeleteMatch={onDeleteMatch}
               onDeletePlayoffMatches={onDeletePlayoffMatches}
               onDeleteAnnouncement={onDeleteAnnouncement}
+              onDeleteAppearanceAdjustment={onDeleteAppearanceAdjustment}
               onDeleteDisciplineAdjustment={onDeleteDisciplineAdjustment}
               onDeleteDisciplineLink={onDeleteDisciplineLink}
               onDeleteDisciplineReset={onDeleteDisciplineReset}
@@ -186,6 +191,7 @@ function LeagueAdmin({
   currentUser,
   league,
   onAddAnnouncement,
+  onAddAppearanceAdjustment,
   onAddCompetition,
   onAddDisciplineAdjustment,
   onAddDisciplineLink,
@@ -200,6 +206,7 @@ function LeagueAdmin({
   onDeleteMatch,
   onDeletePlayoffMatches,
   onDeleteAnnouncement,
+  onDeleteAppearanceAdjustment,
   onDeleteDisciplineAdjustment,
   onDeleteDisciplineLink,
   onDeleteDisciplineReset,
@@ -399,7 +406,14 @@ function LeagueAdmin({
         />
       )}
 
-      {activeSection === "rules" && <RulesPanel league={league} onSaveRules={onSaveRules} />}
+      {activeSection === "rules" && (
+        <RulesPanel
+          league={league}
+          onAddAppearanceAdjustment={onAddAppearanceAdjustment}
+          onDeleteAppearanceAdjustment={onDeleteAppearanceAdjustment}
+          onSaveRules={onSaveRules}
+        />
+      )}
 
       {activeSection === "identity" && (
         <section className="panel">
@@ -2151,7 +2165,7 @@ function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, o
                 <label>Auxiliar<input name="assistantCoach" placeholder="Opcional" /></label>
                 <label>Direccion / sede<input name="address" placeholder="Cancha, colonia o sede" /></label>
                 <label>Color uniforme<input name="colors" type="color" defaultValue="#0f766e" /></label>
-                <label>Escudo<input name="logoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label>
+                <label>Escudo<input name="logoFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} /></label>
               </div>
               <button className="primary" type="submit">Agregar equipo</button>
             </form>
@@ -2335,10 +2349,11 @@ function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, o
   );
 }
 
-function RulesPanel({ league, onSaveRules }) {
+function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjustment, onSaveRules }) {
   const rules = league.rules || {};
   const walkoverLabel = `${rules.forfeitGoalsFor ?? 3}-${rules.forfeitGoalsAgainst ?? 0}`;
   const playoffQualifiers = Number(rules.playoffQualifiers ?? 8);
+  const minimumPlayoffAppearances = Number(rules.minimumPlayoffAppearances ?? 0);
   const playoffPhaseLabel = getPlayoffPhaseLabel(playoffQualifiers);
   const [rulesNotice, setRulesNotice] = useState("");
 
@@ -2385,6 +2400,9 @@ function RulesPanel({ league, onSaveRules }) {
         <label>Equipos a liguilla
           <input name="playoffQualifiers" type="number" min="0" max="64" defaultValue={playoffQualifiers} />
         </label>
+        <label>Partidos minimos por jugador para liguilla
+          <input name="minimumPlayoffAppearances" type="number" min="0" max="64" defaultValue={minimumPlayoffAppearances} />
+        </label>
         <label className="wide-field">Notas del reglamento
           <textarea name="notes" defaultValue={rules.notes || ""} placeholder="Ej. Criterios de sancion, defaults, bajas o acuerdos de asamblea." />
         </label>
@@ -2394,10 +2412,145 @@ function RulesPanel({ league, onSaveRules }) {
           <span>Suspension: {rules.yellowSuspensionLimit ?? 3} amarillas o {rules.defaultRedSuspensionMatches ?? 1} partido(s) base por roja.</span>
           <span>Disciplina: {(rules.disciplineScope || "competition") === "league" ? "amarillas compartidas en toda la liga" : "amarillas separadas por categoria"}.</span>
           <span>Liguilla: {playoffQualifiers || 0} clasificado(s){playoffPhaseLabel ? ` | ${playoffPhaseLabel}` : ""}.</span>
+          <span>Jugadores: {minimumPlayoffAppearances || 0} partido(s) minimo para poder disputar liguilla.</span>
         </div>
         <button className="primary" type="submit">Guardar reglas</button>
       </form>
+      <AppearanceAdjustmentsPanel
+        league={league}
+        onAddAppearanceAdjustment={onAddAppearanceAdjustment}
+        onDeleteAppearanceAdjustment={onDeleteAppearanceAdjustment}
+      />
     </section>
+  );
+}
+
+function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjustment }) {
+  const players = useMemo(() => [...league.players].sort((a, b) => a.name.localeCompare(b.name)), [league.players]);
+  const eligibilityByPlayerId = useMemo(() => calculatePlayerAppearanceEligibility(league), [league]);
+  const [query, setQuery] = useState("");
+  const [notice, setNotice] = useState("");
+  const history = useMemo(() => (league.appearanceAdjustments || [])
+    .filter((adjustment) => {
+      if (!query.trim()) return true;
+      const player = getPlayer(league, adjustment.playerId);
+      const team = player ? getTeam(league, player.teamId) : null;
+      return normalizeAdminSearchTerm(`${player?.name || ""} ${team?.name || ""} ${adjustment.reason || ""}`)
+        .includes(normalizeAdminSearchTerm(query));
+    })
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.id).localeCompare(String(a.id))), [league, query]);
+
+  function submitAdjustment(event) {
+    event.preventDefault();
+    const payload = getFormPayload(event.currentTarget);
+    const player = getPlayer(league, payload.playerId);
+    if (!player) {
+      setNotice("Selecciona un jugador valido.");
+      return;
+    }
+    if (!window.confirm(`¿Guardar ajuste de partidos jugados para ${player.name}?`)) return;
+    onAddAppearanceAdjustment(payload);
+    event.currentTarget.reset();
+    setNotice("Ajuste de partidos jugados guardado.");
+  }
+
+  return (
+    <div className="appearance-admin-panel">
+      <div className="discipline-list-head">
+        <div>
+          <h3>Partidos jugados por jugador</h3>
+          <p className="helper-text">Ajusta manualmente partidos jugados para elegibilidad de liguilla. El conteo real por convocatoria se conserva separado.</p>
+        </div>
+      </div>
+      {notice && <p className="auth-ok">{notice}</p>}
+      <div className="discipline-admin-grid">
+        <form className="discipline-admin-form" onSubmit={submitAdjustment}>
+          <h3>Ajuste manual</h3>
+          <label>Jugador
+            <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador..." />
+          </label>
+          <label>Movimiento
+            <select name="direction" defaultValue="add">
+              <option value="add">Sumar partidos</option>
+              <option value="subtract">Restar partidos</option>
+            </select>
+          </label>
+          <label>Cantidad
+            <input name="value" type="number" min="1" max="64" defaultValue="1" />
+          </label>
+          <label>Fecha
+            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+          </label>
+          <label className="wide-field">Motivo
+            <input name="reason" placeholder="Ej. correccion de acta, acuerdo de liga" />
+          </label>
+          <label className="wide-field">Notas
+            <input name="notes" placeholder="Detalle interno opcional" />
+          </label>
+          <button className="primary" type="submit" disabled={!players.length}>Guardar ajuste</button>
+        </form>
+
+        <div className="discipline-admin-list compact">
+          <div className="discipline-list-head">
+            <div>
+              <h3>Avance principal</h3>
+              <p className="helper-text">Vista rapida de jugadores con regla de liguilla activa.</p>
+            </div>
+          </div>
+          <div className="appearance-progress-list">
+            {players.slice(0, 8).map((player) => {
+              const eligibility = eligibilityByPlayerId.get(player.id);
+              const team = getTeam(league, player.teamId);
+              return (
+                <article key={player.id}>
+                  <div>
+                    <strong>{player.name}</strong>
+                    <span>{team?.name || "Sin equipo"} | {eligibility?.recognizedAppearances || 0}/{eligibility?.required || 0} partido(s)</span>
+                  </div>
+                  <b className={eligibility?.eligible ? "ready" : "pending"}>{eligibility?.eligible ? "Disponible" : `Faltan ${eligibility?.remaining || 0}`}</b>
+                </article>
+              );
+            })}
+            {!players.length && <p className="empty">No hay jugadores registrados.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="discipline-admin-list">
+        <div className="discipline-list-head">
+          <div>
+            <h3>Historial de ajustes</h3>
+            <span>{history.length} movimiento(s)</span>
+          </div>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar jugador o motivo" />
+        </div>
+        {history.map((adjustment) => {
+          const player = getPlayer(league, adjustment.playerId);
+          const team = player ? getTeam(league, player.teamId) : null;
+          return (
+            <article className="discipline-admin-card" key={adjustment.id}>
+              <div>
+                <strong>{player?.name || "Jugador eliminado"}</strong>
+                <span>{team?.name || "Sin equipo"} | {adjustment.date || "Sin fecha"} | {adjustment.value > 0 ? "+" : ""}{adjustment.value} partido(s)</span>
+                <small>{adjustment.reason || "Ajuste manual"}</small>
+              </div>
+              <button
+                className="danger"
+                type="button"
+                onClick={() => {
+                  if (!window.confirm("¿Eliminar este ajuste manual de partidos jugados?")) return;
+                  onDeleteAppearanceAdjustment(adjustment.id);
+                  setNotice("Ajuste eliminado.");
+                }}
+              >
+                Eliminar
+              </button>
+            </article>
+          );
+        })}
+        {!history.length && <p className="empty">No hay ajustes manuales registrados.</p>}
+      </div>
+    </div>
   );
 }
 
@@ -2650,7 +2803,7 @@ function ManagementBoard({
                 <input name="assistantCoach" defaultValue={team.assistantCoach || ""} aria-label={`Auxiliar ${team.name}`} placeholder="Auxiliar" />
                 <input name="address" defaultValue={team.address || ""} aria-label={`Direccion ${team.name}`} placeholder="Direccion / sede" />
                 <input name="colors" defaultValue={team.colors} aria-label={`Color ${team.name}`} type="color" />
-                <input name="logoFile" aria-label={`Escudo ${team.name}`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+                <input name="logoFile" aria-label={`Escudo ${team.name}`} type="file" accept={IMAGE_UPLOAD_ACCEPT} />
                 <label className="checkbox-field compact-checkbox">
                   <input name="removeLogo" type="checkbox" />
                   Quitar escudo
@@ -4208,7 +4361,7 @@ function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     if (!file) return resolve("");
     if (!ALLOWED_UPLOAD_TYPES.has(file.type)) {
-      reject(new Error("Solo se permiten imagenes PNG, JPG, WebP o GIF."));
+      reject(new Error("Solo se permiten imagenes PNG, JPG o WebP."));
       return;
     }
     if (file.size > MAX_IMAGE_DATA_URL_LENGTH) {
@@ -4341,7 +4494,7 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
           </select>
         </label>
         <label>Patrocinador<input name="name" required placeholder="Nombre comercial" /></label>
-        <label>Imagen banner<input name="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required /></label>
+        <label>Imagen banner<input name="imageFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} required /></label>
         <label>Enlace<input name="linkUrl" type="url" placeholder="https://..." /></label>
         <label>Orden<input name="sortOrder" type="number" min="0" defaultValue="0" /></label>
         <label>Estado
@@ -4371,7 +4524,7 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
                       {sponsor.imageUrl ? <img alt={sponsor.name} src={sponsor.imageUrl} /> : <span>Sin imagen</span>}
                     </div>
                     <label>Patrocinador<input name="name" defaultValue={sponsor.name} required /></label>
-                    <label>Reemplazar imagen<input name="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /></label>
+                    <label>Reemplazar imagen<input name="imageFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} /></label>
                     <label>Enlace<input name="linkUrl" type="url" defaultValue={sponsor.linkUrl || ""} placeholder="https://..." /></label>
                     <label>Orden<input name="sortOrder" type="number" min="0" defaultValue={sponsor.sortOrder || 0} /></label>
                     <label>Estado

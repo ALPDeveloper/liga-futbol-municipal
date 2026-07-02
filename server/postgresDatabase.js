@@ -89,6 +89,7 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS discipline_scope TEXT NOT NULL DEFAULT 'competition'");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS playoff_qualifiers INTEGER NOT NULL DEFAULT 8");
+  await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS team_affiliations (
       id TEXT PRIMARY KEY,
@@ -128,6 +129,18 @@ async function runPostgresMigrations(pool) {
       id TEXT PRIMARY KEY,
       league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
       player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      date DATE,
+      reason TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'active'
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS player_appearance_adjustments (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+      value INTEGER NOT NULL,
       date DATE,
       reason TEXT,
       notes TEXT,
@@ -202,6 +215,25 @@ async function runPostgresMigrations(pool) {
       reviewed_at TIMESTAMPTZ
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_rosters (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      captain_pin TEXT,
+      players_json JSONB NOT NULL,
+      status TEXT NOT NULL DEFAULT 'submitted',
+      notes TEXT,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(match_id, team_id)
+    )
+  `);
+  await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS captain_pin TEXT");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_rosters_match ON match_rosters(match_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users(lower(email))");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_team_delegate_activation_tokens_hash ON team_delegate_activation_tokens(token_hash)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_referee_activation_tokens_hash ON referee_activation_tokens(token_hash)");
@@ -385,6 +417,15 @@ export async function getPostgresStore() {
       notes: row.notes,
       status: row.status
     }));
+    const appearanceAdjustments = (await pool.query("SELECT * FROM player_appearance_adjustments WHERE league_id = $1 ORDER BY date DESC NULLS LAST, id DESC", [leagueRow.id])).rows.map((row) => ({
+      id: row.id,
+      playerId: row.player_id,
+      value: row.value,
+      date: rowDate(row, "date"),
+      reason: row.reason,
+      notes: row.notes,
+      status: row.status
+    }));
     const sponsors = (await pool.query("SELECT * FROM sponsors WHERE league_id = $1 ORDER BY sort_order, name", [leagueRow.id])).rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -434,6 +475,19 @@ export async function getPostgresStore() {
         events
       });
     }
+    const matchRosters = (await pool.query("SELECT * FROM match_rosters WHERE league_id = $1 ORDER BY submitted_at DESC", [leagueRow.id])).rows.map((row) => ({
+      id: row.id,
+      matchId: row.match_id,
+      teamId: row.team_id,
+      submittedByUserId: row.submitted_by_user_id || "",
+      captainPlayerId: row.captain_player_id || "",
+      captainPin: row.captain_pin || "",
+      players: row.players_json || [],
+      status: row.status,
+      notes: row.notes || "",
+      submittedAt: rowDate(row, "submitted_at"),
+      updatedAt: rowDate(row, "updated_at")
+    }));
 
     leagues.push({
       id: leagueRow.id,
@@ -465,6 +519,7 @@ export async function getPostgresStore() {
         defaultRedSuspensionMatches: rules.default_red_suspension_matches,
         disciplineScope: rules.discipline_scope,
         playoffQualifiers: rules.playoff_qualifiers,
+        minimumPlayoffAppearances: rules.minimum_playoff_appearances,
         notes: rules.notes
       },
       highlights,
@@ -477,8 +532,10 @@ export async function getPostgresStore() {
       disciplineLinks,
       disciplineAdjustments,
       disciplineResets,
+      appearanceAdjustments,
       sponsors,
-      matches
+      matches,
+      matchRosters
     });
   }
 
@@ -525,7 +582,20 @@ export async function importPostgresStore(store) {
   try {
     await client.query("BEGIN");
     const userLeagueAssignments = (await query(client, "SELECT id, league_id FROM users")).rows;
+    const preservedTeamAssignments = (await query(client, `
+      SELECT id, league_id, team_id, user_id, role, status, created_at
+      FROM team_user_assignments
+    `)).rows;
+    const preservedTeamRosterPermissions = (await query(client, `
+      SELECT team_id, league_id, registration_enabled, enabled_until, notes, updated_at
+      FROM team_roster_permissions
+    `)).rows;
+    const preservedDelegateActivationTokens = (await query(client, `
+      SELECT id, user_id, assignment_id, token_hash, expires_at, used_at, revoked_at, created_at
+      FROM team_delegate_activation_tokens
+    `)).rows;
     const nextLeagueIds = new Set(normalized.leagues.map((league) => league.id));
+    const nextTeamIds = new Set(normalized.leagues.flatMap((league) => (league.teams || []).map((team) => team.id)));
     const removedLeagueIds = new Set(
       userLeagueAssignments
         .map((assignment) => assignment.league_id)
@@ -538,9 +608,11 @@ export async function importPostgresStore(store) {
 
     for (const table of [
       "match_events",
+      "match_rosters",
       "discipline_resets",
       "discipline_adjustments",
       "discipline_links",
+      "player_appearance_adjustments",
       "player_injuries",
       "player_sanctions",
       "matches",
@@ -613,8 +685,8 @@ export async function importPostgresStore(store) {
       ]);
 
       await query(client, `
-        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, minimum_playoff_appearances, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       `, [
         league.id,
         league.rules?.withdrawalPolicy || "award_walkover",
@@ -625,6 +697,7 @@ export async function importPostgresStore(store) {
         Number(league.rules?.defaultRedSuspensionMatches ?? 1),
         league.rules?.disciplineScope === "league" ? "league" : "competition",
         Number(league.rules?.playoffQualifiers ?? 8),
+        Number(league.rules?.minimumPlayoffAppearances ?? 0),
         league.rules?.notes || "Si un equipo se da de baja, la liga puede otorgar triunfo por default segun sus estatutos."
       ]);
 
@@ -692,6 +765,10 @@ export async function importPostgresStore(store) {
         [reset.id, league.id, reset.playerId, reset.date || "", reset.reason || "", reset.notes || "", reset.status || "active"]
       )), { dateColumns: ["date"] });
 
+      await insertRows(client, "player_appearance_adjustments", ["id", "league_id", "player_id", "value", "date", "reason", "notes", "status"], (league.appearanceAdjustments || []).map((adjustment) => (
+        [adjustment.id, league.id, adjustment.playerId, Number(adjustment.value || 0), adjustment.date || "", adjustment.reason || "", adjustment.notes || "", adjustment.status || "active"]
+      )), { dateColumns: ["date"] });
+
       await insertRows(client, "matches", ["id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg", "aggregate_home", "aggregate_away", "round", "date", "time", "venue", "home_team_id", "away_team_id", "status", "home_goals", "away_goals", "observations", "resolution_type", "resolution_note", "central_referee_user_id", "assistant_referee1_user_id", "assistant_referee2_user_id", "fourth_referee_user_id"], league.matches.map((match) => [
           match.id,
           league.id,
@@ -722,7 +799,64 @@ export async function importPostgresStore(store) {
       await insertRows(client, "match_events", ["match_id", "type", "player_id", "team_id", "minute", "suspension_matches", "reason"], league.matches.flatMap((match) => (
         (match.events || []).map((event) => [match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, event.reason])
       )));
+
+      await insertRows(client, "match_rosters", ["id", "league_id", "match_id", "team_id", "submitted_by_user_id", "captain_player_id", "captain_pin", "players_json", "status", "notes", "submitted_at", "updated_at"], (league.matchRosters || []).map((roster) => [
+        roster.id,
+        league.id,
+        roster.matchId,
+        roster.teamId,
+        roster.submittedByUserId || null,
+        roster.captainPlayerId || null,
+        roster.captainPin || "",
+        JSON.stringify(roster.players || []),
+        roster.status || "submitted",
+        roster.notes || "",
+        roster.submittedAt || new Date().toISOString(),
+        roster.updatedAt || roster.submittedAt || new Date().toISOString()
+      ]));
     }
+
+    const userIds = new Set((await query(client, "SELECT id FROM users")).rows.map((user) => user.id));
+    const restoredAssignmentIds = new Set();
+
+    await insertRows(client, "team_roster_permissions", ["team_id", "league_id", "registration_enabled", "enabled_until", "notes", "updated_at"], preservedTeamRosterPermissions
+      .filter((permission) => nextLeagueIds.has(permission.league_id) && nextTeamIds.has(permission.team_id))
+      .map((permission) => [
+        permission.team_id,
+        permission.league_id,
+        Boolean(permission.registration_enabled),
+        permission.enabled_until || null,
+        permission.notes || "",
+        permission.updated_at || new Date().toISOString()
+      ]));
+
+    const assignmentsToRestore = preservedTeamAssignments
+      .filter((assignment) => nextLeagueIds.has(assignment.league_id) && nextTeamIds.has(assignment.team_id) && userIds.has(assignment.user_id));
+    await insertRows(client, "team_user_assignments", ["id", "league_id", "team_id", "user_id", "role", "status", "created_at"], assignmentsToRestore.map((assignment) => {
+      restoredAssignmentIds.add(assignment.id);
+      return [
+        assignment.id,
+        assignment.league_id,
+        assignment.team_id,
+        assignment.user_id,
+        assignment.role || "delegate",
+        assignment.status || "active",
+        assignment.created_at || new Date().toISOString()
+      ];
+    }));
+
+    await insertRows(client, "team_delegate_activation_tokens", ["id", "user_id", "assignment_id", "token_hash", "expires_at", "used_at", "revoked_at", "created_at"], preservedDelegateActivationTokens
+      .filter((token) => userIds.has(token.user_id) && restoredAssignmentIds.has(token.assignment_id))
+      .map((token) => [
+        token.id,
+        token.user_id,
+        token.assignment_id,
+        token.token_hash,
+        token.expires_at,
+        token.used_at || null,
+        token.revoked_at || null,
+        token.created_at || new Date().toISOString()
+      ]));
 
     for (const assignment of userLeagueAssignments) {
       if (assignment.league_id && nextLeagueIds.has(assignment.league_id)) {

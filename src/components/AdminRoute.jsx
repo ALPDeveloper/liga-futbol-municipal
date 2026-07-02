@@ -3,6 +3,7 @@ import {
   addLeague,
   addAnnouncement,
   addCompetition,
+  addAppearanceAdjustment,
   addDisciplineAdjustment,
   addDisciplineLink,
   addDisciplineReset,
@@ -17,6 +18,7 @@ import {
   deleteMatch,
   deletePlayoffMatches,
   deleteAnnouncement,
+  deleteAppearanceAdjustment,
   deleteDisciplineAdjustment,
   deleteDisciplineLink,
   deleteDisciplineReset,
@@ -167,6 +169,7 @@ export function AdminRoute({
       heroImage={heroImage}
       league={league}
       onAddAnnouncement={(payload) => commit(addAnnouncement(store, league.id, payload))}
+      onAddAppearanceAdjustment={(payload) => commit(addAppearanceAdjustment(store, league.id, payload))}
       onAddCompetition={(payload) => {
         commit(addCompetition(store, league.id, payload));
       }}
@@ -190,6 +193,7 @@ export function AdminRoute({
       onAddTeamAffiliation={(payload) => commit(addTeamAffiliation(store, league.id, payload))}
       onAddVenue={(payload) => commit(addVenue(store, league.id, payload))}
       onDeleteAnnouncement={(announcementId) => commit(deleteAnnouncement(store, league.id, announcementId))}
+      onDeleteAppearanceAdjustment={(adjustmentId) => commit(deleteAppearanceAdjustment(store, league.id, adjustmentId))}
       onDeleteDisciplineAdjustment={(adjustmentId) => commit(deleteDisciplineAdjustment(store, league.id, adjustmentId))}
       onDeleteDisciplineLink={(linkId) => commit(deleteDisciplineLink(store, league.id, linkId))}
       onDeleteDisciplineReset={(resetId) => commit(deleteDisciplineReset(store, league.id, resetId))}

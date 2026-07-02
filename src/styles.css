@@ -296,6 +296,82 @@ a:hover {
   color: #fff;
 }
 
+.access-ligatec-link {
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px solid rgba(141, 255, 68, 0.58);
+  border-radius: 8px;
+  color: #fff;
+  text-decoration: none;
+  background:
+    linear-gradient(135deg, rgba(0, 174, 255, 0.1), rgba(101, 245, 51, 0.13)),
+    rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.access-ligatec-link span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.access-ligatec-link strong,
+.access-ligatec-link small {
+  display: block;
+  line-height: 1.05;
+}
+
+.access-ligatec-link strong {
+  font-size: 0.9rem;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.access-ligatec-link small {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.access-link-mark,
+.access-lock-icon {
+  position: relative;
+  width: 30px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 2px solid #9df64d;
+  border-radius: 7px;
+}
+
+.access-link-mark::before,
+.access-lock-icon::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: -14px;
+  width: 12px;
+  height: 16px;
+  border: 2px solid #9df64d;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+}
+
+.access-link-mark::after,
+.access-lock-icon::after {
+  content: "";
+  position: absolute;
+  right: -7px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #9df64d;
+  border-radius: 999px;
+  background: #06111d;
+}
+
 .auth-panel {
   display: grid;
   grid-template-columns: 180px 130px auto auto;
@@ -399,6 +475,178 @@ a:hover {
 .admin-access-card > a {
   color: var(--field);
   font-weight: 800;
+}
+
+.access-page {
+  min-height: calc(100vh - 78px);
+  display: grid;
+  place-items: center;
+}
+
+.access-card {
+  width: min(100%, 720px);
+  display: grid;
+  gap: 18px;
+  padding: clamp(22px, 4vw, 36px);
+  border: 1px solid rgba(72, 255, 172, 0.22);
+  border-radius: 8px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(0, 174, 255, 0.24), transparent 34%),
+    radial-gradient(circle at 85% 18%, rgba(101, 245, 51, 0.2), transparent 30%),
+    linear-gradient(145deg, #03101e, #051a20 58%, #071108);
+  box-shadow: 0 24px 70px rgba(2, 8, 23, 0.28);
+}
+
+.access-card-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: center;
+}
+
+.access-logo {
+  width: 72px;
+  height: 72px;
+}
+
+.access-card h1 {
+  margin: 4px 0 6px;
+  color: #fff;
+  font-size: clamp(2.1rem, 7vw, 4rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.access-card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.76);
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.access-lock-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(141, 255, 68, 0.42);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.access-lock-banner strong,
+.access-lock-banner small {
+  display: block;
+}
+
+.access-lock-banner strong {
+  color: #fff;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.access-lock-banner small {
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 800;
+}
+
+.access-card .auth-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.access-card .auth-panel input,
+.access-card .auth-panel button {
+  min-height: 48px;
+}
+
+.access-card .auth-panel button {
+  color: #102018;
+}
+
+.access-card .auth-panel button.primary {
+  grid-column: 1 / -1;
+  color: #102018;
+  background: linear-gradient(135deg, #1ff0c8, #91f537);
+}
+
+.access-card .auth-panel button:not(.primary) {
+  grid-column: 1 / -1;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.access-card .auth-panel.signed-in {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--ink);
+  background: #fff;
+}
+
+.access-current-session {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.access-current-session span {
+  font-weight: 900;
+}
+
+.link-button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  color: #9df64d;
+  background: transparent;
+  font-weight: 900;
+  text-decoration: underline;
+}
+
+.access-selection-card {
+  width: min(100%, 880px);
+}
+
+.access-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.access-option-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(72, 255, 172, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.access-option-card span,
+.access-option-card small {
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 900;
+}
+
+.access-option-card span {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.access-option-card strong {
+  color: #fff;
+  font-size: 1.24rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .league-switcher {
@@ -2212,7 +2460,7 @@ th {
 
 .match-scoreboard {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(72px, auto) minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   padding: 14px;
@@ -2237,10 +2485,11 @@ th {
 
 .match-score-team strong {
   color: #fff;
-  font-size: 0.98rem;
+  font-size: clamp(0.78rem, 2.8vw, 0.98rem);
   line-height: 1.12;
   text-wrap: balance;
   overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .match-score-center {
@@ -6209,7 +6458,10 @@ label {
   .admin-content,
   .content-grid,
   .team-portal-page,
-  .activation-page {
+  .activation-page,
+  .access-page,
+  .access-card,
+  .access-option-card {
     width: 100%;
     max-width: 100%;
     overflow-x: hidden;
@@ -6259,6 +6511,7 @@ label {
   button,
   a.primary,
   a.secondary,
+  .access-ligatec-link,
   .admin-public-link,
   .public-share-button,
   .whatsapp-share-button {
@@ -6273,6 +6526,12 @@ label {
   .brand,
   .brand-copy,
   .auth-panel,
+  .access-card,
+  .access-card-head,
+  .access-lock-banner,
+  .access-current-session,
+  .access-option-grid,
+  .access-option-card,
   .public-league-badge,
   .league-switcher,
   .admin-league-head,
@@ -6312,6 +6571,7 @@ label {
 
   .topbar-actions,
   .admin-public-link,
+  .access-ligatec-link,
   .auth-panel,
   .public-league-badge,
   .league-switcher,
@@ -6321,8 +6581,36 @@ label {
 
   .auth-panel,
   .auth-panel.signed-in,
+  .access-card .auth-panel,
+  .access-card .auth-panel.signed-in,
   .admin-access-card .auth-panel {
     grid-template-columns: 1fr;
+  }
+
+  .access-card {
+    padding: 18px;
+  }
+
+  .access-card-head {
+    align-items: start;
+  }
+
+  .access-logo {
+    width: 58px;
+    height: 58px;
+  }
+
+  .access-card h1 {
+    font-size: clamp(2rem, 12vw, 3rem);
+  }
+
+  .access-ligatec-link {
+    justify-content: center;
+  }
+
+  .access-current-session {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .segmented,
@@ -6824,15 +7112,25 @@ label {
   }
 
   .match-scoreboard {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(62px, auto) minmax(0, 1fr);
+    gap: 6px;
+    padding: 10px 6px;
   }
 
-  .match-score-team.away {
-    order: 3;
+  .match-score-team {
+    gap: 5px;
+  }
+
+  .match-score-team strong {
+    font-size: 0.72rem;
   }
 
   .match-score-center {
-    order: 2;
+    min-width: 62px;
+  }
+
+  .match-score-center strong {
+    font-size: 1.45rem;
   }
 
   .match-event-row {
@@ -8339,7 +8637,7 @@ label {
 
 .referee-sheet-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto) minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   text-align: center;
@@ -8351,6 +8649,16 @@ label {
   min-width: 0;
 }
 
+.referee-score-team.home {
+  text-align: left;
+  justify-items: start;
+}
+
+.referee-score-team.away {
+  text-align: right;
+  justify-items: end;
+}
+
 .referee-sheet-head span {
   color: rgba(234, 248, 245, 0.7);
   font-size: 0.72rem;
@@ -8360,7 +8668,12 @@ label {
 
 .referee-sheet-head strong {
   color: #fff;
+  max-width: 100%;
+  font-size: clamp(0.78rem, 3.2vw, 1.05rem);
+  line-height: 1.08;
+  text-wrap: balance;
   overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .referee-score-box {
@@ -8371,6 +8684,7 @@ label {
 }
 
 .referee-score-box input {
+  min-height: 44px;
   text-align: center;
   font-size: 1.2rem;
   font-weight: 950;
@@ -8385,6 +8699,122 @@ label {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.referee-live-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(42, 231, 188, 0.22);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at top left, rgba(8, 119, 255, 0.24), transparent 38%),
+    linear-gradient(135deg, rgba(3, 17, 27, 0.96), rgba(5, 38, 44, 0.92));
+  min-width: 0;
+}
+
+.referee-live-panel.is-active {
+  border-color: rgba(140, 247, 76, 0.38);
+  box-shadow: 0 14px 36px rgba(8, 119, 255, 0.18);
+}
+
+.referee-live-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.referee-live-head > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.referee-live-head span,
+.referee-live-added span {
+  color: #8cf74c;
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.referee-live-head strong {
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+
+.referee-live-head small {
+  color: rgba(234, 248, 245, 0.7);
+  font-weight: 850;
+}
+
+.referee-live-clock {
+  display: grid;
+  gap: 2px;
+  min-width: 118px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  text-align: center;
+}
+
+.referee-live-clock b {
+  color: #fff;
+  font-size: 1.55rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.referee-live-clock span {
+  color: rgba(234, 248, 245, 0.72);
+  font-size: 0.68rem;
+}
+
+.referee-live-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.referee-live-added {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(42, 231, 188, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.referee-live-added strong {
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 950;
+}
+
+.referee-live-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.referee-live-controls button {
+  min-height: 44px;
+  padding: 8px;
+  border-radius: 8px;
+  white-space: normal;
+}
+
+.referee-sheet-form .inline-actions button,
+.referee-event-buttons button,
+.referee-action-button,
+.team-portal-page button,
+.admin-route-shell .capture-nav button,
+.admin-route-shell .admin-section-nav button {
+  min-height: 44px;
 }
 
 .referee-event-buttons {
@@ -8690,6 +9120,288 @@ label {
   text-transform: uppercase;
 }
 
+.team-player-progress {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1.2;
+}
+
+.team-player-progress.complete {
+  color: #147a43;
+}
+
+.team-player-progress-track {
+  display: block;
+  width: min(220px, 100%);
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.team-player-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0f73ff, #16c784);
+}
+
+.team-match-roster-list {
+  display: grid;
+  gap: 12px;
+}
+
+.team-match-roster-card {
+  overflow: hidden;
+  border: 1px solid #dbe7ef;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.team-match-roster-card summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.team-match-roster-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.team-match-roster-card summary strong,
+.team-match-roster-card summary span {
+  display: block;
+  min-width: 0;
+}
+
+.team-match-roster-card summary strong {
+  color: var(--field-dark);
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
+.team-match-roster-card summary span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.team-match-roster-card summary b {
+  justify-self: end;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #0f766e;
+  font-size: 0.74rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.team-match-roster-card form {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.team-match-pin-box {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(15, 115, 255, 0.24);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(15, 115, 255, 0.10), rgba(22, 199, 132, 0.10));
+}
+
+.team-match-pin-box span,
+.team-match-pin-box small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.team-match-pin-box strong {
+  color: var(--field-dark);
+  font-size: 2rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.team-match-player-grid {
+  display: grid;
+  gap: 8px;
+  max-height: min(54vh, 520px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.team-match-player-grid label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dbe7ef;
+  border-radius: 9px;
+  background: #f8fbfd;
+}
+
+.team-match-player-grid label.blocked {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #9f1239;
+}
+
+.team-match-player-grid input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.team-match-player-grid strong,
+.team-match-player-grid small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.team-match-player-grid strong {
+  color: var(--ink);
+  font-weight: 950;
+}
+
+.team-match-player-grid small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.team-match-player-grid label.blocked small,
+.team-match-player-grid label.blocked strong {
+  color: inherit;
+}
+
+.referee-roster-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.referee-roster-status-row span {
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 999px;
+  background: rgba(15, 115, 255, 0.09);
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
+.referee-pin-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(130px, 0.5fr) minmax(130px, 0.5fr);
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid rgba(22, 199, 132, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(0, 41, 78, 0.06), rgba(22, 199, 132, 0.10));
+}
+
+.referee-pin-panel > div {
+  display: grid;
+  gap: 4px;
+}
+
+.referee-pin-panel strong,
+.referee-pin-panel span {
+  display: block;
+  min-width: 0;
+}
+
+.referee-pin-panel strong {
+  color: var(--field-dark);
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.referee-pin-panel span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.appearance-admin-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #dbe7ef;
+}
+
+.appearance-progress-list {
+  display: grid;
+  gap: 8px;
+}
+
+.appearance-progress-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #dbe7ef;
+  border-radius: 9px;
+  background: #f8fbfd;
+}
+
+.appearance-progress-list strong,
+.appearance-progress-list span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.appearance-progress-list strong {
+  color: var(--ink);
+  font-weight: 950;
+}
+
+.appearance-progress-list span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.appearance-progress-list b {
+  padding: 7px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.appearance-progress-list b.ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.appearance-progress-list b.pending {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
 @media (max-width: 720px) {
   .admin-route-shell .page {
     width: min(100% - 14px, 1180px);
@@ -8841,7 +9553,8 @@ label {
   .referee-filter-bar,
   .referee-assignment-form,
   .referee-sheet-controls,
-  .referee-sheet-head,
+  .referee-live-head,
+  .referee-live-meta,
   .referee-event-row,
   .delegate-grid,
   .team-portal-roster-head,
@@ -8862,6 +9575,14 @@ label {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .referee-live-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .referee-live-clock {
+    justify-self: stretch;
+  }
+
   .referee-command-center {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -8872,6 +9593,29 @@ label {
 
   .referee-score-box {
     justify-self: center;
+  }
+
+  .referee-sheet-head {
+    grid-template-columns: minmax(0, 1fr) minmax(86px, auto) minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .referee-score-box {
+    grid-template-columns: 42px auto 42px;
+  }
+
+  .referee-score-box input {
+    padding: 8px 4px;
+  }
+
+  .referee-score-team.home {
+    text-align: left;
+    justify-items: start;
+  }
+
+  .referee-score-team.away {
+    text-align: right;
+    justify-items: end;
   }
 
   .event-row {
@@ -8895,6 +9639,28 @@ label {
   .team-portal-roster-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .team-match-roster-card summary {
+    grid-template-columns: 1fr;
+  }
+
+  .team-match-roster-card summary b {
+    justify-self: start;
+    white-space: normal;
+  }
+
+  .appearance-progress-list article {
+    grid-template-columns: 1fr;
+  }
+
+  .appearance-progress-list b {
+    justify-self: start;
+    white-space: normal;
+  }
+
+  .referee-pin-panel {
+    grid-template-columns: 1fr;
   }
 
   .referee-review-head {

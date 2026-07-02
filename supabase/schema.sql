@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS league_rules (
   default_red_suspension_matches INTEGER NOT NULL DEFAULT 1,
   discipline_scope TEXT NOT NULL DEFAULT 'competition',
   playoff_qualifiers INTEGER NOT NULL DEFAULT 8,
+  minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0,
   notes TEXT
 );
 
@@ -206,6 +207,17 @@ CREATE TABLE IF NOT EXISTS discipline_resets (
   status TEXT NOT NULL DEFAULT 'active'
 );
 
+CREATE TABLE IF NOT EXISTS player_appearance_adjustments (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
+  value INTEGER NOT NULL,
+  date DATE,
+  reason TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+);
+
 ALTER TABLE IF EXISTS teams
   ADD COLUMN IF NOT EXISTS competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL;
 
@@ -247,6 +259,9 @@ ALTER TABLE IF EXISTS league_rules
 
 ALTER TABLE IF EXISTS league_rules
   ADD COLUMN IF NOT EXISTS playoff_qualifiers INTEGER NOT NULL DEFAULT 8;
+
+ALTER TABLE IF EXISTS league_rules
+  ADD COLUMN IF NOT EXISTS minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0;
 
 UPDATE teams
 SET competition_id = leagues.current_competition_id
@@ -345,6 +360,25 @@ CREATE TABLE IF NOT EXISTS referee_match_sheets (
   reviewed_at TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS match_rosters (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  captain_pin TEXT,
+  players_json JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'submitted',
+  notes TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(match_id, team_id)
+);
+
+ALTER TABLE IF EXISTS match_rosters
+  ADD COLUMN IF NOT EXISTS captain_pin TEXT;
+
 CREATE TABLE IF NOT EXISTS memberships (
   id TEXT PRIMARY KEY,
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
@@ -410,6 +444,7 @@ CREATE INDEX IF NOT EXISTS idx_referee_activation_tokens_hash ON referee_activat
 CREATE INDEX IF NOT EXISTS idx_referee_profiles_municipality ON referee_profiles(municipality);
 CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_match ON referee_match_sheets(match_id);
 CREATE INDEX IF NOT EXISTS idx_referee_match_sheets_status ON referee_match_sheets(status);
+CREATE INDEX IF NOT EXISTS idx_match_rosters_match ON match_rosters(match_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_expires ON password_reset_requests(user_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_matches_referee_central ON matches(central_referee_user_id);
 CREATE INDEX IF NOT EXISTS idx_matches_referee_assistant1 ON matches(assistant_referee1_user_id);
