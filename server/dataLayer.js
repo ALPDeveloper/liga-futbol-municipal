@@ -80,7 +80,7 @@ function normalizeRefereeRow(row) {
     name: row.user_name ?? row.userName ?? row.name,
     email: row.user_email ?? row.userEmail ?? row.email,
     phone: row.user_phone ?? row.userPhone ?? row.phone ?? "",
-    status: (row.user_status ?? row.userStatus ?? row.status) || "active",
+    status: (row.referee_status ?? row.refereeStatus ?? row.user_status ?? row.userStatus ?? row.status) || "active",
     municipality: row.municipality || "",
     photoUrl: row.photo_url ?? row.photoUrl ?? "",
     notes: row.notes || "",
@@ -498,9 +498,11 @@ export async function listRefereesData(municipality = "") {
     const rows = await pgQuery(`
       SELECT
         rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
-        u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+        u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status,
+        COALESCE(ua.status, CASE WHEN u.role = 'referee' THEN u.status ELSE NULL END) AS referee_status
       FROM referee_profiles rp
       JOIN users u ON u.id = rp.user_id
+      LEFT JOIN user_accesses ua ON ua.user_id = u.id AND ua.role = 'referee' AND ua.status <> 'deleted'
       WHERE ($1::text = '' OR rp.municipality = $1)
       ORDER BY rp.municipality, u.name
     `, [municipality || ""]);
@@ -509,9 +511,11 @@ export async function listRefereesData(municipality = "") {
   return db.prepare(`
     SELECT
       rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
-      u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+      u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status,
+      COALESCE(ua.status, CASE WHEN u.role = 'referee' THEN u.status ELSE NULL END) AS referee_status
     FROM referee_profiles rp
     JOIN users u ON u.id = rp.user_id
+    LEFT JOIN user_accesses ua ON ua.user_id = u.id AND ua.role = 'referee' AND ua.status <> 'deleted'
     WHERE (? = '' OR rp.municipality = ?)
     ORDER BY rp.municipality, u.name
   `).all(municipality || "", municipality || "").map(normalizeRefereeRow);
@@ -533,6 +537,18 @@ export async function createRefereeProfileData({ userId, municipality, photoUrl 
 }
 
 export async function updateRefereeStatusData(userId, status) {
+  const user = await getUserById(userId);
+  const refereeAccess = (user?.accesses || []).find((access) => access.role === "referee" && access.status !== "deleted");
+  if (refereeAccess) {
+    await updateUserAccessData(refereeAccess.id, {
+      leagueId: refereeAccess.leagueId || null,
+      teamId: refereeAccess.teamId || null,
+      role: "referee",
+      permissions: refereeAccess.permissions || [],
+      status
+    });
+    return getUserById(userId);
+  }
   if (isPostgres()) {
     await pgQuery("UPDATE users SET status = $1 WHERE id = $2 AND role = 'referee'", [status, userId]);
     return getUserById(userId);
@@ -546,20 +562,42 @@ export async function getRefereeProfileData(userId) {
     ? await pgQuery(`
         SELECT
           rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
-          u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+          u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status,
+          COALESCE(ua.status, CASE WHEN u.role = 'referee' THEN u.status ELSE NULL END) AS referee_status
         FROM referee_profiles rp
         JOIN users u ON u.id = rp.user_id
+        LEFT JOIN user_accesses ua ON ua.user_id = u.id AND ua.role = 'referee' AND ua.status <> 'deleted'
         WHERE rp.user_id = $1
       `, [userId])
     : db.prepare(`
         SELECT
           rp.user_id, rp.municipality, rp.photo_url, rp.notes, rp.created_at, rp.updated_at,
-          u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status
+          u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.status AS user_status,
+          COALESCE(ua.status, CASE WHEN u.role = 'referee' THEN u.status ELSE NULL END) AS referee_status
         FROM referee_profiles rp
         JOIN users u ON u.id = rp.user_id
+        LEFT JOIN user_accesses ua ON ua.user_id = u.id AND ua.role = 'referee' AND ua.status <> 'deleted'
         WHERE rp.user_id = ?
       `).all(userId);
   return normalizeRefereeRow(rows[0]);
+}
+
+export async function removeRefereeRoleData(userId) {
+  if (isPostgres()) {
+    await pgQuery("DELETE FROM referee_profiles WHERE user_id = $1", [userId]);
+    await pgQuery("DELETE FROM user_accesses WHERE user_id = $1 AND role = 'referee'", [userId]);
+    await pgQuery("UPDATE matches SET central_referee_user_id = NULL WHERE central_referee_user_id = $1", [userId]);
+    await pgQuery("UPDATE matches SET assistant_referee1_user_id = NULL WHERE assistant_referee1_user_id = $1", [userId]);
+    await pgQuery("UPDATE matches SET assistant_referee2_user_id = NULL WHERE assistant_referee2_user_id = $1", [userId]);
+    await pgQuery("UPDATE matches SET fourth_referee_user_id = NULL WHERE fourth_referee_user_id = $1", [userId]);
+    return;
+  }
+  db.prepare("DELETE FROM referee_profiles WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM user_accesses WHERE user_id = ? AND role = 'referee'").run(userId);
+  db.prepare("UPDATE matches SET central_referee_user_id = NULL WHERE central_referee_user_id = ?").run(userId);
+  db.prepare("UPDATE matches SET assistant_referee1_user_id = NULL WHERE assistant_referee1_user_id = ?").run(userId);
+  db.prepare("UPDATE matches SET assistant_referee2_user_id = NULL WHERE assistant_referee2_user_id = ?").run(userId);
+  db.prepare("UPDATE matches SET fourth_referee_user_id = NULL WHERE fourth_referee_user_id = ?").run(userId);
 }
 
 export async function updateMatchRefereesData(matchId, payload) {
@@ -774,11 +812,34 @@ export async function updateTeamDelegateAssignmentData(assignmentId, { status })
 export async function updateTeamDelegateStatusData({ assignmentId, userId, status }) {
   if (isPostgres()) {
     await pgQuery("UPDATE team_user_assignments SET status = $1 WHERE id = $2", [status === "active" ? "active" : status, assignmentId]);
-    await pgQuery("UPDATE users SET status = $1 WHERE id = $2", [status, userId]);
+    await pgQuery("UPDATE users SET status = $1 WHERE id = $2 AND role = 'team_delegate'", [status, userId]);
+    await pgQuery(`
+      UPDATE user_accesses ua
+      SET status = $1, updated_at = $2
+      FROM team_user_assignments tua
+      WHERE tua.id = $3
+        AND ua.user_id = tua.user_id
+        AND ua.role = 'team_delegate'
+        AND ua.team_id = tua.team_id
+        AND ua.status <> 'deleted'
+    `, [status, new Date().toISOString(), assignmentId]);
     return;
   }
   db.prepare("UPDATE team_user_assignments SET status = ? WHERE id = ?").run(status === "active" ? "active" : status, assignmentId);
-  db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, userId);
+  db.prepare("UPDATE users SET status = ? WHERE id = ? AND role = 'team_delegate'").run(status, userId);
+  db.prepare(`
+    UPDATE user_accesses
+    SET status = ?, updated_at = ?
+    WHERE role = 'team_delegate'
+      AND status <> 'deleted'
+      AND EXISTS (
+        SELECT 1
+        FROM team_user_assignments tua
+        WHERE tua.id = ?
+          AND tua.user_id = user_accesses.user_id
+          AND tua.team_id = user_accesses.team_id
+      )
+  `).run(status, new Date().toISOString(), assignmentId);
 }
 
 export async function deleteTeamDelegateAssignmentData(assignmentId) {
@@ -1183,26 +1244,9 @@ export async function activateRefereeUserData({ userId, passwordHash }) {
     await pgQuery(`
       UPDATE users
       SET password_hash = $1, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
-      WHERE id = $2 AND role = 'referee'
-    `, [passwordHash, userId]);
-    return getUserById(userId);
-  }
-  db.prepare(`
-    UPDATE users
-    SET password_hash = ?, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
-    WHERE id = ? AND role = 'referee'
-  `).run(passwordHash, userId);
-  return getUserById(userId);
-}
-
-export async function activateAdminUserData({ userId, passwordHash }) {
-  if (isPostgres()) {
-    await pgQuery(`
-      UPDATE users
-      SET password_hash = $1, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
       WHERE id = $2
     `, [passwordHash, userId]);
-    await pgQuery("UPDATE user_accesses SET status = 'active', updated_at = $1 WHERE user_id = $2 AND status = 'pending_activation'", [new Date().toISOString(), userId]);
+    await pgQuery("UPDATE user_accesses SET status = 'active', updated_at = $1 WHERE user_id = $2 AND role = 'referee' AND status = 'pending_activation'", [new Date().toISOString(), userId]);
     return getUserById(userId);
   }
   db.prepare(`
@@ -1210,7 +1254,34 @@ export async function activateAdminUserData({ userId, passwordHash }) {
     SET password_hash = ?, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
     WHERE id = ?
   `).run(passwordHash, userId);
-  db.prepare("UPDATE user_accesses SET status = 'active', updated_at = ? WHERE user_id = ? AND status = 'pending_activation'").run(new Date().toISOString(), userId);
+  db.prepare("UPDATE user_accesses SET status = 'active', updated_at = ? WHERE user_id = ? AND role = 'referee' AND status = 'pending_activation'").run(new Date().toISOString(), userId);
+  return getUserById(userId);
+}
+
+export async function activateAdminUserData({ userId, accessId = "", passwordHash }) {
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE users
+      SET password_hash = $1, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
+      WHERE id = $2
+    `, [passwordHash, userId]);
+    if (accessId) {
+      await pgQuery("UPDATE user_accesses SET status = 'active', updated_at = $1 WHERE id = $2 AND user_id = $3 AND status = 'pending_activation'", [new Date().toISOString(), accessId, userId]);
+    } else {
+      await pgQuery("UPDATE user_accesses SET status = 'active', updated_at = $1 WHERE user_id = $2 AND role IN ('super_admin', 'league_admin', 'admin_limited') AND status = 'pending_activation'", [new Date().toISOString(), userId]);
+    }
+    return getUserById(userId);
+  }
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
+    WHERE id = ?
+  `).run(passwordHash, userId);
+  if (accessId) {
+    db.prepare("UPDATE user_accesses SET status = 'active', updated_at = ? WHERE id = ? AND user_id = ? AND status = 'pending_activation'").run(new Date().toISOString(), accessId, userId);
+  } else {
+    db.prepare("UPDATE user_accesses SET status = 'active', updated_at = ? WHERE user_id = ? AND role IN ('super_admin', 'league_admin', 'admin_limited') AND status = 'pending_activation'").run(new Date().toISOString(), userId);
+  }
   return getUserById(userId);
 }
 
@@ -1222,6 +1293,7 @@ export async function activateTeamDelegateUserData({ userId, assignmentId, passw
       WHERE id = $2
     `, [passwordHash, userId]);
     await pgQuery("UPDATE team_user_assignments SET status = 'active' WHERE id = $1", [assignmentId]);
+    await pgQuery("UPDATE user_accesses SET status = 'active', updated_at = $1 WHERE user_id = $2 AND role = 'team_delegate' AND status = 'pending_activation'", [new Date().toISOString(), userId]);
     return getUserById(userId);
   }
   db.prepare(`
@@ -1230,6 +1302,7 @@ export async function activateTeamDelegateUserData({ userId, assignmentId, passw
     WHERE id = ?
   `).run(passwordHash, userId);
   db.prepare("UPDATE team_user_assignments SET status = 'active' WHERE id = ?").run(assignmentId);
+  db.prepare("UPDATE user_accesses SET status = 'active', updated_at = ? WHERE user_id = ? AND role = 'team_delegate' AND status = 'pending_activation'").run(new Date().toISOString(), userId);
   return getUserById(userId);
 }
 

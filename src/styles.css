@@ -2876,6 +2876,8 @@ th {
 .announcement-public-list article {
   display: grid;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
   padding: 12px;
   border: 1px solid var(--line);
   border-left: 5px solid var(--field);
@@ -2889,23 +2891,30 @@ th {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .announcement-public-list strong {
+  min-width: 0;
   font-size: 1rem;
+  overflow-wrap: anywhere;
 }
 
 .announcement-public-list time {
+  min-width: 0;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 900;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .announcement-public-list p {
+  min-width: 0;
   margin: 0;
   color: var(--ink);
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .team-profile {
@@ -4185,6 +4194,25 @@ th {
   margin: 0;
 }
 
+.module-guide {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.module-guide span {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--field) 20%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--field) 7%, #fff);
+  color: var(--field-dark);
+  font-size: 0.76rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
 .admin-shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -5047,12 +5075,25 @@ th {
 }
 
 .announcement-card {
-  grid-template-columns: minmax(180px, 1fr) 150px 140px minmax(260px, 2fr) auto auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(130px, 0.6fr) minmax(120px, 0.6fr) minmax(220px, 1.5fr);
   align-items: stretch;
+  min-width: 0;
+}
+
+.announcement-card input,
+.announcement-card select,
+.announcement-card textarea,
+.announcement-card button {
+  min-width: 0;
+}
+
+.announcement-card button {
+  white-space: normal;
 }
 
 .announcement-card textarea {
   min-height: 72px;
+  overflow-wrap: anywhere;
 }
 
 .injury-card.recovered {
@@ -6120,6 +6161,8 @@ label {
   .duplicate-merge-form,
   .sanction-form,
   .sanction-card,
+  .announcement-form,
+  .announcement-card,
   .discipline-admin-grid,
   .discipline-admin-card,
   .discipline-filters,
@@ -8129,11 +8172,11 @@ label {
 }
 
 .referee-filter-bar-matches {
-  grid-template-columns: minmax(0, 1fr) minmax(132px, 0.72fr);
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
 }
 
 .referee-filter-bar-matches label:last-child {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .referee-filter-bar-matches label,
@@ -8922,6 +8965,79 @@ label {
   gap: 10px;
 }
 
+.referee-latest-event,
+.referee-previous-events {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.referee-latest-event > span {
+  color: rgba(234, 248, 245, 0.7);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.referee-previous-events {
+  border: 1px solid rgba(42, 231, 188, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.referee-previous-events summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  cursor: pointer;
+  list-style: none;
+  min-width: 0;
+}
+
+.referee-previous-events summary::-webkit-details-marker {
+  display: none;
+}
+
+.referee-previous-events summary::after {
+  content: "+";
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: rgba(140, 247, 76, 0.15);
+  color: #8cf74c;
+  font-size: 1.2rem;
+  font-weight: 1000;
+}
+
+.referee-previous-events[open] summary::after {
+  content: "-";
+}
+
+.referee-previous-events summary strong,
+.referee-previous-events summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.referee-previous-events summary span {
+  color: rgba(234, 248, 245, 0.68);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.referee-previous-event-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
 .referee-event-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -8932,6 +9048,11 @@ label {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
   min-width: 0;
+}
+
+.referee-event-row.is-latest {
+  border-color: rgba(140, 247, 76, 0.45);
+  background: linear-gradient(135deg, rgba(42, 231, 188, 0.15), rgba(140, 247, 76, 0.08));
 }
 
 .referee-event-row-head {

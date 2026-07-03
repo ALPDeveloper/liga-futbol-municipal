@@ -847,6 +847,11 @@ function TeamDelegatesPanel({ authToken, league }) {
       <p className="helper-text">
         Crea un usuario por equipo y controla cuando puede registrar jugadores. Los delegados usan la ruta /equipo y no tienen acceso al panel administrativo completo.
       </p>
+      <div className="module-guide">
+        <span>1. Crea delegado</span>
+        <span>2. Abre o cierra registro</span>
+        <span>3. Revisa plantilla enviada</span>
+      </div>
       {notice && <p className="auth-ok">{notice}</p>}
       {error && <p className="auth-error">{error}</p>}
 
@@ -1053,6 +1058,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(getDefaultCompetitionId(league));
   const [matchSearch, setMatchSearch] = useState("");
   const [matchStatusFilter, setMatchStatusFilter] = useState("scheduled");
+  const [assignmentCoverageFilter, setAssignmentCoverageFilter] = useState("missing_central");
   const [assignmentFeedback, setAssignmentFeedback] = useState({});
   const [activeRefereeTask, setActiveRefereeTask] = useState("assign");
   const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
@@ -1079,6 +1085,8 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       .filter((match) => {
         if (matchStatusFilter === "scheduled" && match.status !== "scheduled") return false;
         if (matchStatusFilter === "finished" && match.status !== "finished" && match.status !== "walkover") return false;
+        if (assignmentCoverageFilter === "missing_central" && match.centralRefereeUserId) return false;
+        if (assignmentCoverageFilter === "incomplete" && isMatchRefereeAssignmentComplete(match)) return false;
         if (!query) return true;
         return normalizeAdminSearchTerm(`${getMatchAdminLabel(league, match)} ${match.venue || ""} ${match.date || ""}`).includes(query);
       })
@@ -1087,7 +1095,15 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
         String(a.date || "").localeCompare(String(b.date || "")) ||
         String(a.time || "").localeCompare(String(b.time || ""))
       ));
-  }, [competitionLeague.matches, league, matchSearch, matchStatusFilter]);
+  }, [assignmentCoverageFilter, competitionLeague.matches, league, matchSearch, matchStatusFilter]);
+  const assignmentPendingCount = useMemo(
+    () => competitionLeague.matches.filter((match) => match.status === "scheduled" && !match.centralRefereeUserId).length,
+    [competitionLeague.matches]
+  );
+  const assignmentIncompleteCount = useMemo(
+    () => competitionLeague.matches.filter((match) => match.status === "scheduled" && !isMatchRefereeAssignmentComplete(match)).length,
+    [competitionLeague.matches]
+  );
   const matchRounds = useMemo(() => {
     const groups = new Map();
     for (const match of filteredMatches) {
@@ -1291,6 +1307,11 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       <p className="helper-text">
         Crea arbitros por municipio, envia su enlace de activacion y asigna central o auxiliares a los partidos. El panel de arbitro vive separado en /arbitro.
       </p>
+      <div className="module-guide">
+        <span>1. Crea o activa arbitro</span>
+        <span>2. Designa partidos pendientes</span>
+        <span>3. Revisa actas enviadas</span>
+      </div>
       {notice && <p className="auth-ok">{notice}</p>}
       {error && <p className="auth-error">{error}</p>}
 
@@ -1452,7 +1473,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           <div className="referee-task-head">
             <span>Programacion arbitral</span>
             <h3>Designar arbitros por partido</h3>
-            <p>Filtra por torneo, jornada o equipo. Solo aparecen como opcion los arbitros activos de {league.city}.</p>
+            <p>Por defecto solo veras partidos sin arbitro central. Cambia a incompletos si tambien quieres revisar auxiliares.</p>
           </div>
           <div className="delegate-filter-bar referee-filter-bar referee-filter-bar-matches">
             <label>Torneo / categoria
@@ -1469,6 +1490,13 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
                 <option value="all">Todos</option>
               </select>
             </label>
+            <label>Designacion
+              <select value={assignmentCoverageFilter} onChange={(event) => setAssignmentCoverageFilter(event.target.value)}>
+                <option value="missing_central">Sin central</option>
+                <option value="incomplete">Incompletos</option>
+                <option value="all">Todos</option>
+              </select>
+            </label>
             <label>Buscar partido
               <input
                 type="search"
@@ -1480,7 +1508,8 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           </div>
           <div className="delegate-summary-strip">
             <span><strong>{activeReferees.length}</strong> arbitros activos</span>
-            <span><strong>{filteredMatches.length}</strong> partidos filtrados</span>
+            <span><strong>{assignmentPendingCount}</strong> sin central</span>
+            <span><strong>{assignmentIncompleteCount}</strong> incompletos</span>
             <span><strong>{matchRounds.length}</strong> grupos</span>
           </div>
           <div className="delegate-group-list referee-match-groups">
@@ -1630,6 +1659,14 @@ function getMatchAdminLabel(league, match) {
   const homeTeam = getTeam(league, match.homeTeamId)?.name || "LOCAL";
   const awayTeam = getTeam(league, match.awayTeamId)?.name || "VISITANTE";
   return `${homeTeam} vs ${awayTeam}`;
+}
+
+function isMatchRefereeAssignmentComplete(match) {
+  return Boolean(
+    match.centralRefereeUserId &&
+    match.assistantReferee1UserId &&
+    match.assistantReferee2UserId
+  );
 }
 
 function groupDelegateItemsByCompetition(items, league, getCompetitionId) {
@@ -1935,6 +1972,11 @@ function AnnouncementsPanel({ league, onAddAnnouncement, onDeleteAnnouncement, o
     <section className="panel">
       <SectionHeading eyebrow="Comunicacion" title="Avisos publicos" />
       <p className="helper-text">Los avisos activos apareceran en la pagina publica. Si no hay avisos activos, esa seccion no se muestra.</p>
+      <div className="module-guide">
+        <span>1. Titulo corto</span>
+        <span>2. Mensaje claro</span>
+        <span>3. Publicado o archivado</span>
+      </div>
       {notice && <p className="auth-ok">{notice}</p>}
 
       <form className="announcement-form" onSubmit={submitAnnouncement}>

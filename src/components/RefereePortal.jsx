@@ -446,6 +446,77 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     }
   }
 
+  function renderEventRow(eventItem, index, isLatest = false) {
+    const players = getPlayersForEvent(match, eventItem);
+    const eventTeam = eventItem.teamId === match.homeTeamId ? match.homeTeamName : match.awayTeamName;
+    const playerTeam = eventItem.type === "own_goal"
+      ? eventItem.teamId === match.homeTeamId ? match.awayTeamName : match.homeTeamName
+      : eventTeam;
+    const playerSearch = playerSearches[eventItem.id] || "";
+    const playerQuery = normalizeSearch(playerSearch);
+    const filteredPlayers = players.filter((player) => {
+      if (!playerQuery) return true;
+      return normalizeSearch(`#${player.number || ""} ${player.name}`).includes(playerQuery);
+    });
+    const visiblePlayers = filteredPlayers.length ? filteredPlayers : players;
+    return (
+      <article className={`referee-event-row ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
+        <div className="referee-event-row-head">
+          <div>
+            <strong>#{index + 1} {getEventLabel(eventItem.type)}</strong>
+            <span>{eventItem.type === "own_goal" ? `A favor de ${eventTeam}` : eventTeam}</span>
+          </div>
+          <button className="danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
+        </div>
+        <label>Tipo de evento
+          <select value={eventItem.type} onChange={(event) => updateEvent(eventItem.id, "type", event.target.value)} aria-label="Tipo de evento">
+            <option value="goal">Gol</option>
+            <option value="own_goal">Autogol</option>
+            <option value="yellow">Amarilla</option>
+            <option value="red">Roja</option>
+          </select>
+        </label>
+        <div className="referee-locked-team">
+          <span>{eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento"}</span>
+          <strong>{eventTeam}</strong>
+          <small>Fijo segun el boton elegido</small>
+        </div>
+        <label className="referee-player-search">Buscar jugador
+          <input
+            value={playerSearch}
+            onChange={(event) => updatePlayerSearch(eventItem.id, event.target.value)}
+            placeholder={`Numero, nombre o apellido de ${playerTeam}`}
+            aria-label="Buscar jugador del evento"
+          />
+        </label>
+        <label>Jugador
+          <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label="Jugador">
+            <option value="">{filteredPlayers.length ? "Selecciona jugador" : "Sin coincidencias, mostrando plantilla"}</option>
+            {visiblePlayers.map((player) => (
+              <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isCaptain ? " | CAPITAN" : ""}</option>
+            ))}
+          </select>
+        </label>
+        <label>Minuto
+          <input value={eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} inputMode="numeric" min="0" max="130" placeholder="Min" type="number" aria-label="Minuto" />
+        </label>
+        {eventItem.type === "red" && (
+          <>
+            <label>Suspension
+              <input value={eventItem.suspensionMatches || 1} onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)} inputMode="numeric" min="1" max="20" type="number" aria-label="Partidos de suspension" />
+            </label>
+            <label>Motivo
+              <input value={eventItem.reason || ""} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Motivo de roja" aria-label="Motivo de roja" />
+            </label>
+          </>
+        )}
+      </article>
+    );
+  }
+
+  const previousEvents = events.slice(0, -1);
+  const latestEvent = events[events.length - 1] || null;
+
   return (
     <form className="referee-sheet-form" onSubmit={submitSheet}>
       <div className="referee-acta-title">
@@ -551,73 +622,23 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       </div>
 
       <div className="referee-event-list">
-        {events.map((eventItem, index) => {
-          const players = getPlayersForEvent(match, eventItem);
-          const eventTeam = eventItem.teamId === match.homeTeamId ? match.homeTeamName : match.awayTeamName;
-          const playerTeam = eventItem.type === "own_goal"
-            ? eventItem.teamId === match.homeTeamId ? match.awayTeamName : match.homeTeamName
-            : eventTeam;
-          const playerSearch = playerSearches[eventItem.id] || "";
-          const playerQuery = normalizeSearch(playerSearch);
-          const filteredPlayers = players.filter((player) => {
-            if (!playerQuery) return true;
-            return normalizeSearch(`#${player.number || ""} ${player.name}`).includes(playerQuery);
-          });
-          const visiblePlayers = filteredPlayers.length ? filteredPlayers : players;
-          return (
-            <article className="referee-event-row" key={eventItem.id}>
-              <div className="referee-event-row-head">
-                <div>
-                  <strong>#{index + 1} {getEventLabel(eventItem.type)}</strong>
-                  <span>{eventItem.type === "own_goal" ? `A favor de ${eventTeam}` : eventTeam}</span>
-                </div>
-                <button className="danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
-              </div>
-              <label>Tipo de evento
-                <select value={eventItem.type} onChange={(event) => updateEvent(eventItem.id, "type", event.target.value)} aria-label="Tipo de evento">
-                  <option value="goal">Gol</option>
-                  <option value="own_goal">Autogol</option>
-                  <option value="yellow">Amarilla</option>
-                  <option value="red">Roja</option>
-                </select>
-              </label>
-              <div className="referee-locked-team">
-                <span>{eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento"}</span>
-                <strong>{eventTeam}</strong>
-                <small>Fijo segun el boton elegido</small>
-              </div>
-              <label className="referee-player-search">Buscar jugador
-                <input
-                  value={playerSearch}
-                  onChange={(event) => updatePlayerSearch(eventItem.id, event.target.value)}
-                  placeholder={`Numero, nombre o apellido de ${playerTeam}`}
-                  aria-label="Buscar jugador del evento"
-                />
-              </label>
-              <label>Jugador
-                <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label="Jugador">
-                  <option value="">{filteredPlayers.length ? "Selecciona jugador" : "Sin coincidencias, mostrando plantilla"}</option>
-                  {visiblePlayers.map((player) => (
-                    <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isCaptain ? " | CAPITAN" : ""}</option>
-                  ))}
-                </select>
-              </label>
-              <label>Minuto
-                <input value={eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} inputMode="numeric" min="0" max="130" placeholder="Min" type="number" aria-label="Minuto" />
-              </label>
-              {eventItem.type === "red" && (
-                <>
-                  <label>Suspension
-                    <input value={eventItem.suspensionMatches || 1} onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)} inputMode="numeric" min="1" max="20" type="number" aria-label="Partidos de suspension" />
-                  </label>
-                  <label>Motivo
-                    <input value={eventItem.reason || ""} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Motivo de roja" aria-label="Motivo de roja" />
-                  </label>
-                </>
-              )}
-            </article>
-          );
-        })}
+        {latestEvent && (
+          <div className="referee-latest-event">
+            <span>Ultimo evento registrado</span>
+            {renderEventRow(latestEvent, events.length - 1, true)}
+          </div>
+        )}
+        {previousEvents.length > 0 && (
+          <details className="referee-previous-events">
+            <summary>
+              <strong>Eventos anteriores</strong>
+              <span>{previousEvents.length} evento(s), tocar para revisar</span>
+            </summary>
+            <div className="referee-previous-event-list">
+              {previousEvents.map((eventItem, index) => renderEventRow(eventItem, index))}
+            </div>
+          </details>
+        )}
         {!events.length && <p className="empty">Agrega goles, tarjetas o autogoles con los botones superiores.</p>}
       </div>
 

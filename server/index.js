@@ -54,6 +54,7 @@ import {
   markPasswordResetUsed,
   markRefereeActivationUsedData,
   markTeamDelegateActivationUsedData,
+  removeRefereeRoleData,
   registerFailedLoginData,
   revokeAdminActivationsData,
   revokeRefereeActivationsData,
@@ -183,6 +184,38 @@ function canManageLeague(user, leagueId) {
 
 function isPortalOnlyRole(role) {
   return role === "team_delegate" || role === "referee";
+}
+
+function hasActiveRoleAccess(user, role) {
+  return user?.role === role || (user?.accesses || []).some((access) => (
+    access.role === role && access.status === "active"
+  ));
+}
+
+function hasActiveTeamDelegateAccess(user) {
+  return user?.role === "team_delegate" || (user?.accesses || []).some((access) => (
+    access.role === "team_delegate" && access.status === "active"
+  ));
+}
+
+function hasAnyNonRefereeAccess(user) {
+  if (!user) return false;
+  if (user.role && user.role !== "referee") return true;
+  return (user.accesses || []).some((access) => access.role !== "referee" && access.status !== "deleted");
+}
+
+function hasAnyNonDelegateAccess(user) {
+  if (!user) return false;
+  if (user.role && user.role !== "team_delegate") return true;
+  return (user.accesses || []).some((access) => access.role !== "team_delegate" && access.status !== "deleted");
+}
+
+function getFallbackPrimaryRoleFromAccesses(user, excludedAccessIds = new Set()) {
+  const remainingAccesses = (user?.accesses || []).filter((access) => (
+    access.status !== "deleted" && !excludedAccessIds.has(access.id)
+  ));
+  const priority = ["super_admin", "league_admin", "admin_limited", "team_delegate", "referee"];
+  return [...remainingAccesses].sort((a, b) => priority.indexOf(a.role) - priority.indexOf(b.role))[0] || null;
 }
 
 function hasAdminPermission(user, leagueId, permission) {
@@ -811,7 +844,7 @@ app.post("/api/uploads/images", requireAuth, uploadLimiter, async (request, resp
   const leagueId = String(request.body.leagueId || request.user.leagueId || "").trim();
   let canUploadForLeague = !leagueId || hasAdminPermission(request.user, leagueId, "settings");
 
-  if (!canUploadForLeague && request.user.role === "team_delegate") {
+  if (!canUploadForLeague && hasActiveTeamDelegateAccess(request.user)) {
     const context = await getTeamDelegateContextData(request.user.id);
     canUploadForLeague = Boolean(
       context &&
@@ -823,7 +856,7 @@ app.post("/api/uploads/images", requireAuth, uploadLimiter, async (request, resp
   if (leagueId && !canUploadForLeague) {
     return response.status(403).json({ error: "No puedes subir imagenes para esta liga" });
   }
-  if (request.user.role === "team_delegate" && !["player-photos", "team-logos"].includes(request.body.scope)) {
+  if (hasActiveTeamDelegateAccess(request.user) && !["player-photos", "team-logos"].includes(request.body.scope)) {
     return response.status(403).json({ error: "Los delegados solo pueden subir fotos de jugadores o escudo de su equipo." });
   }
 
@@ -1077,6 +1110,7 @@ app.post("/api/admin-activations/:token", activationLimiter, async (request, res
 
   const user = await activateAdminUserData({
     userId: activation.userId,
+    accessId: activation.accessId,
     passwordHash: hashPassword(password)
   });
   await markAdminActivationUsedData(activation.id);
@@ -1340,29 +1374,75 @@ app.post("/api/team-delegates", requireAuth, async (request, response) => {
   if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido" });
   if (!validateUserStatus(status)) return response.status(400).json({ error: "Estado invalido" });
 
-  const userId = `user-${crypto.randomUUID()}`;
+  const existingUser = (await listUsersData()).find((item) => String(item.email || "").toLowerCase() === email);
+  if (existingUser?.status === "deleted") {
+    return response.status(409).json({ error: "Ese correo pertenece a un usuario eliminado. Usa otro correo o recupera la cuenta manualmente." });
+  }
+  const existingDelegateAssignment = existingUser
+    ? (await listTeamDelegatesData(leagueId)).find((item) => item.userId === existingUser.id && item.teamId === teamId && item.status !== "deleted")
+    : null;
+  if (existingDelegateAssignment) {
+    return response.status(409).json({ error: "Ese usuario ya es delegado de este equipo." });
+  }
+
+  const userId = existingUser?.id || `user-${crypto.randomUUID()}`;
   const assignmentId = `delegate-${crypto.randomUUID()}`;
   let user;
   let invitation;
   try {
-    user = await createUserData({
-      id: userId,
-      leagueId,
-      name,
-      email,
-      phone,
-      role: "team_delegate",
-      status,
-      passwordHash: null
-    });
-    await createTeamDelegateAssignmentData({ id: assignmentId, leagueId, teamId, userId, status });
-    invitation = await createDelegateInvitation({
-      request,
-      userId,
-      assignmentId,
-      delegateName: name,
-      teamName: team.name
-    });
+    if (!existingUser) {
+      user = await createUserData({
+        id: userId,
+        leagueId,
+        name,
+        email,
+        phone,
+        role: "team_delegate",
+        status,
+        passwordHash: null
+      });
+    } else {
+      user = existingUser;
+    }
+    const assignmentStatus = existingUser?.status === "active" ? "active" : status;
+    await createTeamDelegateAssignmentData({ id: assignmentId, leagueId, teamId, userId, status: assignmentStatus });
+    if (existingUser?.status === "active") {
+      await createUserAccessData({
+        id: `access-delegate-${crypto.randomUUID()}`,
+        userId,
+        leagueId,
+        teamId,
+        role: "team_delegate",
+        status: "active"
+      });
+      invitation = {
+        activationUrl: `${getAppBaseUrl(request)}/acceso`,
+        expiresAt: "",
+        whatsappMessage: [
+          `Hola ${name}, se agrego el acceso de delegado del equipo ${team.name} a tu cuenta existente de LIGATEC.`,
+          "Entra desde Acceso LIGATEC con tu correo y contrasena actual:",
+          `${getAppBaseUrl(request)}/acceso`,
+          "Despues selecciona el rol Delegado para administrar tu plantilla."
+        ].join("\n")
+      };
+    } else {
+      await createUserAccessData({
+        id: `access-delegate-${crypto.randomUUID()}`,
+        userId,
+        leagueId,
+        teamId,
+        role: "team_delegate",
+        status
+      });
+      invitation = await createDelegateInvitation({
+        request,
+        userId,
+        assignmentId,
+        delegateName: name,
+        teamName: team.name
+      });
+    }
+    user = await getUserById(userId);
   } catch (error) {
     if (String(error?.message || "").toLowerCase().includes("unique")) {
       return response.status(409).json({ error: "Ya existe un usuario con ese correo." });
@@ -1425,6 +1505,62 @@ app.post("/api/team-delegates/:assignmentId/invitation", requireAuth, async (req
     return response.status(400).json({ error: "No se puede invitar a un usuario eliminado." });
   }
 
+  const delegateUser = await getUserById(assignment.userId);
+  if (delegateUser?.status === "active") {
+    if (assignment.status !== "active") {
+      await updateTeamDelegateStatusData({
+        assignmentId: assignment.id,
+        userId: assignment.userId,
+        status: "active"
+      });
+    }
+    const existingDelegateAccess = (delegateUser.accesses || []).find((access) => (
+      access.role === "team_delegate" &&
+      access.teamId === assignment.teamId &&
+      access.status !== "deleted"
+    ));
+    if (existingDelegateAccess) {
+      await updateUserAccessData(existingDelegateAccess.id, {
+        leagueId: assignment.leagueId,
+        teamId: assignment.teamId,
+        role: "team_delegate",
+        permissions: existingDelegateAccess.permissions || [],
+        status: "active"
+      });
+    } else {
+      await createUserAccessData({
+        id: `access-delegate-${crypto.randomUUID()}`,
+        userId: assignment.userId,
+        leagueId: assignment.leagueId,
+        teamId: assignment.teamId,
+        role: "team_delegate",
+        status: "active"
+      });
+    }
+    const invitation = {
+      activationUrl: `${getAppBaseUrl(request)}/acceso`,
+      expiresAt: "",
+      whatsappMessage: [
+        `Hola ${assignment.userName}, tu acceso de delegado del equipo ${assignment.teamName} esta disponible en LIGATEC.`,
+        "Entra con tu correo y contrasena actual desde:",
+        `${getAppBaseUrl(request)}/acceso`,
+        "Despues selecciona el rol Delegado."
+      ].join("\n")
+    };
+    await logAudit({
+      user: request.user,
+      leagueId: assignment.leagueId,
+      action: "team_delegate_invitation",
+      entityType: "team_user_assignment",
+      entityId: assignment.id,
+      detail: `Genero mensaje de acceso para delegado existente ${assignment.userEmail}`
+    });
+    return response.json({
+      delegates: await listTeamDelegatesData(assignment.leagueId),
+      invitation
+    });
+  }
+
   if (assignment.status !== "pending_activation") {
     await updateTeamDelegateStatusData({
       assignmentId: assignment.id,
@@ -1466,6 +1602,8 @@ app.delete("/api/team-delegates/:assignmentId", requireAuth, async (request, res
 
   const mode = String(request.query.mode || "disable_user");
   const currentAssignments = await countTeamDelegateAssignmentsData(assignment.userId);
+  const delegateUser = await getUserById(assignment.userId);
+  const canAffectWholeUser = !hasAnyNonDelegateAccess(delegateUser);
   if (mode === "delete_user" && currentAssignments > 1) {
     return response.status(400).json({
       error: "Este usuario tiene otros equipos asignados. Quita primero los demas accesos antes de eliminarlo definitivamente."
@@ -1473,14 +1611,28 @@ app.delete("/api/team-delegates/:assignmentId", requireAuth, async (request, res
   }
 
   await deleteTeamDelegateAssignmentData(assignment.id);
+  const delegateAccess = (delegateUser?.accesses || []).find((access) => (
+    access.role === "team_delegate" &&
+    access.teamId === assignment.teamId &&
+    access.status !== "deleted"
+  ));
+  if (delegateAccess) {
+    await updateUserAccessData(delegateAccess.id, {
+      leagueId: assignment.leagueId,
+      teamId: assignment.teamId,
+      role: "team_delegate",
+      permissions: delegateAccess.permissions || [],
+      status: "deleted"
+    });
+  }
   const remainingAssignments = await countTeamDelegateAssignmentsData(assignment.userId);
   let userDisabled = false;
   let userDeleted = false;
 
-  if (mode === "delete_user" && remainingAssignments === 0) {
+  if (mode === "delete_user" && remainingAssignments === 0 && canAffectWholeUser) {
     await deleteUserData(assignment.userId);
     userDeleted = true;
-  } else if (mode === "disable_user" && remainingAssignments === 0) {
+  } else if (mode === "disable_user" && remainingAssignments === 0 && canAffectWholeUser) {
     await disableUserData(assignment.userId);
     userDisabled = true;
   }
@@ -1534,22 +1686,64 @@ app.post("/api/referees", requireAuth, async (request, response) => {
     return response.status(403).json({ error: "No puedes crear arbitros para este municipio" });
   }
 
-  const userId = `user-referee-${crypto.randomUUID()}`;
+  const existingUser = (await listUsersData()).find((item) => String(item.email || "").toLowerCase() === email);
+  if (existingUser?.status === "deleted") {
+    return response.status(409).json({ error: "Ese correo pertenece a un usuario eliminado. Usa otro correo o recupera la cuenta manualmente." });
+  }
+  if (existingUser && await getRefereeProfileData(existingUser.id)) {
+    return response.status(409).json({ error: "Ese correo ya esta registrado como arbitro." });
+  }
+
+  const userId = existingUser?.id || `user-referee-${crypto.randomUUID()}`;
   let user;
   let invitation;
   try {
-    user = await createUserData({
-      id: userId,
-      leagueId: null,
-      name,
-      email,
-      phone,
-      role: "referee",
-      status,
-      passwordHash: null
-    });
+    if (!existingUser) {
+      user = await createUserData({
+        id: userId,
+        leagueId: null,
+        name,
+        email,
+        phone,
+        role: "referee",
+        status,
+        passwordHash: null
+      });
+    } else {
+      user = existingUser;
+    }
+    const nextRefereeStatus = existingUser?.status === "active" ? "active" : status;
+    const existingRefereeAccess = (user?.accesses || []).find((access) => access.role === "referee" && access.status !== "deleted");
+    if (existingRefereeAccess) {
+      await updateUserAccessData(existingRefereeAccess.id, {
+        leagueId: existingRefereeAccess.leagueId || null,
+        teamId: existingRefereeAccess.teamId || null,
+        role: "referee",
+        permissions: existingRefereeAccess.permissions || [],
+        status: nextRefereeStatus
+      });
+    } else {
+      await createUserAccessData({
+        id: `access-referee-${crypto.randomUUID()}`,
+        userId,
+        role: "referee",
+        status: nextRefereeStatus
+      });
+    }
     await createRefereeProfileData({ userId, municipality });
-    invitation = await createRefereeInvitation({ request, userId, refereeName: name, municipality });
+    invitation = existingUser?.status === "active"
+      ? {
+          activationUrl: `${getAppBaseUrl(request)}/acceso`,
+          expiresAt: "",
+          whatsappMessage: [
+            `Hola ${name}, se agrego el acceso de arbitro para ${municipality} a tu cuenta existente de LIGATEC.`,
+            "Entra desde Acceso LIGATEC con tu correo y contrasena actual:",
+            `${getAppBaseUrl(request)}/acceso`,
+            "Despues selecciona el rol Arbitro para ver tus partidos asignados."
+          ].join("\n")
+        }
+      : await createRefereeInvitation({ request, userId, refereeName: name, municipality });
+    user = await getUserById(userId);
   } catch (error) {
     if (String(error?.message || "").toLowerCase().includes("unique")) {
       return response.status(409).json({ error: "Ya existe un usuario con ese correo." });
@@ -1609,6 +1803,31 @@ app.post("/api/referees/:userId/invitation", requireAuth, async (request, respon
     return response.status(403).json({ error: "No puedes invitar arbitros de otro municipio" });
   }
   if (referee.status === "deleted") return response.status(400).json({ error: "No se puede invitar a un usuario eliminado." });
+  const refereeUser = await getUserById(referee.userId);
+  if (refereeUser?.status === "active") {
+    if (referee.status !== "active") await updateRefereeStatusData(referee.userId, "active");
+    const invitation = {
+      activationUrl: `${getAppBaseUrl(request)}/acceso`,
+      expiresAt: "",
+      whatsappMessage: [
+        `Hola ${referee.name}, tu acceso de arbitro para ${referee.municipality} esta disponible en LIGATEC.`,
+        "Entra con tu correo y contrasena actual desde:",
+        `${getAppBaseUrl(request)}/acceso`,
+        "Despues selecciona el rol Arbitro."
+      ].join("\n")
+    };
+    await logAudit({
+      user: request.user,
+      action: "referee_invitation",
+      entityType: "user",
+      entityId: referee.userId,
+      detail: `Genero mensaje de acceso para arbitro existente ${referee.email}`
+    });
+    return response.json({
+      referees: await listRefereesData(request.user.role === "super_admin" ? "" : referee.municipality),
+      invitation
+    });
+  }
   if (referee.status !== "pending_activation") await updateRefereeStatusData(referee.userId, "pending_activation");
   const invitation = await createRefereeInvitation({
     request,
@@ -1639,7 +1858,13 @@ app.delete("/api/referees/:userId", requireAuth, async (request, response) => {
     return response.status(403).json({ error: "No puedes eliminar arbitros de otro municipio" });
   }
 
-  await deleteUserData(referee.userId);
+  const refereeUser = await getUserById(referee.userId);
+  const userDeleted = !hasAnyNonRefereeAccess(refereeUser);
+  if (userDeleted) {
+    await deleteUserData(referee.userId);
+  } else {
+    await removeRefereeRoleData(referee.userId);
+  }
   clearPublicCache();
 
   await logAudit({
@@ -1647,12 +1872,14 @@ app.delete("/api/referees/:userId", requireAuth, async (request, response) => {
     action: "referee_delete",
     entityType: "user",
     entityId: referee.userId,
-    detail: `Elimino definitivamente arbitro ${referee.email} de ${referee.municipality}`
+    detail: userDeleted
+      ? `Elimino definitivamente arbitro ${referee.email} de ${referee.municipality}`
+      : `Retiro rol de arbitro ${referee.email} de ${referee.municipality}`
   });
 
   response.json({
     referees: await listRefereesData(request.user.role === "super_admin" ? "" : referee.municipality),
-    userDeleted: true
+    userDeleted
   });
 });
 
@@ -1819,7 +2046,7 @@ app.put("/api/team-roster-permissions/:teamId", requireAuth, async (request, res
 });
 
 app.get("/api/team-portal/me", requireAuth, async (request, response) => {
-  if (request.user.role !== "team_delegate") {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
     return response.status(403).json({ error: "Permiso de delegado requerido" });
   }
   const payload = await buildTeamPortalPayload(request.user.id);
@@ -1828,7 +2055,7 @@ app.get("/api/team-portal/me", requireAuth, async (request, response) => {
 });
 
 app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
-  if (request.user.role !== "referee") {
+  if (!hasActiveRoleAccess(request.user, "referee")) {
     return response.status(403).json({ error: "Permiso de arbitro requerido" });
   }
   const referee = await getRefereeProfileData(request.user.id);
@@ -1842,7 +2069,7 @@ app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
 });
 
 app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (request, response) => {
-  if (request.user.role !== "referee") {
+  if (!hasActiveRoleAccess(request.user, "referee")) {
     return response.status(403).json({ error: "Permiso de arbitro requerido" });
   }
   const referee = await getRefereeProfileData(request.user.id);
@@ -1921,7 +2148,7 @@ app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (reque
 });
 
 app.post("/api/team-portal/players", requireAuth, async (request, response) => {
-  if (request.user.role !== "team_delegate") {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
     return response.status(403).json({ error: "Permiso de delegado requerido" });
   }
   const context = await getTeamDelegateContextData(request.user.id);
@@ -1966,7 +2193,7 @@ app.post("/api/team-portal/players", requireAuth, async (request, response) => {
 });
 
 app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, response) => {
-  if (request.user.role !== "team_delegate") {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
     return response.status(403).json({ error: "Permiso de delegado requerido" });
   }
   const context = await getTeamDelegateContextData(request.user.id);
@@ -2013,7 +2240,7 @@ app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, res
 });
 
 app.patch("/api/team-portal/team-logo", requireAuth, async (request, response) => {
-  if (request.user.role !== "team_delegate") {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
     return response.status(403).json({ error: "Permiso de delegado requerido" });
   }
   const context = await getTeamDelegateContextData(request.user.id);
@@ -2038,7 +2265,7 @@ app.patch("/api/team-portal/team-logo", requireAuth, async (request, response) =
 });
 
 app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request, response) => {
-  if (request.user.role !== "team_delegate") {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
     return response.status(403).json({ error: "Permiso de delegado requerido" });
   }
   const context = await getTeamDelegateContextData(request.user.id);
@@ -2187,7 +2414,24 @@ app.post("/api/users", requireSuperAdmin, async (request, response) => {
       status: user.status === "active" ? "active" : "pending_activation"
     });
     user = await getUserById(id);
-    if (user.status !== "active") {
+    if (user.status === "active" && existingUser) {
+      const roleLabel = role === "super_admin"
+        ? "super administrador"
+        : role === "league_admin"
+          ? "administrador de liga"
+          : "administrador con permisos limitados";
+      const league = (await getStoreData()).leagues.find((item) => item.id === leagueId);
+      invitation = {
+        activationUrl: `${getAppBaseUrl(request)}/acceso`,
+        expiresAt: "",
+        whatsappMessage: [
+          `Hola ${request.body.name}, se agrego el acceso de ${roleLabel} a tu cuenta existente de LIGATEC${league?.name ? ` para ${league.name}` : ""}.`,
+          "Entra desde Acceso LIGATEC con tu correo y contrasena actual:",
+          `${getAppBaseUrl(request)}/acceso`,
+          "Despues selecciona el rol administrativo correspondiente."
+        ].join("\n")
+      };
+    } else if (user.status !== "active") {
       const league = (await getStoreData()).leagues.find((item) => item.id === leagueId);
       invitation = await createAdminInvitation({
         request,
@@ -2309,6 +2553,32 @@ app.post("/api/users/:userId/invitation", requireSuperAdmin, async (request, res
 
   const access = (user.accesses || []).find((item) => ["super_admin", "league_admin", "admin_limited"].includes(item.role)) || null;
   const league = access?.leagueId ? (await getStoreData()).leagues.find((item) => item.id === access.leagueId) : null;
+  if (user.status === "active") {
+    const roleLabel = (access?.role || user.role) === "super_admin"
+      ? "super administrador"
+      : (access?.role || user.role) === "league_admin"
+        ? "administrador de liga"
+        : "administrador con permisos limitados";
+    const invitation = {
+      activationUrl: `${getAppBaseUrl(request)}/acceso`,
+      expiresAt: "",
+      whatsappMessage: [
+        `Hola ${user.name}, tu acceso de ${roleLabel} en LIGATEC${league?.name ? ` para ${league.name}` : ""} esta disponible.`,
+        "Entra con tu correo y contrasena actual desde:",
+        `${getAppBaseUrl(request)}/acceso`,
+        "Despues selecciona el rol administrativo correspondiente."
+      ].join("\n")
+    };
+    await logAudit({
+      user: request.user,
+      leagueId: access?.leagueId || user.league_id,
+      action: "admin_invitation",
+      entityType: "user",
+      entityId: user.id,
+      detail: `Genero mensaje de acceso admin existente ${user.email}`
+    });
+    return response.json({ user: toPublicUser(user), invitation });
+  }
   const invitation = await createAdminInvitation({
     request,
     userId: user.id,
@@ -2339,8 +2609,39 @@ app.delete("/api/users/:userId", requireSuperAdmin, async (request, response) =>
   if (user.role === "super_admin" && await countActiveSuperAdminsExcept(user.id) < 1) {
     return response.status(400).json({ error: "Debe quedar al menos un super admin activo" });
   }
-  if (isPortalOnlyRole(user.role)) {
+  const adminAccess = (user.accesses || []).find((access) => ["super_admin", "league_admin", "admin_limited"].includes(access.role) && access.status !== "deleted") || null;
+  if (isPortalOnlyRole(user.role) && !adminAccess) {
     return response.status(400).json({ error: "Los delegados y arbitros se eliminan desde su modulo correspondiente." });
+  }
+
+  const fallbackAccess = getFallbackPrimaryRoleFromAccesses(user, new Set(adminAccess ? [adminAccess.id] : []));
+  if (fallbackAccess) {
+    if (adminAccess) {
+      await updateUserAccessData(adminAccess.id, {
+        leagueId: adminAccess.leagueId || null,
+        role: adminAccess.role,
+        permissions: adminAccess.permissions || [],
+        status: "deleted"
+      });
+    }
+    await updateUserData(user.id, {
+      leagueId: fallbackAccess.leagueId || null,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || "",
+      role: fallbackAccess.role,
+      status: fallbackAccess.status === "active" ? "active" : fallbackAccess.status
+    });
+    const updatedUser = await getUserById(user.id);
+    await logAudit({
+      user: request.user,
+      leagueId: adminAccess?.leagueId || user.league_id,
+      action: "user_delete",
+      entityType: "user",
+      entityId: user.id,
+      detail: `Retiro acceso administrativo de ${user.email} y conservo rol ${fallbackAccess.role}`
+    });
+    return response.json({ deleted: false, user: toPublicUser(updatedUser) });
   }
 
   if (request.query.mode === "permanent") {
