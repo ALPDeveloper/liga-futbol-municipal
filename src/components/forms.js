@@ -4,7 +4,14 @@ export function getFormPayload(form) {
 
   for (const [name, value] of formData.entries()) {
     const field = form.elements[name];
-    payload[name] = normalizeFormValue(value, field);
+    const normalizedValue = normalizeFormValue(value, field);
+    if (payload[name] === undefined) {
+      payload[name] = normalizedValue;
+    } else if (Array.isArray(payload[name])) {
+      payload[name].push(normalizedValue);
+    } else {
+      payload[name] = [payload[name], normalizedValue];
+    }
   }
 
   return payload;

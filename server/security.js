@@ -1,7 +1,21 @@
 const PASSWORD_MIN_LENGTH = 10;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const USER_ROLES = new Set(["super_admin", "league_admin", "team_delegate", "referee"]);
+const USER_ROLES = new Set(["super_admin", "league_admin", "admin_limited", "team_delegate", "referee"]);
 const USER_STATUSES = new Set(["pending_activation", "active", "disabled", "suspended", "deleted"]);
+const ACCESS_ROLES = new Set(["super_admin", "league_admin", "admin_limited", "team_delegate", "referee"]);
+const ADMIN_PERMISSIONS = new Set([
+  "calendar",
+  "matches",
+  "referees",
+  "match_sheets",
+  "teams",
+  "players",
+  "discipline",
+  "delegates",
+  "settings",
+  "users",
+  "read_only"
+]);
 
 export function applySecurityHeaders(request, response, next) {
   response.setHeader(
@@ -98,6 +112,20 @@ export function validateUserStatus(status) {
   return USER_STATUSES.has(String(status || ""));
 }
 
+export function validateAccessRole(role) {
+  return ACCESS_ROLES.has(String(role || ""));
+}
+
+export function normalizeAdminPermissions(value) {
+  const source = Array.isArray(value) ? value : value ? [value] : [];
+  return [...new Set(source.map((item) => String(item || "").trim()).filter((item) => ADMIN_PERMISSIONS.has(item)))];
+}
+
+export function getDefaultPermissionsForRole(role) {
+  if (role === "super_admin" || role === "league_admin") return ["*"];
+  return [];
+}
+
 export function validateStorePayload(payload) {
   return payload && typeof payload === "object" && Array.isArray(payload.leagues);
 }
@@ -140,6 +168,19 @@ export function sanitizePublicStore(store) {
 export function scopeStoreForUser(store, user) {
   if (!user) return sanitizePublicStore(store);
   if (user.role === "super_admin") return store;
+  const adminAccesses = (user.accesses || []).filter((access) => ["super_admin", "league_admin", "admin_limited"].includes(access.role));
+  if (adminAccesses.some((access) => access.role === "super_admin")) return store;
+  const leagueAccessIds = adminAccesses
+    .map((access) => access.leagueId)
+    .filter(Boolean);
+  if (leagueAccessIds.length) {
+    const leagues = (store.leagues || []).filter((league) => leagueAccessIds.includes(league.id));
+    return {
+      ...store,
+      currentLeagueId: leagueAccessIds[0],
+      leagues: sanitizePublicStore({ ...store, leagues }).leagues
+    };
+  }
   if (user.role === "referee") return sanitizePublicStore(store);
   if (user.role !== "league_admin" || !user.leagueId) return sanitizePublicStore(store);
 

@@ -17,6 +17,7 @@ const LazyTeamPortal = React.lazy(() => import("./components/TeamPortal.jsx").th
 const LazyDelegateActivationView = React.lazy(() => import("./components/DelegateActivationView.jsx").then((module) => ({ default: module.DelegateActivationView })));
 const LazyRefereePortal = React.lazy(() => import("./components/RefereePortal.jsx").then((module) => ({ default: module.RefereePortal })));
 const LazyRefereeActivationView = React.lazy(() => import("./components/RefereeActivationView.jsx").then((module) => ({ default: module.RefereeActivationView })));
+const LazyAdminActivationView = React.lazy(() => import("./components/AdminActivationView.jsx").then((module) => ({ default: module.AdminActivationView })));
 
 function registerPwaServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -53,6 +54,7 @@ function isAccessSelectionPath(path) {
 function getRoleLabel(role) {
   if (role === "super_admin") return "Super administrador";
   if (role === "league_admin") return "Administrador de liga";
+  if (role === "admin_limited") return "Admin con permisos";
   if (role === "team_delegate") return "Delegado de equipo";
   if (role === "referee") return "Arbitro";
   return "Usuario LIGATEC";
@@ -61,7 +63,7 @@ function getRoleLabel(role) {
 function getPanelPathForRole(role) {
   if (role === "team_delegate") return "/panel/delegado";
   if (role === "referee") return "/panel/arbitro";
-  if (role === "super_admin" || role === "league_admin") return "/panel/admin";
+  if (["super_admin", "league_admin", "admin_limited"].includes(role)) return "/panel/admin";
   return "/seleccionar-acceso";
 }
 
@@ -72,7 +74,9 @@ function findLeague(store, leagueId) {
 
 function buildAccessOptions(user, store) {
   if (!user || ["disabled", "suspended", "deleted"].includes(user.status)) return [];
-  const rawAccesses = Array.isArray(user.accesses) ? user.accesses : [];
+  const rawAccesses = Array.isArray(user.accesses)
+    ? user.accesses.filter((access) => access.status === "active")
+    : [];
   if (!rawAccesses.length && user.role === "super_admin" && store.leagues.length > 1) {
     return store.leagues.map((league) => ({
       id: `super_admin-${league.id}`,
@@ -85,16 +89,25 @@ function buildAccessOptions(user, store) {
       path: "/panel/admin"
     }));
   }
+  const primaryAccess = {
+    role: user.role,
+    leagueId: user.leagueId || store.currentLeagueId || "",
+    teamId: user.teamId || "",
+    teamName: user.teamName || ""
+  };
   const sourceAccesses = rawAccesses.length
     ? rawAccesses
-    : [{
-        role: user.role,
-        leagueId: user.leagueId || store.currentLeagueId || "",
-        teamId: user.teamId || "",
-        teamName: user.teamName || ""
-      }];
+    : [primaryAccess];
+  const hasPrimaryAccess = sourceAccesses.some((access) => (
+    access.role === primaryAccess.role &&
+    (access.leagueId || "") === (primaryAccess.leagueId || "") &&
+    (access.teamId || "") === (primaryAccess.teamId || "")
+  ));
+  const accessList = rawAccesses.length && !hasPrimaryAccess
+    ? [...sourceAccesses, primaryAccess]
+    : sourceAccesses;
 
-  return sourceAccesses
+  return accessList
     .map((access, index) => {
       const role = access.role || user.role;
       const league = findLeague(store, access.leagueId || user.leagueId || "");
@@ -108,10 +121,11 @@ function buildAccessOptions(user, store) {
         leagueName,
         teamId: access.teamId || user.teamId || "",
         teamName,
+        permissions: Array.isArray(access.permissions) ? access.permissions : [],
         path: getPanelPathForRole(role)
       };
     })
-    .filter((option) => option.path !== "/seleccionar-acceso" || rawAccesses.length);
+    .filter((option) => option.path !== "/seleccionar-acceso" || accessList.length);
 }
 
 function loadSelectedAccess() {
@@ -144,7 +158,7 @@ const initialIsPrivateRoute = isAdminPath(window.location.pathname) ||
   isRefereePath(window.location.pathname) ||
   isAccessPath(window.location.pathname) ||
   isAccessSelectionPath(window.location.pathname);
-const cachedStore = initialIsPrivateRoute ? loadStore() : null;
+const cachedStore = loadStore();
 const emptyStore = normalizeStore({ currentLeagueId: "", leagues: [] });
 const initialStore = cachedStore || emptyStore;
 const initialAuth = loadAuth();
@@ -168,6 +182,11 @@ function getDelegateActivationTokenFromPath(path) {
 function getRefereeActivationTokenFromPath(path) {
   const [, section, token] = path.split("/");
   return section === "activar-arbitro" ? decodeURIComponent(token || "") : "";
+}
+
+function getAdminActivationTokenFromPath(path) {
+  const [, section, token] = path.split("/");
+  return section === "activar-admin" ? decodeURIComponent(token || "") : "";
 }
 
 function getPublicLeaguePath(leagueId) {
@@ -330,6 +349,7 @@ function App() {
   const legalLeagueId = !isPrivateRoute ? getLegalLeagueIdFromPath(routePath) : "";
   const delegateActivationToken = !isPrivateRoute ? getDelegateActivationTokenFromPath(routePath) : "";
   const refereeActivationToken = !isPrivateRoute ? getRefereeActivationTokenFromPath(routePath) : "";
+  const adminActivationToken = !isPrivateRoute ? getAdminActivationTokenFromPath(routePath) : "";
   const routeLeagueId = publicLeagueId || legalLeagueId;
   const league = useMemo(() => {
     if (!store.leagues.length) return null;
@@ -337,18 +357,21 @@ function App() {
     return getCurrentLeague(store);
   }, [routeLeagueId, store]);
   const currentUser = auth.user;
-  const canUseSuperAdmin = currentUser?.role === "super_admin";
-  const canUseLeagueAdmin = currentUser?.role === "league_admin" && currentUser.leagueId === league?.id && league?.status === "active";
+  const activeAccessRole = selectedAccess?.role || currentUser?.role;
+  const activeAccessLeagueId = selectedAccess?.leagueId || currentUser?.leagueId || "";
+  const canUseSuperAdmin = activeAccessRole === "super_admin";
+  const canUseLeagueAdmin = ["league_admin", "admin_limited"].includes(activeAccessRole) && (!activeAccessLeagueId || activeAccessLeagueId === league?.id) && league?.status === "active";
   const canUseAdmin = canUseSuperAdmin || canUseLeagueAdmin;
-  const shouldRedirectAdminToTeamPortal = isAdminRoute && currentUser?.role === "team_delegate";
-  const shouldRedirectAdminToRefereePortal = isAdminRoute && currentUser?.role === "referee";
-  const shouldRedirectTeamPortalToOwnPanel = isTeamRoute && currentUser && currentUser.role !== "team_delegate";
-  const shouldRedirectRefereePortalToOwnPanel = isRefereeRoute && currentUser && currentUser.role !== "referee";
+  const shouldRedirectAdminToTeamPortal = isAdminRoute && activeAccessRole === "team_delegate";
+  const shouldRedirectAdminToRefereePortal = isAdminRoute && activeAccessRole === "referee";
+  const shouldRedirectTeamPortalToOwnPanel = isTeamRoute && currentUser && activeAccessRole !== "team_delegate";
+  const shouldRedirectRefereePortalToOwnPanel = isRefereeRoute && currentUser && activeAccessRole !== "referee";
   const publicLeaguePath = league?.id ? getPublicLeaguePath(league.id) : "/";
   const legalLeaguePath = league?.id ? getLegalLeaguePath(league.id) : "/legal";
   const isLegalRoute = routePath === "/legal" || routePath.startsWith("/legal/");
   const isDelegateActivationRoute = routePath.startsWith("/activar-delegado/");
   const isRefereeActivationRoute = routePath.startsWith("/activar-arbitro/");
+  const isAdminActivationRoute = routePath.startsWith("/activar-admin/");
 
   function navigateTo(path) {
     window.history.pushState({}, "", path);
@@ -417,9 +440,9 @@ function App() {
   useEffect(() => {
     if (shouldRedirectAdminToTeamPortal) navigateTo("/panel/delegado");
     if (shouldRedirectAdminToRefereePortal) navigateTo("/panel/arbitro");
-    if (shouldRedirectTeamPortalToOwnPanel) navigateTo(getPanelPathForRole(currentUser.role));
-    if (shouldRedirectRefereePortalToOwnPanel) navigateTo(getPanelPathForRole(currentUser.role));
-  }, [shouldRedirectAdminToTeamPortal, shouldRedirectAdminToRefereePortal, shouldRedirectTeamPortalToOwnPanel, shouldRedirectRefereePortalToOwnPanel, currentUser?.role]);
+    if (shouldRedirectTeamPortalToOwnPanel) navigateTo(getPanelPathForRole(activeAccessRole));
+    if (shouldRedirectRefereePortalToOwnPanel) navigateTo(getPanelPathForRole(activeAccessRole));
+  }, [shouldRedirectAdminToTeamPortal, shouldRedirectAdminToRefereePortal, shouldRedirectTeamPortalToOwnPanel, shouldRedirectRefereePortalToOwnPanel, activeAccessRole]);
 
   async function flushPersistQueue() {
     if (persistRunningRef.current || !auth.token) return;
@@ -536,6 +559,19 @@ function App() {
     selectAccess(accessOptions[0] || { role: "referee", path: "/panel/arbitro" }, normalizedStore);
   }
 
+  async function completeAdminActivation(nextAuth) {
+    const apiStore = await fetchStoreFromApi(nextAuth.token);
+    const normalizedStore = normalizeStore(apiStore);
+    setAuth(nextAuth);
+    saveAuth(nextAuth);
+    setStore(normalizedStore);
+    saveStore(normalizedStore);
+    setApiStatus("connected");
+    const accessOptions = buildAccessOptions(nextAuth.user, normalizedStore);
+    if (accessOptions.length === 1) selectAccess(accessOptions[0], normalizedStore);
+    else navigateTo("/seleccionar-acceso");
+  }
+
   function logout() {
     setAuth({ token: "", user: null });
     setSelectedAccess(null);
@@ -553,7 +589,7 @@ function App() {
     "--blue": identity.secondaryColor
   };
 
-  if (!initialApiLoaded && !isPrivateRoute && !isDelegateActivationRoute && !isRefereeActivationRoute) {
+  if (!initialApiLoaded && !league && !isPrivateRoute && !isDelegateActivationRoute && !isRefereeActivationRoute && !isAdminActivationRoute) {
     return (
       <main className="startup-screen">
         <div className="startup-card">
@@ -565,7 +601,7 @@ function App() {
     );
   }
 
-  if (!league && !isPrivateRoute && !isLegalRoute && !isDelegateActivationRoute && !isRefereeActivationRoute) {
+  if (!league && !isPrivateRoute && !isLegalRoute && !isDelegateActivationRoute && !isRefereeActivationRoute && !isAdminActivationRoute) {
     return (
       <main className="startup-screen">
         <div className="startup-card">
@@ -684,7 +720,7 @@ function App() {
           publicLeaguePath={publicLeaguePath}
           store={store}
         />
-      ) : isTeamRoute && currentUser?.role !== "team_delegate" ? (
+      ) : isTeamRoute && activeAccessRole !== "team_delegate" ? (
         <AccessPage
           currentUser={currentUser}
           onLogin={login}
@@ -694,7 +730,7 @@ function App() {
           publicLeaguePath={publicLeaguePath}
           store={store}
         />
-      ) : isRefereeRoute && currentUser?.role !== "referee" ? (
+      ) : isRefereeRoute && activeAccessRole !== "referee" ? (
         <AccessPage
           currentUser={currentUser}
           onLogin={login}
@@ -711,6 +747,10 @@ function App() {
       ) : isRefereeActivationRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando activacion" />}>
           <LazyRefereeActivationView token={refereeActivationToken} onActivated={completeRefereeActivation} onNavigate={navigateTo} />
+        </Suspense>
+      ) : isAdminActivationRoute ? (
+        <Suspense fallback={<RouteFallback label="Cargando activacion" />}>
+          <LazyAdminActivationView token={adminActivationToken} onActivated={completeAdminActivation} onNavigate={navigateTo} />
         </Suspense>
       ) : isLegalRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando aviso legal" />}>
@@ -737,6 +777,7 @@ function App() {
             canUseSuperAdmin={canUseSuperAdmin}
             commit={commit}
             currentUser={currentUser}
+            selectedAccess={selectedAccess}
             heroImage={heroImage}
             league={league}
             setAdminPanel={setAdminPanel}

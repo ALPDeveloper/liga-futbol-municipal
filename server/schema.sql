@@ -226,6 +226,29 @@ CREATE TABLE IF NOT EXISTS users (
   last_failed_login_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS user_accesses (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  league_id TEXT REFERENCES leagues(id) ON DELETE CASCADE,
+  team_id TEXT REFERENCES teams(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  permissions_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_activation_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  access_id TEXT REFERENCES user_accesses(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS team_delegate_activation_tokens (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

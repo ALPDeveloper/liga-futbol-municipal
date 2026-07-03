@@ -38,6 +38,14 @@ export async function updateUser(token, userId, payload) {
   return parseResponse(response);
 }
 
+export async function resendUserInvitation(token, userId) {
+  const response = await fetch(`${API_BASE_URL}/users/${encodeURIComponent(userId)}/invitation`, {
+    method: "POST",
+    headers: authHeaders(token)
+  });
+  return parseResponse(response);
+}
+
 export async function disableUser(token, userId) {
   const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
     method: "DELETE",

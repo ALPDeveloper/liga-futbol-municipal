@@ -51,6 +51,7 @@ import {
 } from "../lib/actions.js";
 import { createUser } from "../lib/userApi.js";
 import { deleteLeagueFromApi } from "../lib/leagueApi.js";
+import { createMatchInApi, deleteMatchInApi, updateMatchInApi } from "../lib/matchApi.js";
 import { updateLeagueRulesInApi } from "../lib/rulesApi.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../lib/playerValidation.js";
 import { AdminView } from "./AdminView.jsx";
@@ -64,6 +65,7 @@ export function AdminRoute({
   currentUser,
   heroImage,
   league,
+  selectedAccess,
   setAdminPanel,
   setApiStatus,
   setUserListRefreshKey,
@@ -81,19 +83,20 @@ export function AdminRoute({
     setAdminPanel("league");
     commit(nextStore);
 
-    if (payload.adminEmail && payload.adminPassword && authToken) {
+    if (payload.adminEmail && authToken) {
       try {
-        await createUser(authToken, {
+        const result = await createUser(authToken, {
           name: payload.adminName || `Admin ${payload.name}`,
           email: payload.adminEmail,
-          password: payload.adminPassword,
           role: "league_admin",
-          leagueId: newLeagueId,
-          status: "active"
+          leagueId: newLeagueId
         });
         setApiStatus("connected");
+        if (result?.invitation?.whatsappMessage) {
+          window.alert(`Liga creada. Invitacion del administrador:\n\n${result.invitation.whatsappMessage}`);
+        }
       } catch (userError) {
-        window.alert(`La liga se creo, pero no se pudo crear el usuario admin: ${userError.message}`);
+        window.alert(`La liga se creo, pero no se pudo generar la invitacion del usuario admin: ${userError.message}`);
       }
     }
   }
@@ -160,11 +163,60 @@ export function AdminRoute({
     }
   }
 
+  async function createMatchFromPanel(payload) {
+    if (!authToken) {
+      commit(addMatch(store, league.id, payload));
+      return true;
+    }
+    try {
+      const apiStore = await createMatchInApi(authToken, league.id, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (matchError) {
+      window.alert(matchError.message || "No se pudo crear el partido.");
+      return false;
+    }
+  }
+
+  async function updateMatchFromPanel(matchId, payload) {
+    if (!authToken) {
+      commit(updateMatch(store, league.id, matchId, payload));
+      return true;
+    }
+    try {
+      const apiStore = await updateMatchInApi(authToken, league.id, matchId, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (matchError) {
+      window.alert(matchError.message || "No se pudo actualizar el partido.");
+      return false;
+    }
+  }
+
+  async function deleteMatchFromPanel(matchId) {
+    if (!authToken) {
+      commit(deleteMatch(store, league.id, matchId));
+      return true;
+    }
+    try {
+      const apiStore = await deleteMatchInApi(authToken, league.id, matchId);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (matchError) {
+      window.alert(matchError.message || "No se pudo eliminar el partido.");
+      return false;
+    }
+  }
+
   return (
     <AdminView
       adminPanel={adminPanel}
       canUseSuperAdmin={canUseSuperAdmin}
       currentUser={currentUser}
+      selectedAccess={selectedAccess}
       authToken={authToken}
       heroImage={heroImage}
       league={league}
@@ -177,9 +229,7 @@ export function AdminRoute({
       onAddDisciplineLink={(payload) => commit(addDisciplineLink(store, league.id, payload))}
       onAddDisciplineReset={(payload) => commit(addDisciplineReset(store, league.id, payload))}
       onAddLeague={createLeagueWithAdmin}
-      onAddMatch={(payload) => {
-        commit(addMatch(store, league.id, payload));
-      }}
+      onAddMatch={createMatchFromPanel}
       onAddPlayer={(payload) => {
         if (!guardPlayerName(payload)) return false;
         commit(addPlayer(store, league.id, payload));
@@ -197,7 +247,7 @@ export function AdminRoute({
       onDeleteDisciplineAdjustment={(adjustmentId) => commit(deleteDisciplineAdjustment(store, league.id, adjustmentId))}
       onDeleteDisciplineLink={(linkId) => commit(deleteDisciplineLink(store, league.id, linkId))}
       onDeleteDisciplineReset={(resetId) => commit(deleteDisciplineReset(store, league.id, resetId))}
-      onDeleteMatch={(matchId) => commit(deleteMatch(store, league.id, matchId))}
+      onDeleteMatch={deleteMatchFromPanel}
       onDeletePlayoffMatches={(payload) => commit(deletePlayoffMatches(store, league.id, payload))}
       onDeleteLeague={deleteLeagueWithCleanup}
       onDeletePlayer={(playerId) => commit(deletePlayer(store, league.id, playerId))}
@@ -220,9 +270,7 @@ export function AdminRoute({
       onUpdateAnnouncement={(announcementId, payload) => commit(updateAnnouncement(store, league.id, announcementId, payload))}
       onUpdateCompetition={(competitionId, payload) => commit(updateCompetition(store, league.id, competitionId, payload))}
       onUpdateLeagueMembership={(leagueId, payload) => commit(updateLeagueMembership(store, leagueId, payload))}
-      onUpdateMatch={(matchId, payload) => {
-        commit(updateMatch(store, league.id, matchId, payload));
-      }}
+      onUpdateMatch={updateMatchFromPanel}
       onUpdatePlayerInjury={(injuryId, payload) => commit(updatePlayerInjury(store, league.id, injuryId, payload))}
       onUpdateSponsor={(leagueId, sponsorId, payload) => commit(updateSponsor(store, leagueId, sponsorId, payload))}
       onUpdatePlayer={(playerId, payload) => {

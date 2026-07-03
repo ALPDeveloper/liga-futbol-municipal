@@ -28,6 +28,23 @@ function normalizeUserRow(user) {
   };
 }
 
+function normalizeUserAccessRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id ?? row.userId,
+    leagueId: row.league_id ?? row.leagueId ?? "",
+    leagueName: row.league_name ?? row.leagueName ?? "",
+    teamId: row.team_id ?? row.teamId ?? "",
+    teamName: row.team_name ?? row.teamName ?? "",
+    role: row.role,
+    permissions: parseJsonValue(row.permissions_json ?? row.permissionsJson, []),
+    status: row.status || "active",
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    updatedAt: normalizeDateTime(row.updated_at ?? row.updatedAt)
+  };
+}
+
 function toBoolean(value) {
   return value === true || value === 1 || value === "1" || value === "true";
 }
@@ -131,6 +148,183 @@ async function pgQuery(text, values = []) {
   return result.rows;
 }
 
+async function listUserAccessesForUserData(userId) {
+  if (!userId) return [];
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT ua.*, l.name AS league_name, t.name AS team_name
+      FROM user_accesses ua
+      LEFT JOIN leagues l ON l.id = ua.league_id
+      LEFT JOIN teams t ON t.id = ua.team_id
+      WHERE ua.user_id = $1
+      ORDER BY ua.role, l.name, t.name
+    `, [userId]);
+    return rows.map(normalizeUserAccessRow);
+  }
+  return db.prepare(`
+    SELECT ua.*, l.name AS league_name, t.name AS team_name
+    FROM user_accesses ua
+    LEFT JOIN leagues l ON l.id = ua.league_id
+    LEFT JOIN teams t ON t.id = ua.team_id
+    WHERE ua.user_id = ?
+    ORDER BY ua.role, l.name, t.name
+  `).all(userId).map(normalizeUserAccessRow);
+}
+
+async function attachUserAccesses(user) {
+  if (!user) return null;
+  return {
+    ...user,
+    accesses: await listUserAccessesForUserData(user.id)
+  };
+}
+
+async function attachUsersAccesses(users) {
+  return Promise.all((users || []).map((user) => attachUserAccesses(user)));
+}
+
+export async function listUserAccessesData(userId = "") {
+  if (userId) return listUserAccessesForUserData(userId);
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT ua.*, l.name AS league_name, t.name AS team_name
+      FROM user_accesses ua
+      LEFT JOIN leagues l ON l.id = ua.league_id
+      LEFT JOIN teams t ON t.id = ua.team_id
+      ORDER BY ua.role, l.name, t.name
+    `);
+    return rows.map(normalizeUserAccessRow);
+  }
+  return db.prepare(`
+    SELECT ua.*, l.name AS league_name, t.name AS team_name
+    FROM user_accesses ua
+    LEFT JOIN leagues l ON l.id = ua.league_id
+    LEFT JOIN teams t ON t.id = ua.team_id
+    ORDER BY ua.role, l.name, t.name
+  `).all().map(normalizeUserAccessRow);
+}
+
+export async function createUserAccessData({ id, userId, leagueId = null, teamId = null, role, permissions = [], status = "active" }) {
+  const now = new Date().toISOString();
+  const payload = JSON.stringify(permissions || []);
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO user_accesses (id, user_id, league_id, team_id, role, permissions_json, status, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $8)
+    `, [id, userId, leagueId || null, teamId || null, role, payload, status, now]);
+  } else {
+    db.prepare(`
+      INSERT INTO user_accesses (id, user_id, league_id, team_id, role, permissions_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, userId, leagueId || null, teamId || null, role, payload, status, now, now);
+  }
+  return listUserAccessesForUserData(userId);
+}
+
+export async function updateUserAccessData(accessId, { leagueId = null, teamId = null, role, permissions = [], status = "active" }) {
+  const now = new Date().toISOString();
+  const payload = JSON.stringify(permissions || []);
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE user_accesses
+      SET league_id = $1, team_id = $2, role = $3, permissions_json = $4::jsonb, status = $5, updated_at = $6
+      WHERE id = $7
+    `, [leagueId || null, teamId || null, role, payload, status, now, accessId]);
+  } else {
+    db.prepare(`
+      UPDATE user_accesses
+      SET league_id = ?, team_id = ?, role = ?, permissions_json = ?, status = ?, updated_at = ?
+      WHERE id = ?
+    `).run(leagueId || null, teamId || null, role, payload, status, now, accessId);
+  }
+}
+
+export async function revokeAdminActivationsData(userId) {
+  const revokedAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE admin_activation_tokens
+      SET revoked_at = $1
+      WHERE user_id = $2 AND used_at IS NULL AND revoked_at IS NULL
+    `, [revokedAt, userId]);
+    return;
+  }
+  db.prepare(`
+    UPDATE admin_activation_tokens
+    SET revoked_at = ?
+    WHERE user_id = ? AND used_at IS NULL AND revoked_at IS NULL
+  `).run(revokedAt, userId);
+}
+
+function normalizeAdminActivationRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id ?? row.userId,
+    accessId: row.access_id ?? row.accessId ?? "",
+    tokenHash: row.token_hash ?? row.tokenHash,
+    expiresAt: normalizeDateTime(row.expires_at ?? row.expiresAt),
+    usedAt: normalizeDateTime(row.used_at ?? row.usedAt),
+    revokedAt: normalizeDateTime(row.revoked_at ?? row.revokedAt),
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    userName: row.user_name ?? row.userName,
+    userEmail: row.user_email ?? row.userEmail,
+    userStatus: row.user_status ?? row.userStatus,
+    role: row.access_role ?? row.role,
+    leagueId: row.league_id ?? row.leagueId ?? "",
+    leagueName: row.league_name ?? row.leagueName ?? ""
+  };
+}
+
+export async function createAdminActivationData({ id, userId, accessId, tokenHash, expiresAt }) {
+  const createdAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO admin_activation_tokens (id, user_id, access_id, token_hash, expires_at, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [id, userId, accessId || null, tokenHash, expiresAt, createdAt]);
+  } else {
+    db.prepare(`
+      INSERT INTO admin_activation_tokens (id, user_id, access_id, token_hash, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, userId, accessId || null, tokenHash, expiresAt, createdAt);
+  }
+  return getAdminActivationByHashData(tokenHash);
+}
+
+export async function getAdminActivationByHashData(tokenHash) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT aat.*, u.name AS user_name, u.email AS user_email, u.status AS user_status,
+        ua.role AS access_role, ua.league_id, l.name AS league_name
+      FROM admin_activation_tokens aat
+      JOIN users u ON u.id = aat.user_id
+      LEFT JOIN user_accesses ua ON ua.id = aat.access_id
+      LEFT JOIN leagues l ON l.id = ua.league_id
+      WHERE aat.token_hash = $1
+    `, [tokenHash]);
+    return normalizeAdminActivationRow(rows[0]);
+  }
+  return normalizeAdminActivationRow(db.prepare(`
+    SELECT aat.*, u.name AS user_name, u.email AS user_email, u.status AS user_status,
+      ua.role AS access_role, ua.league_id, l.name AS league_name
+    FROM admin_activation_tokens aat
+    JOIN users u ON u.id = aat.user_id
+    LEFT JOIN user_accesses ua ON ua.id = aat.access_id
+    LEFT JOIN leagues l ON l.id = ua.league_id
+    WHERE aat.token_hash = ?
+  `).get(tokenHash));
+}
+
+export async function markAdminActivationUsedData(activationId) {
+  const usedAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery("UPDATE admin_activation_tokens SET used_at = $1 WHERE id = $2", [usedAt, activationId]);
+    return;
+  }
+  db.prepare("UPDATE admin_activation_tokens SET used_at = ? WHERE id = ?").run(usedAt, activationId);
+}
+
 export async function initializeData() {
   if (isPostgres()) {
     await initializePostgresDatabase();
@@ -150,39 +344,48 @@ export async function importStoreData(store) {
 }
 
 export async function getActiveUserByEmail(email) {
+  let user;
   if (isPostgres()) {
     const rows = await pgQuery("SELECT * FROM users WHERE lower(email) = $1 AND status = 'active'", [email]);
-    return normalizeUserRow(rows[0]);
+    user = normalizeUserRow(rows[0]);
+    return attachUserAccesses(user);
   }
-  return normalizeUserRow(db.prepare("SELECT * FROM users WHERE lower(email) = ? AND status = 'active'").get(email));
+  user = normalizeUserRow(db.prepare("SELECT * FROM users WHERE lower(email) = ? AND status = 'active'").get(email));
+  return attachUserAccesses(user);
 }
 
 export async function getUserById(userId, { activeOnly = false } = {}) {
+  let user;
   if (isPostgres()) {
     const rows = await pgQuery(
       `SELECT * FROM users WHERE id = $1${activeOnly ? " AND status = 'active'" : ""}`,
       [userId]
     );
-    return normalizeUserRow(rows[0]);
+    user = normalizeUserRow(rows[0]);
+    return attachUserAccesses(user);
   }
   const sql = `SELECT * FROM users WHERE id = ?${activeOnly ? " AND status = 'active'" : ""}`;
-  return normalizeUserRow(db.prepare(sql).get(userId));
+  user = normalizeUserRow(db.prepare(sql).get(userId));
+  return attachUserAccesses(user);
 }
 
 export async function listUsersData() {
+  let users;
   if (isPostgres()) {
     const rows = await pgQuery(`
       SELECT id, league_id, name, email, phone, role, status, failed_login_count, locked_until
       FROM users
       ORDER BY role, name
     `);
-    return rows.map(normalizeUserRow);
+    users = rows.map(normalizeUserRow);
+    return attachUsersAccesses(users);
   }
-  return db.prepare(`
+  users = db.prepare(`
     SELECT id, league_id, name, email, phone, role, status, failed_login_count, locked_until
     FROM users
     ORDER BY role, name
   `).all().map(normalizeUserRow);
+  return attachUsersAccesses(users);
 }
 
 export async function createUserData({ id, leagueId, name, email, phone = "", role, status, passwordHash }) {
@@ -989,6 +1192,25 @@ export async function activateRefereeUserData({ userId, passwordHash }) {
     SET password_hash = ?, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
     WHERE id = ? AND role = 'referee'
   `).run(passwordHash, userId);
+  return getUserById(userId);
+}
+
+export async function activateAdminUserData({ userId, passwordHash }) {
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE users
+      SET password_hash = $1, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
+      WHERE id = $2
+    `, [passwordHash, userId]);
+    await pgQuery("UPDATE user_accesses SET status = 'active', updated_at = $1 WHERE user_id = $2 AND status = 'pending_activation'", [new Date().toISOString(), userId]);
+    return getUserById(userId);
+  }
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, status = 'active', failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL
+    WHERE id = ?
+  `).run(passwordHash, userId);
+  db.prepare("UPDATE user_accesses SET status = 'active', updated_at = ? WHERE user_id = ? AND status = 'pending_activation'").run(new Date().toISOString(), userId);
   return getUserById(userId);
 }
 

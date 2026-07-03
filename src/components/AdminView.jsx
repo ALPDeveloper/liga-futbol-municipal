@@ -5,7 +5,7 @@ import { MAX_IMAGE_DATA_URL_LENGTH, calculatePlayerAppearanceEligibility, calcul
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
-import { createUser, deleteUser, disableUser, fetchUsers, updateUser } from "../lib/userApi.js";
+import { createUser, deleteUser, disableUser, fetchUsers, resendUserInvitation, updateUser } from "../lib/userApi.js";
 import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamDelegateInvitation, updateTeamDelegate, updateTeamRosterPermission } from "../lib/teamDelegateApi.js";
 import { createReferee, deleteReferee, fetchReferees, fetchRefereeMatchSheets, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
@@ -93,9 +93,11 @@ export function AdminView({
   onMergeDuplicatePlayer,
   onUpdateTeamAffiliationPlayerNumber,
   onUpdateVenue,
+  selectedAccess,
   store,
   userListRefreshKey = 0
 }) {
+  const activeRole = selectedAccess?.role || currentUser?.role;
   return (
     <main className="page">
       <section className="admin-shell">
@@ -104,7 +106,7 @@ export function AdminView({
           <h1>Operacion</h1>
           {currentUser && (
             <p className="admin-user-note">
-              {currentUser.role === "super_admin" ? "Control total de plataforma" : `Editando ${league.name}`}
+              {activeRole === "super_admin" ? "Control total de plataforma" : `Editando ${league.name}`}
             </p>
           )}
           <button className={adminPanel === "league" ? "active" : ""} onClick={() => onSetAdminPanel("league")}>Admin de liga</button>
@@ -120,6 +122,7 @@ export function AdminView({
               applyApiStore={applyApiStore}
               currentUser={currentUser}
               league={league}
+              selectedAccess={selectedAccess}
               onAddAnnouncement={onAddAnnouncement}
               onAddAppearanceAdjustment={onAddAppearanceAdjustment}
               onAddCompetition={onAddCompetition}
@@ -229,7 +232,8 @@ function LeagueAdmin({
   onUpdateTeam,
   onMergeDuplicatePlayer,
   onUpdateTeamAffiliationPlayerNumber,
-  onUpdateVenue
+  onUpdateVenue,
+  selectedAccess
 }) {
   const identity = league.identity || DEFAULT_IDENTITY;
   const currentCompetitionId = getDefaultCompetitionId(league);
@@ -237,23 +241,42 @@ function LeagueAdmin({
   const currentCompetitionLeague = scopeLeagueToCompetition(league, currentCompetitionId);
   const [activeSection, setActiveSection] = useState("capture");
   const [identityNotice, setIdentityNotice] = useState("");
+  const activeRole = selectedAccess?.role || currentUser?.role;
+  const accessPermissions = new Set(Array.isArray(selectedAccess?.permissions) ? selectedAccess.permissions : []);
+  const hasFullLeagueAccess = ["super_admin", "league_admin"].includes(activeRole);
+  const limitedSectionIds = new Set(["capture", "lists", "delegates", "referees", "rules"]);
+  const canUseSection = (requiredPermissions = []) => (
+    hasFullLeagueAccess ||
+    (activeRole === "admin_limited" &&
+      requiredPermissions.some((permission) => accessPermissions.has(permission)))
+  );
   const sections = [
-    { id: "capture", label: "Captura" },
-    { id: "tournaments", label: "Torneos" },
-    { id: "squads", label: "Plantillas" },
-    { id: "delegates", label: "Delegados" },
-    { id: "referees", label: "Arbitros" },
-    { id: "venues", label: "Canchas" },
-    { id: "announcements", label: "Avisos" },
-    { id: "lists", label: "Listados" },
-    { id: "sheet", label: "Acta" },
-    { id: "affiliations", label: "Afiliaciones" },
-    { id: "discipline", label: "Disciplina" },
-    { id: "sanctions", label: "Sanciones" },
-    { id: "injuries", label: "Lesiones" },
-    { id: "rules", label: "Reglas" },
-    { id: "identity", label: "Identidad" }
+    { id: "capture", label: "Captura", permissions: ["matches", "teams", "players"] },
+    { id: "tournaments", label: "Torneos", permissions: ["settings"] },
+    { id: "squads", label: "Plantillas", permissions: ["players", "teams", "read_only"] },
+    { id: "delegates", label: "Delegados", permissions: ["delegates"] },
+    { id: "referees", label: "Arbitros", permissions: ["referees", "match_sheets"] },
+    { id: "venues", label: "Canchas", permissions: ["settings", "calendar"] },
+    { id: "announcements", label: "Avisos", permissions: ["settings"] },
+    { id: "lists", label: "Listados", permissions: ["matches", "teams", "players", "read_only"] },
+    { id: "sheet", label: "Acta", permissions: ["match_sheets"] },
+    { id: "affiliations", label: "Afiliaciones", permissions: ["players", "teams"] },
+    { id: "discipline", label: "Disciplina", permissions: ["discipline"] },
+    { id: "sanctions", label: "Sanciones", permissions: ["discipline"] },
+    { id: "injuries", label: "Lesiones", permissions: ["players", "discipline"] },
+    { id: "rules", label: "Reglas", permissions: ["settings"] },
+    { id: "identity", label: "Identidad", permissions: ["settings"] }
   ];
+  const visibleSections = sections.filter((section) => (
+    canUseSection(section.permissions) &&
+    (activeRole !== "admin_limited" || limitedSectionIds.has(section.id))
+  ));
+
+  useEffect(() => {
+    if (visibleSections.length && !visibleSections.some((section) => section.id === activeSection)) {
+      setActiveSection(visibleSections[0].id);
+    }
+  }, [activeSection, visibleSections]);
 
   return (
     <>
@@ -271,14 +294,19 @@ function LeagueAdmin({
           </div>
         </div>
         <p className="helper-text">Categoria actual: {currentCompetition?.name || "TORNEO"} | {currentCompetition?.season || league.season}. Equipos y jugadores se administran separados por categoria.</p>
-        {currentUser?.role === "super_admin" && (
+        {activeRole === "admin_limited" && !visibleSections.length && (
+          <p className="auth-error">
+            Este acceso tiene permisos registrados, pero aun no tiene un modulo habilitado en esta version. Solicita al super admin ajustar los permisos.
+          </p>
+        )}
+        {activeRole === "super_admin" && (
           <div className="super-admin-warning">
             <strong>Modo super admin</strong>
             <span>Estas operando {league.name}. Verifica que esta sea la liga correcta antes de guardar cambios.</span>
           </div>
         )}
         <div className="admin-section-tabs" aria-label="Secciones de captura">
-          {sections.map((section) => (
+          {visibleSections.map((section) => (
             <button
               className={activeSection === section.id ? "active" : ""}
               key={section.id}
@@ -300,6 +328,7 @@ function LeagueAdmin({
           onAddMatch={onAddMatch}
           onAddPlayer={onAddPlayer}
           onAddTeam={onAddTeam}
+          allowedModes={activeRole === "admin_limited" ? (accessPermissions.has("matches") ? ["match"] : []) : null}
         />
       )}
 
@@ -357,6 +386,8 @@ function LeagueAdmin({
           onUpdateMatch={onUpdateMatch}
           onUpdatePlayer={onUpdatePlayer}
           onUpdateTeam={onUpdateTeam}
+          allowedLists={activeRole === "admin_limited" ? (accessPermissions.has("matches") ? ["matches"] : []) : null}
+          canEditMatchResults={activeRole !== "admin_limited" || accessPermissions.has("match_sheets")}
         />
       )}
 
@@ -2026,8 +2057,9 @@ function TournamentList({ title, competitions, league, onUpdateCompetition }) {
   );
 }
 
-function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, onGenerateSchedule, onGeneratePlayoffBracket }) {
-  const [captureMode, setCaptureMode] = useState("team");
+function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAddPlayer, onAddTeam, onGenerateSchedule, onGeneratePlayoffBracket }) {
+  const allowedModeSet = allowedModes ? new Set(allowedModes) : null;
+  const [captureMode, setCaptureMode] = useState(allowedModes?.[0] || "team");
   const [matchStage, setMatchStage] = useState("regular");
   const [selectedPlayoffPhase, setSelectedPlayoffPhase] = useState(getPlayoffPhaseValueByTeams(league.rules?.playoffQualifiers ?? 8));
   const [captureNotice, setCaptureNotice] = useState("");
@@ -2040,7 +2072,7 @@ function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, o
     { id: "match", label: "Partido" },
     { id: "schedule", label: "Calendario" },
     { id: "playoffs", label: "Liguilla" }
-  ];
+  ].filter((mode) => !allowedModeSet || allowedModeSet.has(mode.id));
   const defaultCompetitionId = getDefaultCompetitionId(league);
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(defaultCompetitionId);
   const activeCompetitionLeague = scopeLeagueToCompetition(league, selectedCompetitionId);
@@ -2075,11 +2107,17 @@ function CapturePanel({ authToken, league, onAddMatch, onAddPlayer, onAddTeam, o
     }
   }, [activeCompetitionLeague.teams, selectedPlayerTeamId]);
 
-  function submitCaptureAction(event, action, confirmMessage, successMessage, options = {}) {
+  useEffect(() => {
+    if (modes.length && !modes.some((mode) => mode.id === captureMode)) {
+      setCaptureMode(modes[0].id);
+    }
+  }, [captureMode, modes]);
+
+  async function submitCaptureAction(event, action, confirmMessage, successMessage, options = {}) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (confirmMessage && !window.confirm(confirmMessage(payload))) return;
-    const result = action(payload);
+    const result = await action(payload);
     if (result === false) return;
     setCaptureNotice(successMessage(payload));
     if (options.reset !== false) event.currentTarget.reset();
@@ -2555,7 +2593,9 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
 }
 
 function ManagementBoard({
+  allowedLists = null,
   authToken,
+  canEditMatchResults = true,
   league,
   onDeleteMatch,
   onDeletePlayoffMatches,
@@ -2565,7 +2605,8 @@ function ManagementBoard({
   onUpdatePlayer,
   onUpdateTeam
 }) {
-  const [activeList, setActiveList] = useState("teams");
+  const allowedListSet = allowedLists ? new Set(allowedLists) : null;
+  const [activeList, setActiveList] = useState(allowedLists?.[0] || "teams");
   const [listNotice, setListNotice] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("all");
   const showingAllCompetitions = selectedCompetitionId === "all";
@@ -2599,7 +2640,7 @@ function ManagementBoard({
     { id: "teams", label: `Equipos (${activeCompetitionLeague.teams.length})` },
     { id: "players", label: `Jugadores (${activeCompetitionLeague.players.length})` },
     { id: "matches", label: `Partidos (${activeCompetitionLeague.matches.length})` }
-  ];
+  ].filter((tab) => !allowedListSet || allowedListSet.has(tab.id));
   const playerGroups = useMemo(() => {
     const teamById = new Map(activeCompetitionLeague.teams.map((team) => [team.id, team]));
     const grouped = new Map();
@@ -2674,9 +2715,16 @@ function ManagementBoard({
     )).length;
   }
 
-  function confirmDelete(label, callback, successMessage = "Registro eliminado correctamente.") {
+  useEffect(() => {
+    if (listTabs.length && !listTabs.some((tab) => tab.id === activeList)) {
+      setActiveList(listTabs[0].id);
+    }
+  }, [activeList, listTabs]);
+
+  async function confirmDelete(label, callback, successMessage = "Registro eliminado correctamente.") {
     if (!window.confirm(`¿Seguro que quieres eliminar ${label}? Esta accion puede afectar informacion relacionada.`)) return;
-    callback();
+    const result = await callback();
+    if (result === false) return;
     setListNotice(successMessage);
   }
 
@@ -2694,9 +2742,10 @@ function ManagementBoard({
     return scopeLeagueToCompetition(league, competitionId || getDefaultCompetitionId(league));
   }
 
-  function handleMatchSave(matchId, form) {
+  async function handleMatchSave(matchId, form) {
     if (!window.confirm("¿Guardar cambios de este partido?")) return;
-    onUpdateMatch(matchId, getFormPayload(form));
+    const result = await onUpdateMatch(matchId, getFormPayload(form));
+    if (result === false) return;
     setListNotice("Datos del partido guardados correctamente.");
   }
 
@@ -2931,19 +2980,21 @@ function ManagementBoard({
                     <input name="time" defaultValue={match.time || ""} aria-label={`Hora ${match.id}`} type="time" />
                     <VenueSelect league={league} defaultValue={match.venue || ""} ariaLabel={`Cancha ${match.id}`} />
                     <TeamSelect league={getCompetitionLeague(match.competitionId)} name="homeTeamId" defaultValue={match.homeTeamId} />
-                    <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />
+                    {canEditMatchResults && <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />}
                     <TeamSelect league={getCompetitionLeague(match.competitionId)} name="awayTeamId" defaultValue={match.awayTeamId} />
-                    <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />
-                    <select name="status" defaultValue={match.status || "scheduled"} aria-label={`Estado ${match.id}`}>
-                      <option value="scheduled">Programado</option>
-                      <option value="finished">Finalizado</option>
-                      <option value="walkover">Default</option>
-                    </select>
+                    {canEditMatchResults && <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />}
+                    {canEditMatchResults && (
+                      <select name="status" defaultValue={match.status || "scheduled"} aria-label={`Estado ${match.id}`}>
+                        <option value="scheduled">Programado</option>
+                        <option value="finished">Finalizado</option>
+                        <option value="walkover">Default</option>
+                      </select>
+                    )}
                     <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
                     <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
                     <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : match.status === "walkover" ? "Default" : "Programado"}</span>
-                    <button className="primary" type="submit">Guardar</button>
-                    <button className="danger" type="button" onClick={() => confirmDelete("este partido de liguilla", () => onDeleteMatch(match.id), "Partido de liguilla eliminado correctamente.")}>Eliminar</button>
+                    <button className="primary" type="submit" disabled={!canEditMatchResults && match.status !== "scheduled"}>Guardar</button>
+                    <button className="danger" type="button" disabled={!canEditMatchResults && match.status !== "scheduled"} onClick={() => confirmDelete("este partido de liguilla", () => onDeleteMatch(match.id), "Partido de liguilla eliminado correctamente.")}>Eliminar</button>
                   </form>
                 ))}
               </div>
@@ -2995,19 +3046,21 @@ function ManagementBoard({
                           <input name="time" defaultValue={match.time || ""} aria-label={`Hora ${match.id}`} type="time" />
                           <VenueSelect league={league} defaultValue={match.venue || ""} ariaLabel={`Cancha ${match.id}`} />
                           <TeamSelect league={getCompetitionLeague(match.competitionId)} name="homeTeamId" defaultValue={match.homeTeamId} />
-                          <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />
+                          {canEditMatchResults && <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />}
                           <TeamSelect league={getCompetitionLeague(match.competitionId)} name="awayTeamId" defaultValue={match.awayTeamId} />
-                          <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />
-                          <select name="status" defaultValue={match.status || "scheduled"} aria-label={`Estado ${match.id}`}>
-                            <option value="scheduled">Programado</option>
-                            <option value="finished">Finalizado</option>
-                            <option value="walkover">Default</option>
-                          </select>
+                          {canEditMatchResults && <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />}
+                          {canEditMatchResults && (
+                            <select name="status" defaultValue={match.status || "scheduled"} aria-label={`Estado ${match.id}`}>
+                              <option value="scheduled">Programado</option>
+                              <option value="finished">Finalizado</option>
+                              <option value="walkover">Default</option>
+                            </select>
+                          )}
                           <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
                           <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
                           <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : match.status === "walkover" ? "Default" : "Programado"}</span>
-                          <button className="primary" type="submit">Guardar</button>
-                          <button className="danger" type="button" onClick={() => confirmDelete("este partido", () => onDeleteMatch(match.id), "Partido eliminado correctamente.")}>Eliminar</button>
+                          <button className="primary" type="submit" disabled={!canEditMatchResults && match.status !== "scheduled"}>Guardar</button>
+                          <button className="danger" type="button" disabled={!canEditMatchResults && match.status !== "scheduled"} onClick={() => confirmDelete("este partido", () => onDeleteMatch(match.id), "Partido eliminado correctamente.")}>Eliminar</button>
                         </form>
                       ))}
                     </div>
@@ -4249,8 +4302,7 @@ function SuperAdmin({
           <label>Liga<input name="name" required placeholder="Nombre de la nueva liga" /></label>
           <label>Municipio<input name="city" required placeholder="Municipio o zona" /></label>
           <label>Admin asignado<input name="adminName" placeholder="Nombre del administrador" /></label>
-          <label>Correo admin<input name="adminEmail" type="email" placeholder="correo del admin" /></label>
-          <label>Contraseña inicial<input name="adminPassword" type="password" minLength="6" placeholder="Minimo 6 caracteres" /></label>
+          <label>Correo admin<input name="adminEmail" type="email" placeholder="correo del admin para enviar invitacion" /></label>
           <button className="primary" type="submit">Agregar liga</button>
           <button
             type="button"
@@ -4599,28 +4651,46 @@ function shuffleSecure(items) {
   return next;
 }
 
-function getAdminPasswordError(password) {
-  const value = String(password || "");
-  if (value.length < 10) return "La contraseña debe tener minimo 10 caracteres.";
-  if (!/[a-z]/.test(value)) return "La contraseña debe tener una minuscula.";
-  if (!/[A-Z]/.test(value)) return "La contraseña debe tener una mayuscula.";
-  if (!/\d/.test(value)) return "La contraseña debe tener un numero.";
-  return "";
-}
-
 function normalizeUserPayload(payload) {
+  const permissions = Array.isArray(payload.permissions)
+    ? payload.permissions
+    : payload.permissions
+      ? [payload.permissions]
+      : [];
   return {
     ...payload,
     email: String(payload.email || "").trim().toLowerCase(),
-    leagueId: payload.role === "league_admin" ? payload.leagueId : ""
+    permissions,
+    leagueId: ["league_admin", "admin_limited"].includes(payload.role) ? payload.leagueId : ""
   };
+}
+
+const ADMIN_PERMISSION_OPTIONS = [
+  { id: "matches", label: "Programar partidos" },
+  { id: "referees", label: "Arbitros" },
+  { id: "match_sheets", label: "Actas arbitrales" },
+  { id: "delegates", label: "Delegados" },
+  { id: "settings", label: "Reglas de liga" }
+];
+
+function getUserRoleLabel(role) {
+  if (role === "super_admin") return "Super admin";
+  if (role === "league_admin") return "Admin de liga";
+  if (role === "admin_limited") return "Admin limitado";
+  if (role === "referee") return "Arbitro";
+  if (role === "team_delegate") return "Delegado";
+  return "Usuario";
+}
+
+function getPermissionLabel(permissionId) {
+  if (permissionId === "*") return "Control completo";
+  return ADMIN_PERMISSION_OPTIONS.find((permission) => permission.id === permissionId)?.label || permissionId;
 }
 
 function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [temporaryPasswords, setTemporaryPasswords] = useState({});
   const adminUsers = users.filter((user) => !["team_delegate", "referee"].includes(user.role));
   const delegateUserCount = users.filter((user) => user.role === "team_delegate").length;
   const refereeUserCount = users.filter((user) => user.role === "referee").length;
@@ -4642,40 +4712,38 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   async function handleCreate(payload) {
     setNotice("");
     setError("");
-    if (payload.role === "league_admin" && !payload.leagueId) {
-      setError("Selecciona una liga para crear un admin de liga.");
+    if (["league_admin", "admin_limited"].includes(payload.role) && !payload.leagueId) {
+      setError("Selecciona una liga para este acceso administrativo.");
       return false;
     }
-    const passwordError = getAdminPasswordError(payload.password);
-    if (passwordError) {
-      setError(passwordError);
+    if (payload.role === "admin_limited" && !payload.permissions?.length) {
+      setError("Selecciona al menos un permiso para el admin limitado.");
       return false;
     }
-    if (!window.confirm(`¿Confirmas crear el usuario ${payload.email}?`)) return false;
-    await createUser(authToken, normalizeUserPayload(payload));
+    if (!window.confirm(`¿Confirmas crear o agregar acceso para ${payload.email}?`)) return false;
+    const response = await createUser(authToken, normalizeUserPayload(payload));
     await loadUsers();
-    setNotice("Usuario creado correctamente. Comparte la clave temporal por un canal seguro y pide al usuario cambiarla.");
+    setNotice(response.invitation?.whatsappMessage
+      ? `Invitacion creada. Copia y envia este mensaje:\n\n${response.invitation.whatsappMessage}`
+      : "Acceso agregado correctamente. El usuario ya puede entrar con su contraseña actual.");
     return true;
   }
 
   async function handleUpdate(userId, payload) {
     setNotice("");
     setError("");
-    if (payload.role === "league_admin" && !payload.leagueId) {
+    if (["league_admin", "admin_limited"].includes(payload.role) && !payload.leagueId) {
       setError("Selecciona una liga para este admin de liga.");
       return false;
     }
-    const passwordError = payload.password ? getAdminPasswordError(payload.password) : "";
-    if (passwordError) {
-      setError(passwordError);
+    if (payload.role === "admin_limited" && !payload.permissions?.length) {
+      setError("Selecciona al menos un permiso para el admin limitado.");
       return false;
     }
     if (!window.confirm("¿Guardar cambios de este usuario?")) return false;
     await updateUser(authToken, userId, normalizeUserPayload(payload));
     await loadUsers();
-    setNotice(payload.password
-      ? "Usuario actualizado. Comparte la nueva clave temporal con el usuario por un canal seguro."
-      : "Usuario actualizado correctamente.");
+    setNotice("Usuario actualizado correctamente.");
     return true;
   }
 
@@ -4699,9 +4767,17 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
     await loadUsers();
   }
 
-  function generateTemporaryPassword(userId = "new") {
-    const password = generateSecureTemporaryPassword();
-    setTemporaryPasswords((current) => ({ ...current, [userId]: password }));
+  async function handleResendInvitation(user) {
+    setNotice("");
+    setError("");
+    try {
+      const response = await resendUserInvitation(authToken, user.id);
+      setNotice(response.invitation?.whatsappMessage
+        ? `Invitacion regenerada. Copia y envia este mensaje:\n\n${response.invitation.whatsappMessage}`
+        : "Invitacion regenerada correctamente.");
+    } catch (requestError) {
+      setError(requestError.message);
+    }
   }
 
   return (
@@ -4728,20 +4804,14 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
           <input name="email" required type="email" placeholder="correo@liga.com" />
         </label>
         <label>
-          Contraseña temporal
-          <input
-            name="password"
-            required
-            type="text"
-            value={temporaryPasswords.new || ""}
-            onChange={(event) => setTemporaryPasswords((current) => ({ ...current, new: event.target.value }))}
-            placeholder="Minimo 10, mayuscula, minuscula y numero"
-          />
+          Telefono
+          <input name="phone" placeholder="354..." />
         </label>
         <label>
           Rol
           <select name="role" defaultValue="league_admin">
             <option value="league_admin">Admin de liga</option>
+            <option value="admin_limited">Admin limitado</option>
             <option value="super_admin">Super admin</option>
           </select>
         </label>
@@ -4752,13 +4822,21 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
             {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
           </select>
         </label>
-        <button type="button" onClick={() => generateTemporaryPassword("new")}>Sugerir clave</button>
-        <button className="primary" type="submit">Crear usuario</button>
+        <fieldset className="permission-checklist">
+          <legend>Permisos para admin limitado</legend>
+          {ADMIN_PERMISSION_OPTIONS.map((permission) => (
+            <label key={permission.id}>
+              <input name="permissions" type="checkbox" value={permission.id} />
+              {permission.label}
+            </label>
+          ))}
+        </fieldset>
+        <button className="primary" type="submit">Crear invitacion</button>
       </form>
 
       {error && <p className="auth-error">{error}</p>}
       {notice && <p className="auth-ok">{notice}</p>}
-      <p className="helper-text">Usa correos reales y accesibles. La recuperacion por codigo se envia por correo cuando el proveedor de email esta configurado en produccion; mientras tanto el super admin puede asignar una clave temporal.</p>
+      <p className="helper-text">Usa correos reales y accesibles. El usuario recibira un enlace de activacion para crear su propia contraseña. Si el correo ya existe, LIGATEC agrega el nuevo acceso a la misma cuenta.</p>
       {(delegateUserCount > 0 || refereeUserCount > 0) && (
         <p className="helper-text">
           {delegateUserCount} usuario(s) delegado se administran desde Admin de liga &gt; Delegados.
@@ -4770,6 +4848,9 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
       <div className="user-list">
         {adminUsers.map((user) => {
           const isSelf = user.id === currentUser?.id;
+          const adminAccesses = (user.accesses || []).filter((access) => ["super_admin", "league_admin", "admin_limited"].includes(access.role));
+          const primaryAccess = adminAccesses.find((access) => access.role === user.role && (access.leagueId || "") === (user.leagueId || "")) || adminAccesses[0] || null;
+          const selectedPermissions = primaryAccess?.permissions || [];
           return (
             <form
               className="user-card"
@@ -4795,6 +4876,7 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
                 Rol
                 <select name="role" defaultValue={user.role} disabled={isSelf}>
                   <option value="league_admin">Admin de liga</option>
+                  <option value="admin_limited">Admin limitado</option>
                   <option value="super_admin">Super admin</option>
                 </select>
               </label>
@@ -4809,23 +4891,42 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
               <label>
                 Estado
                 <select name="status" defaultValue={user.status} disabled={isSelf}>
+                  <option value="pending_activation">Pendiente de activacion</option>
                   <option value="active">Activo</option>
                   <option value="disabled">Deshabilitado</option>
+                  <option value="suspended">Suspendido</option>
                 </select>
               </label>
               {isSelf && <input type="hidden" name="status" value={user.status} />}
-              <label>
-                Nueva contraseña
-                <input
-                  name="password"
-                  type="text"
-                  value={temporaryPasswords[user.id] || ""}
-                  onChange={(event) => setTemporaryPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
-                  placeholder="Opcional, minimo 10"
-                />
-              </label>
-              <button type="button" onClick={() => generateTemporaryPassword(user.id)}>Sugerir clave</button>
+              <fieldset className="permission-checklist user-permission-checklist">
+                <legend>Permisos admin limitado</legend>
+                {ADMIN_PERMISSION_OPTIONS.map((permission) => (
+                  <label key={permission.id}>
+                    <input
+                      name="permissions"
+                      type="checkbox"
+                      value={permission.id}
+                      defaultChecked={selectedPermissions.includes(permission.id)}
+                    />
+                    {permission.label}
+                  </label>
+                ))}
+              </fieldset>
+              {adminAccesses.length > 0 && (
+                <div className="user-access-summary">
+                  <strong>Accesos activos</strong>
+                  {adminAccesses.map((access) => (
+                    <span key={access.id || `${access.role}-${access.leagueId}`}>
+                      {getUserRoleLabel(access.role)} | {access.leagueName || "Todas las ligas"} | {access.status}
+                      {access.permissions?.length ? ` | ${access.permissions.map(getPermissionLabel).join(", ")}` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
               <button className="primary" type="submit">Guardar usuario</button>
+              <button type="button" disabled={isSelf} onClick={() => handleResendInvitation(user)}>
+                Reenviar invitacion
+              </button>
               <button className="danger" type="button" disabled={isSelf} onClick={() => handleDisable(user.id)}>
                 Deshabilitar
               </button>
@@ -4835,7 +4936,7 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
               {isSelf && <small className="self-user-note">Tu cuenta no se puede deshabilitar ni eliminar desde tu propia sesion.</small>}
               {user.lockedUntil && (
                 <small className="self-user-note">
-                  Bloqueado hasta {formatDate(user.lockedUntil)}. Asigna una contraseña temporal para limpiar el bloqueo.
+                  Bloqueado hasta {formatDate(user.lockedUntil)}. El usuario puede recuperar acceso con invitacion o recuperacion de contraseña.
                 </small>
               )}
             </form>
@@ -4863,6 +4964,7 @@ const AUDIT_LABELS = {
   rules_update: "Reglas actualizadas",
   team_withdraw: "Baja de equipo",
   match_walkover: "Default administrativo",
+  match_create: "Partido creado",
   match_sheet_save: "Acta guardada",
   match_update: "Partido actualizado",
   match_delete: "Partido eliminado"

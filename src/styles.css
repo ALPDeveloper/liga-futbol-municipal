@@ -426,6 +426,7 @@ a:hover {
   grid-column: 1 / -1;
   color: var(--field);
   font-weight: 800;
+  white-space: pre-line;
 }
 
 .inline-feedback {
@@ -4687,6 +4688,45 @@ th {
   white-space: normal;
 }
 
+.permission-checklist {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f6fbf7;
+}
+
+.permission-checklist legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.permission-checklist label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--field);
+  font-weight: 900;
+}
+
+.permission-checklist input {
+  width: auto;
+  min-width: 16px;
+  height: 16px;
+}
+
 .tournament-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 118px), 1fr));
@@ -5893,6 +5933,28 @@ label {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfdfb;
+}
+
+.user-access-summary {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 8px;
+  background: #eef8f4;
+  color: var(--field);
+  font-weight: 800;
+}
+
+.user-access-summary strong {
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.user-access-summary span {
+  overflow-wrap: anywhere;
 }
 
 .self-user-note {

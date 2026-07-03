@@ -206,6 +206,29 @@ function runMigrations() {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS user_accesses (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      league_id TEXT REFERENCES leagues(id) ON DELETE CASCADE,
+      team_id TEXT REFERENCES teams(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      permissions_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_activation_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      access_id TEXT REFERENCES user_accesses(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS password_reset_requests (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -657,6 +680,14 @@ export function importStore(store) {
     SELECT team_id, league_id, registration_enabled, enabled_until, notes, updated_at
     FROM team_roster_permissions
   `).all();
+  const preservedUserAccesses = db.prepare(`
+    SELECT id, user_id, league_id, team_id, role, permissions_json, status, created_at, updated_at
+    FROM user_accesses
+  `).all();
+  const preservedAdminActivationTokens = db.prepare(`
+    SELECT id, user_id, access_id, token_hash, expires_at, used_at, revoked_at, created_at
+    FROM admin_activation_tokens
+  `).all();
   const preservedDelegateActivationTokens = db.prepare(`
     SELECT id, user_id, assignment_id, token_hash, expires_at, used_at, revoked_at, created_at
     FROM team_delegate_activation_tokens
@@ -987,7 +1018,29 @@ export function importStore(store) {
     }
 
     const userIds = new Set(db.prepare("SELECT id FROM users").all().map((user) => user.id));
+    const restoredAccessIds = new Set();
     const restoredAssignmentIds = new Set();
+
+    for (const access of preservedUserAccesses) {
+      if (!userIds.has(access.user_id)) continue;
+      if (access.league_id && !nextLeagueIds.has(access.league_id)) continue;
+      if (access.team_id && !nextTeamIds.has(access.team_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO user_accesses (id, user_id, league_id, team_id, role, permissions_json, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        access.id,
+        access.user_id,
+        access.league_id || null,
+        access.team_id || null,
+        access.role,
+        access.permissions_json || "[]",
+        access.status || "active",
+        access.created_at || new Date().toISOString(),
+        access.updated_at || new Date().toISOString()
+      );
+      restoredAccessIds.add(access.id);
+    }
 
     for (const permission of preservedTeamRosterPermissions) {
       if (!nextLeagueIds.has(permission.league_id) || !nextTeamIds.has(permission.team_id)) continue;
@@ -1030,6 +1083,24 @@ export function importStore(store) {
         token.id,
         token.user_id,
         token.assignment_id,
+        token.token_hash,
+        token.expires_at,
+        token.used_at || null,
+        token.revoked_at || null,
+        token.created_at || new Date().toISOString()
+      );
+    }
+
+    for (const token of preservedAdminActivationTokens) {
+      if (!userIds.has(token.user_id)) continue;
+      if (token.access_id && !restoredAccessIds.has(token.access_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO admin_activation_tokens (id, user_id, access_id, token_hash, expires_at, used_at, revoked_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        token.id,
+        token.user_id,
+        token.access_id || null,
         token.token_hash,
         token.expires_at,
         token.used_at || null,

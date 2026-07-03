@@ -58,6 +58,20 @@ export async function requireSuperAdmin(request, response, next) {
 }
 
 export function toPublicUser(user) {
+  const accesses = Array.isArray(user.accesses)
+    ? user.accesses
+        .filter((access) => access.status !== "deleted")
+        .map((access) => ({
+          id: access.id,
+          leagueId: access.leagueId || "",
+          leagueName: access.leagueName || "",
+          teamId: access.teamId || "",
+          teamName: access.teamName || "",
+          role: access.role,
+          permissions: access.permissions || [],
+          status: access.status || "active"
+        }))
+    : [];
   return {
     id: user.id,
     leagueId: user.league_id,
@@ -65,6 +79,7 @@ export function toPublicUser(user) {
     email: user.email,
     role: user.role,
     status: user.status,
+    accesses,
     failedLoginCount: user.failed_login_count || 0,
     lockedUntil: user.locked_until || null
   };

@@ -298,6 +298,34 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE IF EXISTS users
   ADD COLUMN IF NOT EXISTS phone TEXT;
 
+CREATE TABLE IF NOT EXISTS user_accesses (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  league_id TEXT REFERENCES leagues(id) ON DELETE CASCADE,
+  team_id TEXT REFERENCES teams(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  permissions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_accesses_user ON user_accesses(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_accesses_league_role ON user_accesses(league_id, role);
+
+CREATE TABLE IF NOT EXISTS admin_activation_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  access_id TEXT REFERENCES user_accesses(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_activation_tokens_hash ON admin_activation_tokens(token_hash);
+
 CREATE TABLE IF NOT EXISTS team_user_assignments (
   id TEXT PRIMARY KEY,
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
