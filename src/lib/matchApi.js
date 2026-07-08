@@ -38,3 +38,12 @@ export async function deleteMatchInApi(token, leagueId, matchId) {
   });
   return parseResponse(response);
 }
+
+export async function saveMatchResultInApi(token, leagueId, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/matches/${encodeURIComponent(matchId)}/result`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response);
+}

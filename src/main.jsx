@@ -1,5 +1,9 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import alpLogo from "../assets/alp-logo.png";
+import iconJugadores from "../assets/icon-jugadores.png";
+import iconLigas from "../assets/icon-ligas.png";
+import iconPublico from "../assets/icon-publico.png";
 import ligatecLogo from "../assets/ligatec-logo.png";
 import heroImage from "../assets/league-hero.webp";
 import { DEFAULT_IDENTITY } from "./data/seedData.js";
@@ -7,6 +11,7 @@ import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
 import { loadStore, saveStore } from "./lib/storage.js";
 import { clearAuth, loadAuth, saveAuth } from "./lib/authStorage.js";
 import { fetchSessionFromApi, fetchStoreFromApi, loginWithApi, persistStoreToApi } from "./lib/api.js";
+import { IntroAnimation } from "./components/IntroAnimation.jsx";
 import "./styles.css";
 
 const LazyAdminRoute = React.lazy(() => import("./components/AdminRoute.jsx").then((module) => ({ default: module.AdminRoute })));
@@ -49,6 +54,10 @@ function isAccessPath(path) {
 
 function isAccessSelectionPath(path) {
   return path === "/seleccionar-acceso";
+}
+
+function isLeagueDirectoryPath(path) {
+  return path === "/ligas";
 }
 
 function getRoleLabel(role) {
@@ -198,6 +207,7 @@ function getLegalLeaguePath(leagueId) {
 }
 
 const LAST_PUBLIC_LEAGUE_KEY = "ligatec:lastPublicLeagueId";
+const ACCESS_RETURN_PATH_KEY = "ligatec:access-return-path";
 
 function loadLastPublicLeagueId() {
   try {
@@ -212,6 +222,24 @@ function saveLastPublicLeagueId(leagueId) {
     if (leagueId) localStorage.setItem(LAST_PUBLIC_LEAGUE_KEY, leagueId);
   } catch {
     // Navegacion publica: si localStorage no esta disponible, seguimos sin recordar.
+  }
+}
+
+function loadAccessReturnPath() {
+  try {
+    const saved = sessionStorage.getItem(ACCESS_RETURN_PATH_KEY) || "";
+    return saved === "/" || saved === "/ligas" || saved.startsWith("/liga/") ? saved : "/";
+  } catch {
+    return "/";
+  }
+}
+
+function saveAccessReturnPath(path) {
+  try {
+    const safePath = path === "/" || path === "/ligas" || path.startsWith("/liga/") ? path : "/";
+    sessionStorage.setItem(ACCESS_RETURN_PATH_KEY, safePath);
+  } catch {
+    // Si sessionStorage falla, el acceso vuelve a portada por defecto.
   }
 }
 
@@ -328,6 +356,386 @@ function AccessSelectionPage({ currentUser, onNavigate, onSelectAccess, store })
   );
 }
 
+function normalizeLandingSearch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function getLeagueLandingStats(league) {
+  const matches = league.matches || [];
+  const scheduled = matches.filter((match) => match.status === "scheduled").length;
+  const finished = matches.filter((match) => ["finished", "walkover"].includes(match.status)).length;
+  const nextMatch = matches
+    .filter((match) => match.status === "scheduled")
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.time || "").localeCompare(String(b.time || "")))[0];
+  return {
+    teams: league.teams?.length || 0,
+    players: league.players?.length || 0,
+    competitions: league.competitions?.length || 0,
+    scheduled,
+    finished,
+    nextMatch
+  };
+}
+
+function getLeagueInitials(name) {
+  const words = String(name || "LT")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return (words.slice(0, 2).map((word) => word[0]).join("") || "LT").toUpperCase();
+}
+
+function LeagueDirectoryPage({ onNavigate, store }) {
+  const [query, setQuery] = useState("");
+  const activeLeagues = useMemo(
+    () => (store.leagues || []).filter((league) => league.status !== "deleted"),
+    [store.leagues]
+  );
+  const filteredLeagues = useMemo(() => {
+    const search = normalizeLandingSearch(query);
+    if (!search) return activeLeagues;
+    return activeLeagues.filter((league) => {
+      const searchable = [
+        league.name,
+        league.city,
+        league.season,
+        ...(league.competitions || []).map((competition) => `${competition.name} ${competition.season || ""}`),
+        ...(league.teams || []).map((team) => team.name),
+        ...(league.players || []).slice(0, 80).map((player) => player.name)
+      ].join(" ");
+      return normalizeLandingSearch(searchable).includes(search);
+    });
+  }, [activeLeagues, query]);
+
+  function openLeague(leagueId) {
+    if (!leagueId) return;
+    saveLastPublicLeagueId(leagueId);
+    onNavigate(getPublicLeaguePath(leagueId));
+  }
+
+  return (
+    <main className="page landing-page league-directory-page">
+      <section className="league-directory-hero">
+        <div>
+          <span className="eyebrow">Directorio publico</span>
+          <h1>Ligas disponibles en LIGATEC</h1>
+          <p>Encuentra tu municipio, torneo, equipo o jugador y entra directo a la informacion publica de cada liga.</p>
+        </div>
+        <button className="secondary" type="button" onClick={() => onNavigate("/")}>
+          Volver al inicio
+        </button>
+      </section>
+
+      <section className="landing-search-panel" id="ligas-disponibles">
+        <div>
+          <span className="eyebrow">Busca rapido</span>
+          <h2>Elige la liga que quieres consultar</h2>
+          <p>Usa el buscador o entra desde una tarjeta. No necesitas iniciar sesion para consultar la informacion publica.</p>
+        </div>
+        <label className="landing-search-box">
+          <span>Buscar</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Ej. Tinguindin, Guascuaro, Vasco Jr, jugador..."
+            type="search"
+          />
+        </label>
+      </section>
+
+      <section className="landing-league-section" id="directorio-ligas" aria-label="Seleccionar liga">
+        <div className="landing-section-head">
+          <div>
+            <span className="eyebrow">Entrar a una liga</span>
+            <h2>Selecciona el municipio o torneo que quieres consultar.</h2>
+          </div>
+          <small>{filteredLeagues.length} disponible(s)</small>
+        </div>
+      </section>
+
+      <section className="landing-league-grid">
+        {filteredLeagues.map((league) => {
+          const stats = getLeagueLandingStats(league);
+          const activeCompetition = (league.competitions || []).find((competition) => competition.status !== "archived") || league.competitions?.[0];
+          const nextMatch = stats.nextMatch;
+          const homeTeam = nextMatch ? (league.teams || []).find((team) => team.id === nextMatch.homeTeamId)?.name || "Local" : "";
+          const awayTeam = nextMatch ? (league.teams || []).find((team) => team.id === nextMatch.awayTeamId)?.name || "Visitante" : "";
+          return (
+            <article className="landing-league-card" key={league.id}>
+              <div className="landing-card-top">
+                <span className="landing-league-mark">{getLeagueInitials(league.name)}</span>
+                <div className="landing-card-head">
+                  <span>{league.city || "Municipio"}</span>
+                  <strong>{league.name}</strong>
+                  <small>{activeCompetition ? `${activeCompetition.name} | ${activeCompetition.season || league.season}` : league.season}</small>
+                </div>
+                <span className={`landing-status ${league.status === "active" ? "is-active" : ""}`}>{league.status === "active" ? "Activa" : "Pausada"}</span>
+              </div>
+              <div className="landing-card-stats">
+                <span><strong>{stats.teams}</strong> equipos</span>
+                <span><strong>{stats.players}</strong> jugadores</span>
+                <span><strong>{stats.scheduled}</strong> programados</span>
+              </div>
+              <div className="landing-next-match">
+                <span>{nextMatch ? "Proximo partido" : "Actividad"}</span>
+                <strong>{nextMatch ? `${homeTeam} vs ${awayTeam}` : `${stats.finished} partido(s) finalizados`}</strong>
+                {nextMatch && <small>{[nextMatch.date, nextMatch.time, nextMatch.venue].filter(Boolean).join(" | ") || "Fecha por confirmar"}</small>}
+              </div>
+              <div className="landing-card-competitions">
+                {(league.competitions || []).slice(0, 3).map((competition) => (
+                  <span key={competition.id}>{competition.name}</span>
+                ))}
+                {stats.competitions > 3 && <span>+{stats.competitions - 3}</span>}
+              </div>
+              <div className="landing-card-actions">
+                <button className="primary" type="button" onClick={() => openLeague(league.id)}>
+                  Entrar
+                </button>
+              </div>
+            </article>
+          );
+        })}
+        {!filteredLeagues.length && (
+          <article className="landing-empty">
+            <strong>No encontramos coincidencias</strong>
+            <span>Intenta buscar por municipio, nombre de liga, equipo o jugador.</span>
+          </article>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function LandingPage({ onNavigate, store }) {
+  const whatsappUrl = "https://wa.me/523541073146?text=Hola%2C%20quiero%20informaci%C3%B3n%20sobre%20LIGATEC.";
+  const activeLeagues = useMemo(
+    () => (store.leagues || []).filter((league) => league.status !== "deleted"),
+    [store.leagues]
+  );
+  const globalStats = useMemo(() => activeLeagues.reduce((summary, league) => {
+    const stats = getLeagueLandingStats(league);
+    return {
+      leagues: summary.leagues + 1,
+      teams: summary.teams + stats.teams,
+      players: summary.players + stats.players,
+      matches: summary.matches + (league.matches?.length || 0)
+    };
+  }, { leagues: 0, teams: 0, players: 0, matches: 0 }), [activeLeagues]);
+  const featuredLeague = activeLeagues.find((item) => item.status === "active") || activeLeagues[0] || null;
+  const featuredStats = featuredLeague ? getLeagueLandingStats(featuredLeague) : null;
+  const featuredCompetition = featuredLeague
+    ? ((featuredLeague.competitions || []).find((competition) => competition.status !== "archived") || featuredLeague.competitions?.[0])
+    : null;
+  const featuredMatch = featuredStats?.nextMatch;
+  const featuredHomeTeam = featuredMatch ? (featuredLeague.teams || []).find((team) => team.id === featuredMatch.homeTeamId)?.name || "Local" : "Local";
+  const featuredAwayTeam = featuredMatch ? (featuredLeague.teams || []).find((team) => team.id === featuredMatch.awayTeamId)?.name || "Visitante" : "Visitante";
+
+  function openLeagueDirectory() {
+    onNavigate("/ligas");
+    window.setTimeout(() => {
+      document.getElementById("directorio-ligas")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+
+  return (
+    <main className="page landing-page">
+      <IntroAnimation />
+      <section className="landing-hero">
+        <div className="landing-hero-copy">
+          <span className="eyebrow">Hecho en Michoacan</span>
+          <h1>Consulta tu liga, tu equipo o tu jugador en segundos.</h1>
+          <p>
+            LIGATEC es una plataforma publica para aficionados, jugadores, familias y equipos. Entra a la liga de tu municipio y revisa resultados, tabla, goleo, sanciones y avisos sin complicarte.
+          </p>
+          <div className="landing-actions">
+            <button className="primary" type="button" onClick={openLeagueDirectory}>
+              Ver ligas disponibles
+            </button>
+            <a className="secondary" href={whatsappUrl} rel="noreferrer" target="_blank">Contacto</a>
+          </div>
+          <div className="landing-field-strip" aria-label="Areas principales de LIGATEC">
+            <span>Municipios</span>
+            <span>Torneos</span>
+            <span>Equipos</span>
+            <span>Jugadores</span>
+          </div>
+        </div>
+        <div className="landing-hero-panel" aria-label="Resumen LIGATEC">
+          <div className="landing-live-card">
+            <div className="landing-live-head">
+              <span>Vista publica</span>
+              <strong>{featuredLeague?.city || "Futbol regional"}</strong>
+              <small>{featuredCompetition ? `${featuredCompetition.name} | ${featuredCompetition.season || featuredLeague?.season}` : "Temporada activa"}</small>
+            </div>
+            <div className="landing-score-preview">
+              <span>{featuredHomeTeam}</span>
+              <b>VS</b>
+              <span>{featuredAwayTeam}</span>
+            </div>
+            <div className="landing-mini-grid">
+              <span><strong>{featuredStats?.teams || globalStats.teams}</strong> equipos</span>
+              <span><strong>{featuredStats?.players || globalStats.players}</strong> jugadores</span>
+              <span><strong>{featuredStats?.scheduled || 0}</strong> por jugar</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-regional-platform">
+        <div className="landing-regional-copy">
+          <span className="eyebrow">Futbol regional, datos claros</span>
+          <h2>Futbol local con informacion clara.</h2>
+          <p>
+            Resultados, tablas, goleadores, sanciones y avisos disponibles para jugadores, familias y aficionados desde el celular.
+          </p>
+          <div className="landing-tech-tags">
+            <span>Resultados</span>
+            <span>Tabla</span>
+            <span>Goleo</span>
+            <span>Disciplina</span>
+          </div>
+          <div className="landing-regional-metrics">
+            <article>
+              <span className="landing-benefit-icon"><img alt="" src={iconPublico} /></span>
+              <strong>Publico</strong>
+              <span>consulta facil</span>
+            </article>
+            <article>
+              <span className="landing-benefit-icon"><img alt="" src={iconLigas} /></span>
+              <strong>Ligas</strong>
+              <span>control claro</span>
+            </article>
+            <article>
+              <span className="landing-benefit-icon"><img alt="" src={iconJugadores} /></span>
+              <strong>Jugadores</strong>
+              <span>historial visible</span>
+            </article>
+          </div>
+        </div>
+        <div className="landing-platform-preview" aria-label="Vista ejemplo de plataforma publica">
+          <div className="landing-preview-top">
+            <span>Que resuelve</span>
+            <strong>Todo el torneo en un solo lugar.</strong>
+          </div>
+          <div className="landing-preview-match">
+            <span>Resultados visibles</span>
+            <b>sin vueltas</b>
+            <span>Estadisticas claras</span>
+          </div>
+          <div className="landing-preview-rows">
+            <article><span>Para aficionados</span><strong>Consulta sin iniciar sesion</strong></article>
+            <article><span>Para ligas</span><strong>Administracion ordenada</strong></article>
+            <article><span>Para torneos</span><strong>Informacion siempre disponible</strong></article>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-contact-band">
+        <div>
+          <span className="eyebrow">Contacto</span>
+          <h2>¿Quieres llevar tu liga a LIGATEC?</h2>
+          <p>Escríbenos por WhatsApp para revisar tu torneo, municipio o proyecto deportivo.</p>
+        </div>
+        <a className="primary" href={whatsappUrl} rel="noreferrer" target="_blank">Enviar WhatsApp</a>
+      </section>
+
+      <footer className="landing-footer">
+        <section className="landing-footer-hero" aria-label="Resumen LIGATEC">
+          <span className="landing-footer-logo"><img alt="" src={ligatecLogo} /></span>
+          <div>
+            <strong>LIGA<span>TEC</span></strong>
+            <small>PLATAFORMA DEPORTIVA</small>
+          </div>
+          <p><b>La evolucion digital de tu liga.</b> Administracion, estadisticas y transparencia para llevar el futbol local a otro nivel.</p>
+        </section>
+
+        <section className="landing-footer-accordion" aria-label="Informacion de LIGATEC">
+          <details>
+            <summary>
+              <span className="footer-section-icon">➤</span>
+              <strong>Navegacion</strong>
+            </summary>
+            <div className="footer-section-body">
+              <button type="button" onClick={() => onNavigate("/ligas")}>Ligas disponibles</button>
+              <button type="button" onClick={() => onNavigate("/legal")}>Terminos y privacidad</button>
+              <a href={whatsappUrl} rel="noreferrer" target="_blank">Contacto por WhatsApp</a>
+            </div>
+          </details>
+          <details>
+            <summary>
+              <span className="footer-section-icon">?</span>
+              <strong>Recursos</strong>
+            </summary>
+            <div className="footer-section-body footer-info-list">
+              <span>Consulta publica de resultados, tablas y calendarios.</span>
+              <span>Perfiles de jugadores, goleo, sanciones y equipos.</span>
+              <span>Acceso centralizado para administradores, delegados y arbitros.</span>
+            </div>
+          </details>
+          <details>
+            <summary>
+              <span className="footer-section-icon">▥</span>
+              <strong>Plataforma</strong>
+            </summary>
+            <div className="footer-section-body footer-info-list">
+              <span>Diseñada para ligas municipales y torneos locales.</span>
+              <span>Optimizada para consulta movil y uso operativo.</span>
+              <span>Preparada para crecer con nuevas ligas y municipios.</span>
+            </div>
+          </details>
+          <details>
+            <summary>
+              <span className="footer-section-icon">☎</span>
+              <strong>Contacto</strong>
+            </summary>
+            <div className="footer-section-body footer-info-list">
+              <span>WhatsApp: 354 107 3146</span>
+              <span>Atencion para ligas, municipios y proyectos deportivos.</span>
+            </div>
+          </details>
+        </section>
+
+        <section className="landing-footer-support" aria-label="Soporte LIGATEC">
+          <div>
+            <span className="footer-support-icon">☎</span>
+            <div>
+              <strong>¿Necesitas ayuda?</strong>
+              <p>Estamos listos para revisar tu liga, resolver dudas o preparar tu torneo en LIGATEC.</p>
+            </div>
+          </div>
+          <a href={whatsappUrl} rel="noreferrer" target="_blank">
+            <span>WhatsApp</span>
+            <strong>354 107 3146</strong>
+          </a>
+        </section>
+
+        <section className="landing-footer-dev" aria-label="Desarrollador">
+          <span>Desarrollado por</span>
+          <img alt="ALP DEV" src={alpLogo} />
+        </section>
+
+        <section className="landing-footer-security" aria-label="Seguridad">
+          <span className="footer-security-icon">▣</span>
+          <div>
+            <strong>Plataforma segura y confiable</strong>
+            <small>Tus datos estan protegidos y se administran con buenas practicas.</small>
+          </div>
+        </section>
+
+        <div className="landing-footer-bottom">
+          <small>© {new Date().getFullYear()} LIGATEC. Todos los derechos reservados.</small>
+          <small>Hecho en Michoacan para el futbol local.</small>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
 function App() {
   const [store, setStore] = useState(initialStore);
   const [routePath, setRoutePath] = useState(window.location.pathname);
@@ -336,6 +744,7 @@ function App() {
   const [initialApiLoaded, setInitialApiLoaded] = useState(false);
   const [auth, setAuth] = useState(initialAuth);
   const [selectedAccess, setSelectedAccess] = useState(initialSelectedAccess);
+  const [accessReturnPath, setAccessReturnPath] = useState(loadAccessReturnPath);
   const [userListRefreshKey, setUserListRefreshKey] = useState(0);
   const pendingPersistRef = useRef(null);
   const persistRunningRef = useRef(false);
@@ -344,6 +753,8 @@ function App() {
   const isRefereeRoute = isRefereePath(routePath);
   const isAccessRoute = isAccessPath(routePath);
   const isAccessSelectionRoute = isAccessSelectionPath(routePath);
+  const isLeagueDirectoryRoute = isLeagueDirectoryPath(routePath);
+  const isLandingRoute = routePath === "/";
   const isPrivateRoute = isAdminRoute || isTeamRoute || isRefereeRoute || isAccessRoute || isAccessSelectionRoute;
   const publicLeagueId = !isPrivateRoute ? getPublicLeagueIdFromPath(routePath) : "";
   const legalLeagueId = !isPrivateRoute ? getLegalLeagueIdFromPath(routePath) : "";
@@ -372,10 +783,23 @@ function App() {
   const isDelegateActivationRoute = routePath.startsWith("/activar-delegado/");
   const isRefereeActivationRoute = routePath.startsWith("/activar-arbitro/");
   const isAdminActivationRoute = routePath.startsWith("/activar-admin/");
+  const showPublicHomeLink = !isPrivateRoute && !isLandingRoute && !isLeagueDirectoryRoute && !isLegalRoute && !isDelegateActivationRoute && !isRefereeActivationRoute && !isAdminActivationRoute;
+  const showPublicLegalLink = !isLandingRoute;
+  const contextualPublicReturnPath = isLeagueDirectoryRoute ? "/ligas" : (publicLeagueId || legalLeagueId ? publicLeaguePath : "/");
+  const legalPublicReturnPath = legalLeagueId ? publicLeaguePath : "/";
+  const privatePublicReturnPath = isAccessRoute || isAccessSelectionRoute ? accessReturnPath : publicLeaguePath;
+  const legalNavPath = isLandingRoute || isLeagueDirectoryRoute ? "/legal" : legalLeaguePath;
 
   function navigateTo(path) {
     window.history.pushState({}, "", path);
     setRoutePath(window.location.pathname);
+  }
+
+  function navigateToAccess() {
+    const returnPath = contextualPublicReturnPath;
+    saveAccessReturnPath(returnPath);
+    setAccessReturnPath(returnPath);
+    navigateTo("/acceso");
   }
 
   useEffect(() => {
@@ -577,7 +1001,7 @@ function App() {
     setSelectedAccess(null);
     clearAuth();
     clearSelectedAccess();
-    navigateTo(publicLeaguePath);
+    navigateTo(isLandingRoute ? "/" : publicLeaguePath);
     setAdminPanel("league");
   }
 
@@ -594,8 +1018,8 @@ function App() {
       <main className="startup-screen">
         <div className="startup-card">
           <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
-          <strong>Cargando liga</strong>
-          <small>Preparando calendario, tabla y estadisticas.</small>
+          <strong>{isLandingRoute ? "Cargando LIGATEC" : "Cargando liga"}</strong>
+          <small>{isLandingRoute ? "Preparando ligas y municipios disponibles." : "Preparando calendario, tabla y estadisticas."}</small>
         </div>
       </main>
     );
@@ -606,7 +1030,7 @@ function App() {
       <main className="startup-screen">
         <div className="startup-card">
           <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
-          <strong>No se pudieron cargar datos reales</strong>
+          <strong>{isLandingRoute ? "No se pudieron cargar ligas" : "No se pudieron cargar datos reales"}</strong>
           <small>Revisa tu conexion e intenta actualizar la pagina.</small>
         </div>
       </main>
@@ -624,9 +1048,9 @@ function App() {
   return (
     <div className={isPrivateRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} style={themeStyle}>
       <header className={`topbar ${isPrivateRoute ? "admin-topbar" : "public-topbar"}`}>
-        <a className="brand" href={isAdminRoute ? "/panel/admin" : publicLeaguePath} aria-label="Ir al inicio" onClick={(event) => {
+        <a className="brand" href={isAdminRoute ? "/panel/admin" : "/"} aria-label="Ir al inicio" onClick={(event) => {
           event.preventDefault();
-          navigateTo(isAdminRoute ? "/panel/admin" : isTeamRoute ? "/panel/delegado" : isRefereeRoute ? "/panel/arbitro" : publicLeaguePath);
+          navigateTo(isAdminRoute ? "/panel/admin" : isTeamRoute ? "/panel/delegado" : isRefereeRoute ? "/panel/arbitro" : "/");
         }}>
           <span className="brand-mark brand-mark-logo"><img alt="" src={ligatecLogo} /></span>
           <span className="brand-copy">
@@ -638,7 +1062,7 @@ function App() {
           {!isPrivateRoute && (
             <a className="access-ligatec-link" href="/acceso" onClick={(event) => {
               event.preventDefault();
-              navigateTo("/acceso");
+              navigateToAccess();
             }}>
               <span className="access-link-mark" aria-hidden="true" />
               <span>
@@ -660,23 +1084,35 @@ function App() {
             </label>
           ) : (
             <div className="public-league-badge">
-              <span>Liga</span>
-              <strong>{isLegalRoute ? "Aviso legal" : league?.name || "Cargando"}</strong>
+              <span>{isLandingRoute ? "Inicio" : isLeagueDirectoryRoute ? "Directorio" : "Liga"}</span>
+              <strong>{isLandingRoute ? "LIGATEC" : isLeagueDirectoryRoute ? "Ligas disponibles" : isLegalRoute ? "Aviso legal" : league?.name || "Cargando"}</strong>
             </div>
           )}
           {!isPrivateRoute && (
-            <a className="admin-public-link" href={isLegalRoute ? publicLeaguePath : legalLeaguePath} onClick={(event) => {
-              event.preventDefault();
-              navigateTo(isLegalRoute ? publicLeaguePath : legalLeaguePath);
-            }}>
-              {isLegalRoute ? "Vista liga" : "Legal"}
-            </a>
+            <>
+              {showPublicHomeLink && (
+                <a className="admin-public-link public-home-link" href="/" onClick={(event) => {
+                  event.preventDefault();
+                  navigateTo("/");
+                }}>
+                  Inicio
+                </a>
+              )}
+              {showPublicLegalLink && (
+                <a className="admin-public-link" href={isLegalRoute ? legalPublicReturnPath : legalNavPath} onClick={(event) => {
+                  event.preventDefault();
+                  navigateTo(isLegalRoute ? legalPublicReturnPath : legalNavPath);
+                }}>
+                  {isLegalRoute ? (legalLeagueId ? "Vista liga" : "Inicio") : "Legal"}
+                </a>
+              )}
+            </>
           )}
           {isPrivateRoute && (
             <>
-              {league?.id && <a className="admin-public-link" href={publicLeaguePath} onClick={(event) => {
+              {(league?.id || isAccessRoute || isAccessSelectionRoute) && <a className="admin-public-link" href={privatePublicReturnPath} onClick={(event) => {
                 event.preventDefault();
-                navigateTo(publicLeaguePath);
+                navigateTo(privatePublicReturnPath);
               }}>
                 Vista publica
               </a>}
@@ -700,7 +1136,7 @@ function App() {
           onLogout={logout}
           onNavigate={navigateTo}
           onSelectAccess={selectAccess}
-          publicLeaguePath={publicLeaguePath}
+          publicLeaguePath={accessReturnPath}
           store={store}
         />
       ) : isAccessSelectionRoute ? (
@@ -754,8 +1190,12 @@ function App() {
         </Suspense>
       ) : isLegalRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando aviso legal" />}>
-          <LazyLegalView league={league} onNavigate={navigateTo} publicLeaguePath={publicLeaguePath} />
+          <LazyLegalView league={legalLeagueId ? league : null} onNavigate={navigateTo} publicLeaguePath={legalPublicReturnPath} />
         </Suspense>
+      ) : isLeagueDirectoryRoute ? (
+        <LeagueDirectoryPage onNavigate={navigateTo} store={store} />
+      ) : isLandingRoute ? (
+        <LandingPage onNavigate={navigateTo} store={store} />
       ) : league?.status === "suspended" && !isPrivateRoute ? (
         <main className="page">
           <section className="hero compact" style={{ "--hero-image": `url(${heroImage})` }}>

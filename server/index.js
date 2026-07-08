@@ -91,7 +91,7 @@ import {
 } from "./security.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, upperText } from "../src/lib/domain.js";
-import { saveMatchSheet } from "../src/lib/actions.js";
+import { addPlayer, deletePlayer, saveMatchSheet, saveResult, updatePlayer } from "../src/lib/actions.js";
 
 validateRuntimeConfig();
 await initializeData();
@@ -1314,6 +1314,147 @@ app.delete("/api/leagues/:leagueId/matches/:matchId", requireAuth, async (reques
     entityType: "match",
     entityId: match.id,
     detail: `Elimino partido jornada ${match.round || "-"}`
+  });
+  response.json(nextStore);
+});
+
+function getPlayerPayloadFromRequest(body) {
+  return {
+    teamId: String(body.teamId || "").trim(),
+    competitionId: String(body.competitionId || "").trim(),
+    name: body.name,
+    number: body.number,
+    position: body.position,
+    photoUrl: body.photoUrl,
+    photoAuthorized: body.photoAuthorized === true || body.photoAuthorized === "true"
+  };
+}
+
+function validatePlayerPayloadForLeague(league, payload, excludePlayerId = "") {
+  const team = (league.teams || []).find((item) => item.id === payload.teamId);
+  if (!team) return { status: 400, error: "Equipo invalido para esta liga." };
+
+  const competitionId = payload.competitionId || team.competitionId || league.currentCompetitionId;
+  const competition = (league.competitions || []).find((item) => item.id === competitionId);
+  if (!competition) return { status: 400, error: "Categoria invalida para este jugador." };
+
+  const nameCheck = validatePlayerFullName(payload.name);
+  if (!nameCheck.valid) return { status: 400, error: nameCheck.message };
+
+  const duplicate = findDuplicatePlayer(league, { ...payload, competitionId }, excludePlayerId);
+  if (duplicate) return { status: 409, error: `Este jugador ya esta registrado como ${duplicate.name}.` };
+
+  return null;
+}
+
+app.post("/api/leagues/:leagueId/players", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "players")) {
+    return response.status(403).json({ error: "No puedes registrar jugadores en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida" });
+
+  const payload = getPlayerPayloadFromRequest(request.body || {});
+  const validation = validatePlayerPayloadForLeague(league, payload);
+  if (validation) return response.status(validation.status).json({ error: validation.error });
+
+  const nextStore = await importStoreData(addPlayer(store, leagueId, payload));
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "player_create",
+    entityType: "player",
+    detail: `Registro jugador ${upperText(payload.name || "")}`
+  });
+  response.status(201).json(nextStore);
+});
+
+app.patch("/api/leagues/:leagueId/players/:playerId", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "players")) {
+    return response.status(403).json({ error: "No puedes modificar jugadores en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  const player = league?.players?.find((item) => item.id === request.params.playerId);
+  if (!league || !player) return response.status(404).json({ error: "Jugador no encontrado" });
+  if (league.status !== "active") return response.status(404).json({ error: "Liga suspendida" });
+
+  const payload = getPlayerPayloadFromRequest(request.body || {});
+  const validation = validatePlayerPayloadForLeague(league, payload, player.id);
+  if (validation) return response.status(validation.status).json({ error: validation.error });
+
+  const nextStore = await importStoreData(updatePlayer(store, leagueId, player.id, payload));
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "player_update",
+    entityType: "player",
+    entityId: player.id,
+    detail: `Actualizo jugador ${upperText(payload.name || player.name)}`
+  });
+  response.json(nextStore);
+});
+
+app.delete("/api/leagues/:leagueId/players/:playerId", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "players")) {
+    return response.status(403).json({ error: "No puedes eliminar jugadores en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  const player = league?.players?.find((item) => item.id === request.params.playerId);
+  if (!league || !player) return response.status(404).json({ error: "Jugador no encontrado" });
+  if (league.status !== "active") return response.status(404).json({ error: "Liga suspendida" });
+
+  const nextStore = await importStoreData(deletePlayer(store, leagueId, player.id));
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "player_delete",
+    entityType: "player",
+    entityId: player.id,
+    detail: `Elimino jugador ${player.name}`
+  });
+  response.json(nextStore);
+});
+
+app.post("/api/leagues/:leagueId/matches/:matchId/result", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!canEditMatchResults(request.user, leagueId)) {
+    return response.status(403).json({ error: "No puedes capturar resultados en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  const match = league?.matches?.find((item) => item.id === request.params.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
+  if (league.status !== "active") return response.status(404).json({ error: "Liga suspendida" });
+
+  const nextStore = await importStoreData(saveResult(store, leagueId, {
+    ...request.body,
+    matchId: match.id
+  }));
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "match_result_save",
+    entityType: "match",
+    entityId: match.id,
+    detail: `Guardo resultado jornada ${match.round || "-"}`
   });
   response.json(nextStore);
 });

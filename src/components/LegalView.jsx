@@ -164,6 +164,7 @@ export function LegalView({ league, onNavigate, publicLeaguePath = "/" }) {
   const leagueName = league?.name || "la liga publicada";
   const location = league?.city || "Mexico";
   const year = new Date().getFullYear();
+  const publicReturnLabel = publicLeaguePath === "/" ? "Volver al inicio" : "Volver a la liga";
 
   function handleNavigate(event, path) {
     if (!onNavigate) return;
@@ -180,7 +181,7 @@ export function LegalView({ league, onNavigate, publicLeaguePath = "/" }) {
           <p>Marco legal de uso para {LEGAL_PROFILE.brand} y {leagueName}. Ultima actualizacion: {LAST_UPDATED}.</p>
           <div className="hero-actions">
             <a className="primary" href="#privacidad">Ver privacidad</a>
-            <a className="secondary" href={publicLeaguePath} onClick={(event) => handleNavigate(event, publicLeaguePath)}>Volver a la liga</a>
+            <a className="secondary" href={publicLeaguePath} onClick={(event) => handleNavigate(event, publicLeaguePath)}>{publicReturnLabel}</a>
           </div>
         </div>
       </section>

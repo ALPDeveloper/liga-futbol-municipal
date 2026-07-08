@@ -2173,7 +2173,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
     try {
       const payload = await getPlayerPayload(form, "", { authToken, leagueId: league.id, scope: "player-photos" });
       if (!window.confirm("¿Confirmas registrar este jugador en el equipo seleccionado?")) return;
-      const result = onAddPlayer(payload);
+      const result = await onAddPlayer(payload);
       if (result === false) return;
       setCaptureNotice("Jugador registrado correctamente.");
       form.reset();
@@ -2795,7 +2795,7 @@ function ManagementBoard({
     if (!window.confirm("¿Guardar cambios de este jugador?")) return;
     try {
       const payload = await getPlayerPayload(form, player.photoUrl || "", { authToken, leagueId: league.id, scope: "player-photos" });
-      const result = onUpdatePlayer(player.id, payload);
+      const result = await onUpdatePlayer(player.id, payload);
       if (result === false) return;
       setListNotice("Datos del jugador guardados correctamente.");
     } catch (error) {

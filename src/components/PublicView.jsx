@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import navGoleoIcon from "../../assets/nav-goleo.png";
+import navInicioIcon from "../../assets/nav-inicio.png";
+import navMasIcon from "../../assets/nav-mas.png";
+import navPartidosIcon from "../../assets/nav-partidos.png";
+import navTablaIcon from "../../assets/nav-tabla.png";
 import {
   calculatePlayerStats,
   calculateStandings,
@@ -1101,18 +1106,18 @@ function HeroMatchTeam({ team, fallback }) {
 
 function PublicQuickNav() {
   const links = [
-    { href: "#inicio", label: "Inicio", icon: "I" },
-    { href: "#calendario", label: "Partidos", icon: "P" },
-    { href: "#tabla", label: "Tabla", icon: "T" },
-    { href: "#goleo", label: "Goleo", icon: "G" },
-    { href: "#mas", label: "Mas", icon: "M" }
+    { href: "#inicio", label: "Inicio", icon: navInicioIcon },
+    { href: "#calendario", label: "Partidos", icon: navPartidosIcon },
+    { href: "#tabla", label: "Tabla", icon: navTablaIcon },
+    { href: "#goleo", label: "Goleo", icon: navGoleoIcon },
+    { href: "#mas", label: "Mas", icon: navMasIcon }
   ];
 
   return (
     <nav className="public-quick-nav" aria-label="Navegacion publica">
       {links.map((link) => (
         <a href={link.href} key={link.href}>
-          <span className="quick-nav-icon" aria-hidden="true">{link.icon}</span>
+          <span className="quick-nav-icon" aria-hidden="true"><img alt="" src={link.icon} /></span>
           <span>{link.label}</span>
         </a>
       ))}
