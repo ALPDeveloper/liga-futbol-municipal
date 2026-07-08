@@ -686,6 +686,16 @@ export async function importPostgresStore(store) {
         .filter((leagueId) => leagueId && !nextLeagueIds.has(leagueId))
     );
 
+    for (const table of [
+      "admin_activation_tokens",
+      "team_delegate_activation_tokens",
+      "team_roster_permissions",
+      "team_user_assignments",
+      "user_accesses"
+    ]) {
+      await query(client, `DELETE FROM ${table}`);
+    }
+
     for (const leagueId of removedLeagueIds) {
       await query(client, "DELETE FROM users WHERE role = 'league_admin' AND league_id = $1", [leagueId]);
     }
