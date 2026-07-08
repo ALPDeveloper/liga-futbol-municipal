@@ -37,6 +37,11 @@ function toBoolean(value) {
   return value === true || value === 1 || value === "1" || value === "true";
 }
 
+function toJsonValue(value, fallback) {
+  if (value === undefined || value === null || value === "") return JSON.stringify(fallback);
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
 function rowDate(row, key) {
   return toDateValue(row[key]);
 }
@@ -926,7 +931,7 @@ export async function importPostgresStore(store) {
           access.league_id || null,
           access.team_id || null,
           access.role,
-          access.permissions_json || "[]",
+          toJsonValue(access.permissions_json, []),
           access.status || "active",
           access.created_at || new Date().toISOString(),
           access.updated_at || new Date().toISOString()
