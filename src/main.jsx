@@ -375,6 +375,7 @@ function getLeagueLandingStats(league) {
     teams: league.teams?.length || 0,
     players: league.players?.length || 0,
     competitions: league.competitions?.length || 0,
+    activeCompetitions: (league.competitions || []).filter((competition) => competition.status !== "archived").length,
     scheduled,
     finished,
     nextMatch
@@ -461,10 +462,6 @@ function LeagueDirectoryPage({ onNavigate, store }) {
       <section className="landing-league-grid">
         {filteredLeagues.map((league) => {
           const stats = getLeagueLandingStats(league);
-          const activeCompetition = (league.competitions || []).find((competition) => competition.status !== "archived") || league.competitions?.[0];
-          const nextMatch = stats.nextMatch;
-          const homeTeam = nextMatch ? (league.teams || []).find((team) => team.id === nextMatch.homeTeamId)?.name || "Local" : "";
-          const awayTeam = nextMatch ? (league.teams || []).find((team) => team.id === nextMatch.awayTeamId)?.name || "Visitante" : "";
           return (
             <article className="landing-league-card" key={league.id}>
               <div className="landing-card-top">
@@ -472,7 +469,7 @@ function LeagueDirectoryPage({ onNavigate, store }) {
                 <div className="landing-card-head">
                   <span>{league.city || "Municipio"}</span>
                   <strong>{league.name}</strong>
-                  <small>{activeCompetition ? `${activeCompetition.name} | ${activeCompetition.season || league.season}` : league.season}</small>
+                  <small>{league.season || "Temporada activa"} | Consulta publica</small>
                 </div>
                 <span className={`landing-status ${league.status === "active" ? "is-active" : ""}`}>{league.status === "active" ? "Activa" : "Pausada"}</span>
               </div>
@@ -481,16 +478,16 @@ function LeagueDirectoryPage({ onNavigate, store }) {
                 <span><strong>{stats.players}</strong> jugadores</span>
                 <span><strong>{stats.scheduled}</strong> programados</span>
               </div>
-              <div className="landing-next-match">
-                <span>{nextMatch ? "Proximo partido" : "Actividad"}</span>
-                <strong>{nextMatch ? `${homeTeam} vs ${awayTeam}` : `${stats.finished} partido(s) finalizados`}</strong>
-                {nextMatch && <small>{[nextMatch.date, nextMatch.time, nextMatch.venue].filter(Boolean).join(" | ") || "Fecha por confirmar"}</small>}
+              <div className="landing-next-match landing-league-summary">
+                <span>Informacion disponible</span>
+                <strong>Resultados, tabla, goleo y disciplina</strong>
+                <small>{stats.activeCompetitions || stats.competitions} torneo(s) activo(s) | {stats.finished} partido(s) finalizado(s)</small>
               </div>
               <div className="landing-card-competitions">
-                {(league.competitions || []).slice(0, 3).map((competition) => (
-                  <span key={competition.id}>{competition.name}</span>
-                ))}
-                {stats.competitions > 3 && <span>+{stats.competitions - 3}</span>}
+                <span>Calendario</span>
+                <span>Estadisticas</span>
+                <span>Avisos</span>
+                <span>Equipos</span>
               </div>
               <div className="landing-card-actions">
                 <button className="primary" type="button" onClick={() => openLeague(league.id)}>

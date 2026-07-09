@@ -111,7 +111,12 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       .filter((team) => competitionTeamIds.has(team.id) && !playingTeamIds.has(team.id) && team.status !== "withdrawn")
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [activeLeague.teams, regularLeague.matches, selectedRoundMatches]);
-  const scorers = stats.filter((row) => row.goals > 0).sort((a, b) => b.goals - a.goals).slice(0, 5);
+  const allScorers = useMemo(() => (
+    stats
+      .filter((row) => row.goals > 0)
+      .sort((a, b) => b.goals - a.goals || a.player.name.localeCompare(b.player.name))
+  ), [stats]);
+  const scorers = allScorers.slice(0, 5);
   const discipline = calculateYellowCardDiscipline(disciplineLeague);
   const spotlights = useMemo(
     () => buildPublicSpotlights(activeLeague).filter((item) => item.label !== "Partido destacado"),
@@ -335,7 +340,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             <SectionHeading eyebrow="Competencia" title="Tabla de posiciones" />
             <ShareActionButton
               label="Compartir tabla"
-              onClick={() => shareStandingsCard({ league, competition: activeCompetition, standings, url: window.location.href })}
+              onClick={() => shareStandingsCard({ league, competition: activeCompetition, standings })}
             />
             <StandingsTable rows={standings} rules={activeLeague.rules} />
           </section>
@@ -350,7 +355,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             {!!selectedRoundMatches.length && (
               <ShareActionButton
                 label="Compartir jornada"
-                onClick={() => shareRoundCard({ league: activeLeague, selectedRound, matches: selectedRoundMatches, url: window.location.href })}
+                onClick={() => shareRoundCard({ league: activeLeague, selectedRound, matches: selectedRoundMatches })}
               />
             )}
             <div className="match-list">
@@ -410,11 +415,21 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
 
           <section className="panel" id="goleo">
             <SectionHeading eyebrow="Individual" title="Goleadores" />
+            <ShareActionButton
+              className="compact-share-button"
+              label="Compartir"
+              onClick={() => shareScorersCard({ league: activeLeague, scorers: allScorers })}
+            />
             <Scorers rows={scorers} onSelectPlayer={selectPublicPlayer} />
           </section>
 
           <section className="panel">
             <SectionHeading eyebrow="Siguiente jornada" title="Expulsados y regresos" />
+            <ShareActionButton
+              className="compact-share-button"
+              label="Compartir"
+              onClick={() => shareSuspensionsCard({ league: activeLeague, notices: suspensionNotices })}
+            />
             <SuspensionNotices notices={suspensionNotices} />
           </section>
 
@@ -425,6 +440,11 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
 
           <section className="panel">
             <SectionHeading eyebrow="Control" title="Disciplina" />
+            <ShareActionButton
+              className="compact-share-button"
+              label="Compartir amarillas"
+              onClick={() => shareYellowCardsCard({ league: disciplineLeague, rows: discipline })}
+            />
             <Discipline rows={discipline} />
           </section>
 
@@ -820,43 +840,69 @@ function shareWhatsAppItem({ text, url }) {
   window.open(`https://wa.me/?text=${message}`, "_blank", "noopener,noreferrer");
 }
 
-async function shareStandingsCard({ league, competition, standings, url }) {
+async function shareStandingsCard({ league, competition, standings }) {
   const title = `Tabla de posiciones | ${league.name}`;
-  const text = buildStandingsShareText(league, competition, standings);
   await shareGeneratedCard({
-    fallback: { text, url },
     fileName: "tabla-posiciones.png",
     imageBuilder: () => createStandingsShareImage({ league, competition, standings }),
-    text,
     title
   });
 }
 
-async function shareRoundCard({ league, selectedRound, matches, url }) {
+async function shareRoundCard({ league, selectedRound, matches }) {
   const title = `Jornada ${selectedRound || ""} | ${league.name}`;
-  const text = buildRoundShareText(league, selectedRound, matches);
   await shareGeneratedCard({
-    fallback: { text, url },
     fileName: `jornada-${selectedRound || "partidos"}.png`,
     imageBuilder: () => createRoundShareImage({ league, selectedRound, matches }),
-    text,
     title
   });
 }
 
-async function shareGeneratedCard({ fallback, fileName, imageBuilder, text, title }) {
+async function shareScorersCard({ league, scorers }) {
+  await shareGeneratedCard({
+    fileName: "tabla-goleo.png",
+    imageBuilder: () => createScorersShareImage({ league, scorers }),
+    title: `Tabla de goleo | ${league.name}`
+  });
+}
+
+async function shareSuspensionsCard({ league, notices }) {
+  await shareGeneratedCard({
+    fileName: "expulsados-regresos.png",
+    imageBuilder: () => createSuspensionsShareImage({ league, notices }),
+    title: `Expulsados y regresos | ${league.name}`
+  });
+}
+
+async function shareYellowCardsCard({ league, rows }) {
+  await shareGeneratedCard({
+    fileName: "tarjetas-amarillas.png",
+    imageBuilder: () => createYellowCardsShareImage({ league, rows }),
+    title: `Tarjetas amarillas | ${league.name}`
+  });
+}
+
+async function shareFeaturedMatchCard({ league, match }) {
+  await shareGeneratedCard({
+    fileName: "partido-destacado.png",
+    imageBuilder: () => createFeaturedMatchShareImage({ league, match }),
+    title: `Partido destacado | ${league.name}`
+  });
+}
+
+async function shareGeneratedCard({ fileName, imageBuilder }) {
   let blob = null;
 
   try {
     const canvas = await imageBuilder();
     blob = await canvasToPngBlob(canvas);
   } catch (error) {
-    shareWhatsAppItem(fallback);
+    window.alert("No se pudo generar la imagen para compartir. Intentalo de nuevo.");
     return;
   }
 
   const file = new File([blob], fileName, { type: "image/png" });
-  const shareData = { files: [file], text, title };
+  const shareData = { files: [file] };
 
   if (canShareGeneratedFile(shareData)) {
     try {
@@ -935,63 +981,74 @@ function createShareCanvas(width, height) {
   return { canvas, context };
 }
 
-function createStandingsShareImage({ league, competition, standings }) {
-  const rows = standings.slice(0, 12);
+async function createStandingsShareImage({ league, competition, standings }) {
+  const rows = standings;
   const width = 1080;
-  const height = 238 + rows.length * 68 + 78;
+  const rowHeight = 58;
+  const height = Math.max(540, 232 + rows.length * rowHeight + 86);
   const { canvas, context } = createShareCanvas(width, height);
 
   drawShareBackground(context, width, height, league);
-  drawShareHeader(context, {
+  await drawShareHeader(context, width, {
     eyebrow: competition?.name || league.season,
     league,
     title: "TABLA DE POSICIONES"
   });
 
-  drawRoundedRect(context, 60, 172, width - 120, 42, 12, "#e9f7ef");
-  drawShareLabel(context, "POS", 82, 184, "#0f2f24");
-  drawShareLabel(context, "EQUIPO", 180, 184, "#0f2f24");
-  drawShareLabel(context, "PTS", 725, 184, "#0f2f24");
-  drawShareLabel(context, "PJ", 820, 184, "#0f2f24");
-  drawShareLabel(context, "DG", 910, 184, "#0f2f24");
+  drawRoundedRect(context, 52, 166, width - 104, 42, 12, "#e9f7ef");
+  [
+    ["#", 70],
+    ["EQUIPO", 132],
+    ["PTS", 548],
+    ["PJ", 622],
+    ["G", 690],
+    ["E", 748],
+    ["P", 806],
+    ["GF", 860],
+    ["GC", 920],
+    ["DG", 980]
+  ].forEach(([label, x]) => drawShareLabel(context, label, x, 178, "#0f2f24"));
 
   rows.forEach((row, index) => {
-    const y = 232 + index * 68;
+    const y = 224 + index * rowHeight;
     const rank = index + 1;
     const accent = rank === 1 ? "#e7c948" : rank === 2 ? "#34699a" : rank === 3 ? "#b6e35c" : "#0f6b4f";
-    drawRoundedRect(context, 60, y, width - 120, 56, 14, rank <= 3 ? "#09261f" : "#ffffff");
+    drawRoundedRect(context, 52, y, width - 104, 48, 14, rank <= 3 ? "#09261f" : "#ffffff");
     context.fillStyle = accent;
-    drawRoundedRect(context, 60, y, 62, 56, 14, accent);
+    drawRoundedRect(context, 52, y, 52, 48, 14, accent);
     context.fillStyle = rank === 1 || rank === 3 ? "#102016" : "#ffffff";
-    context.font = "900 28px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(String(rank), 82, y + 12);
+    context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(String(rank), 70, y + 10);
 
-    drawTeamBubble(context, row.team, 150, y + 11, 34);
+    drawTeamBubble(context, row.team, 122, y + 8, 32);
     context.fillStyle = rank <= 3 ? "#ffffff" : "#11231d";
-    context.font = "900 26px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    drawCanvasText(context, row.team.name, 198, y + 13, 470, 29, 1);
+    context.font = "900 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.team.name, 164, y + 12, 350, 25, 1);
 
     context.fillStyle = rank <= 3 ? "#dff7e9" : "#0f6b4f";
-    context.font = "950 30px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(String(row.points), 732, y + 12);
+    drawShareStatCell(context, row.points, 566, y + 12);
     context.fillStyle = rank <= 3 ? "#d7e5de" : "#64736b";
-    context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(String(row.played), 826, y + 15);
-    context.fillText(String(row.goalDifference), 916, y + 15);
+    drawShareStatCell(context, row.played, 632, y + 13);
+    drawShareStatCell(context, row.wins, 694, y + 13);
+    drawShareStatCell(context, row.draws, 752, y + 13);
+    drawShareStatCell(context, row.losses, 810, y + 13);
+    drawShareStatCell(context, row.goalsFor, 872, y + 13);
+    drawShareStatCell(context, row.goalsAgainst, 932, y + 13);
+    drawShareStatCell(context, row.goalDifference, 992, y + 13);
   });
 
   drawShareFooter(context, width, height, league);
-  return Promise.resolve(canvas);
+  return canvas;
 }
 
-function createRoundShareImage({ league, selectedRound, matches }) {
+async function createRoundShareImage({ league, selectedRound, matches }) {
   const rows = sortPublicMatches(matches);
   const width = 1080;
   const height = 238 + rows.length * 92 + 78;
   const { canvas, context } = createShareCanvas(width, height);
 
   drawShareBackground(context, width, height, league);
-  drawShareHeader(context, {
+  await drawShareHeader(context, width, {
     eyebrow: league.season,
     league,
     title: `JORNADA ${selectedRound || "-"}`
@@ -1031,7 +1088,190 @@ function createRoundShareImage({ league, selectedRound, matches }) {
   });
 
   drawShareFooter(context, width, height, league);
-  return Promise.resolve(canvas);
+  return canvas;
+}
+
+async function createScorersShareImage({ league, scorers }) {
+  const rows = scorers;
+  const width = 1080;
+  const rowHeight = 64;
+  const height = Math.max(520, 232 + Math.max(rows.length, 1) * rowHeight + 86);
+  const { canvas, context } = createShareCanvas(width, height);
+
+  drawShareBackground(context, width, height, league);
+  await drawShareHeader(context, width, {
+    eyebrow: league.season,
+    league,
+    title: "TABLA DE GOLEO"
+  });
+
+  drawRoundedRect(context, 60, 166, width - 120, 42, 12, "#e9f7ef");
+  drawShareLabel(context, "#", 84, 178, "#0f2f24");
+  drawShareLabel(context, "JUGADOR", 160, 178, "#0f2f24");
+  drawShareLabel(context, "EQUIPO", 640, 178, "#0f2f24");
+  drawShareLabel(context, "GOLES", 900, 178, "#0f2f24");
+
+  if (!rows.length) {
+    drawShareEmptyState(context, "Aun no hay goles registrados.", 60, 236, width - 120);
+  }
+
+  rows.forEach((row, index) => {
+    const y = 224 + index * rowHeight;
+    const rank = index + 1;
+    drawRoundedRect(context, 60, y, width - 120, 52, 14, rank <= 3 ? "#09261f" : "#ffffff");
+    drawRoundedRect(context, 78, y + 9, 40, 34, 10, rank === 1 ? "#e7c948" : rank === 2 ? "#34699a" : rank === 3 ? "#b6e35c" : "#0f6b4f");
+    context.fillStyle = rank === 1 || rank === 3 ? "#102016" : "#ffffff";
+    context.font = "900 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(String(rank), 92, y + 15);
+    drawTeamBubble(context, row.team, 140, y + 9, 34);
+    context.fillStyle = rank <= 3 ? "#ffffff" : "#11231d";
+    context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.player.name, 186, y + 13, 390, 27, 1);
+    context.fillStyle = rank <= 3 ? "#d7e5de" : "#64736b";
+    context.font = "850 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.team?.name || "Sin equipo", 640, y + 16, 220, 22, 1);
+    context.fillStyle = rank <= 3 ? "#dff7e9" : "#0f6b4f";
+    context.font = "950 28px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(String(row.goals), 920, y + 11);
+  });
+
+  drawShareFooter(context, width, height, league);
+  return canvas;
+}
+
+async function createSuspensionsShareImage({ league, notices }) {
+  const rows = notices;
+  const width = 1080;
+  const rowHeight = 82;
+  const height = Math.max(520, 226 + Math.max(rows.length, 1) * rowHeight + 92);
+  const { canvas, context } = createShareCanvas(width, height);
+
+  drawShareBackground(context, width, height, league);
+  await drawShareHeader(context, width, {
+    eyebrow: "Siguiente jornada",
+    league,
+    title: "EXPULSADOS Y REGRESOS"
+  });
+
+  if (!rows.length) {
+    drawShareEmptyState(context, "No hay jugadores suspendidos para la siguiente jornada.", 60, 184, width - 120);
+  }
+
+  rows.forEach((notice, index) => {
+    const y = 178 + index * rowHeight;
+    const tone = notice.indefinite ? "#7f1d1d" : notice.status === "suspended" ? "#b91c1c" : "#0f6b4f";
+    drawRoundedRect(context, 60, y, width - 120, 68, 16, "#ffffff");
+    drawRoundedRect(context, 76, y + 12, 52, 44, 12, tone);
+    context.fillStyle = "#ffffff";
+    context.font = "950 16px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(notice.type === "Expulsion" ? "ROJA" : "SANC", 82, y + 24);
+    context.fillStyle = "#11231d";
+    context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, notice.player.name, 150, y + 12, 390, 27, 1);
+    context.fillStyle = "#64736b";
+    context.font = "850 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, notice.team?.name || "Sin equipo", 150, y + 40, 390, 22, 1);
+    context.fillStyle = tone;
+    context.font = "900 21px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    const status = notice.indefinite
+      ? "INHABILITADO INDEFINIDO"
+      : notice.returnRound
+        ? `REGRESA J${notice.returnRound}`
+        : `${notice.remainingMatches || 0} JUEGO(S) RESTANTE(S)`;
+    drawCanvasText(context, status, 580, y + 16, 360, 24, 1);
+    context.fillStyle = "#64736b";
+    context.font = "800 17px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, notice.reason || "Sancion registrada", 580, y + 42, 360, 20, 1);
+  });
+
+  drawShareFooter(context, width, height, league);
+  return canvas;
+}
+
+async function createYellowCardsShareImage({ league, rows }) {
+  const width = 1080;
+  const rowHeight = 70;
+  const height = Math.max(520, 232 + Math.max(rows.length, 1) * rowHeight + 86);
+  const { canvas, context } = createShareCanvas(width, height);
+
+  drawShareBackground(context, width, height, league);
+  await drawShareHeader(context, width, {
+    eyebrow: "Disciplina",
+    league,
+    title: "TARJETAS AMARILLAS"
+  });
+
+  drawRoundedRect(context, 60, 166, width - 120, 42, 12, "#fff7d8");
+  drawShareLabel(context, "JUGADOR", 86, 178, "#4c3b00");
+  drawShareLabel(context, "EQUIPO", 520, 178, "#4c3b00");
+  drawShareLabel(context, "AMARILLAS", 800, 178, "#4c3b00");
+
+  if (!rows.length) {
+    drawShareEmptyState(context, "Sin amarillas vigentes registradas.", 60, 236, width - 120);
+  }
+
+  rows.forEach((row, index) => {
+    const y = 224 + index * rowHeight;
+    const danger = row.status === "suspended";
+    drawRoundedRect(context, 60, y, width - 120, 56, 14, danger ? "#fff1f2" : "#ffffff");
+    context.fillStyle = "#11231d";
+    context.font = "900 23px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.player.name, 86, y + 12, 370, 26, 1);
+    context.fillStyle = "#64736b";
+    context.font = "850 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.team?.name || "Sin equipo", 520, y + 15, 230, 22, 1);
+    drawRoundedRect(context, 808, y + 10, 96, 36, 12, danger ? "#ef4444" : "#facc15");
+    context.fillStyle = danger ? "#ffffff" : "#3b2f00";
+    context.font = "950 21px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(`${row.yellowCards}/${row.yellowLimit}`, 834, y + 17);
+    context.fillStyle = danger ? "#b91c1c" : "#64736b";
+    context.font = "800 16px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.message, 920, y + 14, 94, 18, 2);
+  });
+
+  drawShareFooter(context, width, height, league);
+  return canvas;
+}
+
+async function createFeaturedMatchShareImage({ league, match }) {
+  const width = 1080;
+  const height = 620;
+  const { canvas, context } = createShareCanvas(width, height);
+  const home = getTeam(league, match.homeTeamId);
+  const away = getTeam(league, match.awayTeamId);
+  const isFinished = match.status === "finished" || match.status === "walkover";
+  const center = isFinished ? `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}` : "VS";
+
+  drawShareBackground(context, width, height, league);
+  await drawShareHeader(context, width, {
+    eyebrow: match.round ? `Jornada ${match.round}` : league.season,
+    league,
+    title: isFinished ? "PARTIDO DE LA JORNADA" : "PROXIMO PARTIDO"
+  });
+
+  drawRoundedRect(context, 78, 178, width - 156, 300, 28, "#ffffff");
+  context.fillStyle = "#0f6b4f";
+  context.font = "950 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.fillText(isFinished ? "RESULTADO" : "PROGRAMADO", 440, 208);
+  drawTeamBubble(context, home, 170, 250, 86);
+  drawTeamBubble(context, away, width - 256, 250, 86);
+  context.fillStyle = "#11231d";
+  context.font = "950 34px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  drawCanvasText(context, home?.name || "LOCAL", 90, 360, 250, 38, 2);
+  drawCanvasText(context, away?.name || "VISITANTE", width - 340, 360, 250, 38, 2);
+  drawRoundedRect(context, 424, 262, 232, 86, 18, "#0f6b4f");
+  context.fillStyle = "#ffffff";
+  context.font = "950 52px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.textAlign = "center";
+  context.fillText(center, width / 2, 278);
+  context.textAlign = "left";
+  context.fillStyle = "#64736b";
+  context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  const details = [match.date ? formatDate(match.date) : "Fecha por definir", match.time ? `${match.time} hrs` : "Hora por definir", match.venue || "Cancha por definir"].join(" | ");
+  drawCanvasText(context, details, 160, 500, width - 320, 28, 1);
+
+  drawShareFooter(context, width, height, league);
+  return canvas;
 }
 
 function drawShareBackground(context, width, height) {
@@ -1045,7 +1285,7 @@ function drawShareBackground(context, width, height) {
   context.fill();
 }
 
-function drawShareHeader(context, { eyebrow, league, title }) {
+async function drawShareHeader(context, width, { eyebrow, league, title }) {
   drawRoundedRect(context, 60, 34, 62, 62, 16, "#ffffff");
   context.fillStyle = "#0f6b4f";
   context.font = "950 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
@@ -1055,7 +1295,8 @@ function drawShareHeader(context, { eyebrow, league, title }) {
   context.fillText(String(eyebrow || "").toLocaleUpperCase("es-MX"), 142, 36);
   context.fillStyle = "#ffffff";
   context.font = "950 42px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  drawCanvasText(context, title, 142, 64, 820, 45, 1);
+  drawCanvasText(context, title, 142, 64, 690, 45, 1);
+  await drawLigatecCanvasLogo(context, width - 228, 36, 168, 54);
 }
 
 function drawShareFooter(context, width, height, league) {
@@ -1084,6 +1325,46 @@ function drawShareLabel(context, text, x, y, color) {
   context.fillStyle = color;
   context.font = "950 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   context.fillText(text, x, y);
+}
+
+function drawShareStatCell(context, value, x, y) {
+  context.font = "900 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.fillText(String(value ?? 0), x, y);
+}
+
+function drawShareEmptyState(context, text, x, y, width) {
+  drawRoundedRect(context, x, y, width, 92, 18, "#ffffff");
+  context.fillStyle = "#64736b";
+  context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  drawCanvasText(context, text, x + 28, y + 30, width - 56, 28, 2);
+}
+
+let ligatecCanvasLogoPromise = null;
+
+function loadLigatecCanvasLogo() {
+  if (!ligatecCanvasLogoPromise) {
+    ligatecCanvasLogoPromise = new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = ligatecLogo;
+    });
+  }
+  return ligatecCanvasLogoPromise;
+}
+
+async function drawLigatecCanvasLogo(context, x, y, width, height) {
+  try {
+    const image = await loadLigatecCanvasLogo();
+    const ratio = Math.min(width / image.width, height / image.height);
+    const drawWidth = image.width * ratio;
+    const drawHeight = image.height * ratio;
+    context.drawImage(image, x + width - drawWidth, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+  } catch {
+    context.fillStyle = "#ffffff";
+    context.font = "950 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText("LIGATEC", x + 58, y + 15);
+  }
 }
 
 function drawRoundedRect(context, x, y, width, height, radius, color) {
@@ -1123,30 +1404,6 @@ function drawCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines = 2)
   if (line && lines < maxLines) {
     context.fillText(line, x, currentY);
   }
-}
-
-function buildStandingsShareText(league, competition, standings) {
-  const title = `Tabla de posiciones - ${league.name}${competition?.name ? ` (${competition.name})` : ""}`;
-  const rows = standings.slice(0, 12).map((row, index) => (
-    `${index + 1}. ${row.team.name} - ${row.points} pts | PJ ${row.played} | DG ${row.goalDifference}`
-  ));
-  return [title, ...rows].join("\n");
-}
-
-function buildRoundShareText(league, selectedRound, matches) {
-  const title = `${league.name} - Jornada ${selectedRound || "-"}`;
-  const rows = matches.map((match) => {
-    const home = getTeam(league, match.homeTeamId)?.name || "Local";
-    const away = getTeam(league, match.awayTeamId)?.name || "Visitante";
-    const date = match.date ? formatDate(match.date) : "Fecha por definir";
-    const time = match.time || "Hora por definir";
-    const venue = match.venue || "Cancha por definir";
-    const result = match.status === "finished" || match.status === "walkover"
-      ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}`
-      : "vs";
-    return `${home} ${result} ${away} | ${date} | ${time} | ${venue}`;
-  });
-  return [title, ...rows].join("\n");
 }
 
 function getFeaturedPublicMatch(league, standings) {
@@ -1275,11 +1532,7 @@ function HeroMatchPanel({ league, match, standings }) {
       <button
         className="hero-share-button"
         type="button"
-        onClick={() => sharePublicItem({
-          title: `${home?.name || "Local"} vs ${away?.name || "Visitante"}`,
-          text: `${league.name}: ${home?.name || "Local"} vs ${away?.name || "Visitante"} | ${match.date ? formatDate(match.date) : "Fecha por definir"} ${match.time || ""}`,
-          url: window.location.href
-        })}
+        onClick={() => shareFeaturedMatchCard({ league, match })}
       >
         Compartir partido
       </button>

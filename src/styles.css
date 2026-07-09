@@ -3511,6 +3511,24 @@ input[name*="password"] {
   margin: -6px 0 14px;
 }
 
+.compact-share-button {
+  min-height: 34px;
+  width: fit-content;
+  justify-self: start;
+  gap: 6px;
+  margin: -4px 0 12px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--field) 88%, var(--blue));
+  font-size: 0.72rem;
+}
+
+.compact-share-button .whatsapp-icon {
+  width: 18px;
+  height: 18px;
+  font-size: 0.5rem;
+}
+
 .standings-insights article {
   position: relative;
   min-width: 0;
