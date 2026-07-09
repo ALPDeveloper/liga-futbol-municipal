@@ -3225,11 +3225,13 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     setEvents(selectedMatch.events.map((event, index) => ({
       id: `${selectedMatch.id}-${index}-${event.type}-${event.playerId}`,
       type: event.type,
+      lockedType: event.type,
       teamId: event.teamId || getPlayer(league, event.playerId)?.teamId || selectedMatch.homeTeamId,
       lockedTeamId: event.teamId || getPlayer(league, event.playerId)?.teamId || selectedMatch.homeTeamId,
       playerId: event.playerId,
       minute: event.minute || "",
       suspensionMatches: event.suspensionMatches || 1,
+      suspensionIndefinite: Boolean(event.suspensionIndefinite),
       reason: event.reason || "",
       playerQuery: ""
     })));
@@ -3269,17 +3271,18 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   }
 
   function addEvent(type, teamId = selectedMatch?.homeTeamId) {
-    const players = getPlayersForEvent(type, teamId);
     setEvents((current) => [
       ...current,
       {
         id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type,
+        lockedType: type,
         teamId,
         lockedTeamId: teamId,
-        playerId: players[0]?.id || "",
+        playerId: "",
         minute: "",
         suspensionMatches: type === "red" ? Number(league.rules?.defaultRedSuspensionMatches || 1) : 0,
+        suspensionIndefinite: false,
         reason: "",
         playerQuery: ""
       }
@@ -3298,11 +3301,13 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     return Array.from({ length: missing }, () => ({
       id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: "goal",
+      lockedType: "goal",
       teamId,
       lockedTeamId: teamId,
-      playerId: players[0]?.id || "",
+      playerId: "",
       minute: "",
       suspensionMatches: 0,
+      suspensionIndefinite: false,
       reason: "",
       playerQuery: ""
     }));
@@ -3317,7 +3322,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     }
 
     setValidationMessage("");
-    setSheetNotice("Se agregaron los goles pendientes del marcador.");
+    setSheetNotice("Se agregaron eventos de gol pendientes. Selecciona jugador y minuto antes de guardar.");
     setEvents((current) => {
       const homeMissing = buildMissingGoalEvents(selectedMatch.homeTeamId, current);
       const withHome = [...current, ...homeMissing];
@@ -3448,11 +3453,98 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     const redWithoutReason = cleanEvents.find((item) => item.type === "red" && !String(item.reason || "").trim());
     if (redWithoutReason) return "Toda tarjeta roja debe tener motivo de sancion.";
 
-    const redWithoutMatches = cleanEvents.find((item) => item.type === "red" && Number(item.suspensionMatches || 0) < 1);
+    const redWithoutMatches = cleanEvents.find((item) => item.type === "red" && !item.suspensionIndefinite && Number(item.suspensionMatches || 0) < 1);
     if (redWithoutMatches) return "Toda tarjeta roja debe tener al menos 1 partido de sancion.";
 
     return "";
   }
+
+  function renderEventRow(eventItem, index, isLatest = false) {
+    const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
+    const eventTeam = getTeam(league, eventTeamId);
+    const eventTeamLabel = eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento";
+    const playerTeamId = eventItem.type === "own_goal" ? getOpponentTeamId(eventTeamId) : eventTeamId;
+    const eventPlayers = getEventPlayersForDisplay(eventItem, playerTeamId);
+    const playerLabel = eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : "Jugador";
+    const eventSide = eventTeamId === selectedMatch.homeTeamId ? "home" : "away";
+
+    return (
+      <article className={`event-row event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
+        <div className="event-row-head">
+          <strong><span className="event-icon" aria-hidden="true">{getMatchEventIcon(eventItem.type)}</span>{getMatchEventLabel(eventItem.type)} | {eventTeam?.name || "Equipo"}</strong>
+          <span>Evento {index + 1}</span>
+          <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
+        </div>
+        <div className="event-locked-field">
+          <span>Evento</span>
+          <strong><span className="event-icon" aria-hidden="true">{getMatchEventIcon(eventItem.type)}</span>{getMatchEventLabel(eventItem.type)}</strong>
+          <small>Fijo por el boton elegido</small>
+        </div>
+        <div className="event-locked-field">
+          <span>{eventTeamLabel}</span>
+          <strong>{eventTeam?.name || "Equipo"}</strong>
+          <small>{eventItem.type === "own_goal" ? "Gol a favor de este equipo" : "No editable"}</small>
+        </div>
+        <label>Buscar jugador
+          <input
+            value={eventItem.playerQuery || ""}
+            onChange={(event) => updateEvent(eventItem.id, "playerQuery", event.target.value)}
+            placeholder="Nombre o numero"
+          />
+        </label>
+        <label>{playerLabel}
+          <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label={eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : `Jugador de ${eventTeam?.name || "equipo"}`}>
+            <option value="">{eventPlayers.length ? "Selecciona jugador" : "Sin jugadores disponibles"}</option>
+            {eventPlayers.map((player) => (
+              <option key={player.id} value={player.id}>
+                #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>Minuto
+          <input value={eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} type="number" min="0" max="130" placeholder="Min" aria-label="Minuto" />
+        </label>
+        {eventItem.type === "red" ? (
+          <>
+            <label className="event-toggle-field">
+              <input
+                checked={Boolean(eventItem.suspensionIndefinite)}
+                onChange={(event) => updateEvent(eventItem.id, "suspensionIndefinite", event.target.checked)}
+                type="checkbox"
+              />
+              Inhabilitado indefinido
+            </label>
+            <label>Partidos de sancion
+              <input
+                value={eventItem.suspensionIndefinite ? "" : eventItem.suspensionMatches}
+                onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)}
+                type="number"
+                min="1"
+                placeholder={eventItem.suspensionIndefinite ? "Indefinido" : "Sancion"}
+                aria-label="Partidos de sancion"
+                disabled={Boolean(eventItem.suspensionIndefinite)}
+              />
+            </label>
+            <label className="event-reason-field">Motivo
+              <input value={eventItem.reason} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Ej. Insultos al arbitro" aria-label="Motivo de sancion" required />
+            </label>
+          </>
+        ) : (
+          <span className="event-hint">
+            {eventItem.type === "goal"
+              ? `Gol de ${eventTeam?.name || "equipo asignado"}`
+              : eventItem.type === "own_goal"
+              ? `Autogol a favor de ${eventTeam?.name || "equipo asignado"}`
+              : `Amonestacion de ${eventTeam?.name || "equipo asignado"}`}
+          </span>
+        )}
+      </article>
+    );
+  }
+
+  const previousEvents = events.slice(0, -1);
+  const latestEvent = events[events.length - 1] || null;
 
   return (
     <form
@@ -3609,7 +3701,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       {sheetNotice && <p className="auth-ok">{sheetNotice}</p>}
 
       <div className="event-toolbar">
-        <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Completar goles del marcador</button>
+        <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Agregar goles pendientes</button>
       </div>
 
       <div className="event-quick-panel" aria-label="Agregar eventos rapidos">
@@ -3617,101 +3709,42 @@ function MatchSheet({ league, onSaveMatchSheet }) {
           <strong>{homeTeam?.name || "Local"}</strong>
           <span>Eventos del local</span>
           <div className="event-quick-buttons">
-            <button type="button" onClick={() => addEvent("goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Gol</button>
-            <button type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Amarilla</button>
-            <button type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Roja</button>
-            <button type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}>Autogol</button>
+            <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
+            <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
+            <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
+            <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
           </div>
         </div>
         <div className="event-team-card away">
           <strong>{awayTeam?.name || "Visitante"}</strong>
           <span>Eventos del visitante</span>
           <div className="event-quick-buttons">
-            <button type="button" onClick={() => addEvent("goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Gol</button>
-            <button type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Amarilla</button>
-            <button type="button" onClick={() => addEvent("red", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Roja</button>
-            <button type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}>Autogol</button>
+            <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
+            <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
+            <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
+            <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
           </div>
         </div>
       </div>
 
       <div className="event-list">
-        {events.map((eventItem, index) => {
-          const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
-          const eventTeam = getTeam(league, eventTeamId);
-          const isLockedTeamEvent = Boolean(eventItem.lockedTeamId);
-          const eventTeamLabel = eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento";
-          const playerTeamId = eventItem.type === "own_goal" ? getOpponentTeamId(eventTeamId) : eventTeamId;
-          const eventPlayers = getEventPlayersForDisplay(eventItem, playerTeamId);
-          const playerLabel = eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : "Jugador";
-
-          return (
-            <article className="event-row" key={eventItem.id}>
-              <div className="event-row-head">
-                <strong>{getMatchEventLabel(eventItem.type)} | {eventTeam?.name || "Equipo"}</strong>
-                <span>Evento {index + 1}</span>
-                <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
-              </div>
-              <label>Evento
-                <select value={eventItem.type} onChange={(event) => updateEvent(eventItem.id, "type", event.target.value)} aria-label="Tipo de evento">
-                  <option value="goal">Gol</option>
-                  <option value="own_goal">Autogol</option>
-                  <option value="yellow">Amarilla</option>
-                  <option value="red">Roja</option>
-                </select>
-              </label>
-              <label>{eventTeamLabel}
-                <select
-                  disabled={isLockedTeamEvent}
-                  title={isLockedTeamEvent ? "El equipo queda fijo segun el boton local/visitante seleccionado." : eventTeamLabel}
-                  value={eventTeamId}
-                  onChange={(event) => updateEvent(eventItem.id, "teamId", event.target.value)}
-                  aria-label={eventTeamLabel}
-                >
-                  <option value={selectedMatch.homeTeamId}>{homeTeam?.name || "Local"}</option>
-                  <option value={selectedMatch.awayTeamId}>{awayTeam?.name || "Visitante"}</option>
-                </select>
-              </label>
-              <label>Buscar jugador
-                <input
-                  value={eventItem.playerQuery || ""}
-                  onChange={(event) => updateEvent(eventItem.id, "playerQuery", event.target.value)}
-                  placeholder="Nombre o numero"
-                />
-              </label>
-              <label>{playerLabel}
-                <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label={eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : `Jugador de ${eventTeam?.name || "equipo"}`}>
-                  {eventPlayers.map((player) => (
-                    <option key={player.id} value={player.id}>
-                      #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>Minuto
-                <input value={eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} type="number" min="0" max="130" placeholder="Min" aria-label="Minuto" />
-              </label>
-              {eventItem.type === "red" ? (
-                <>
-                  <label>Partidos de sancion
-                    <input value={eventItem.suspensionMatches} onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)} type="number" min="1" placeholder="Sancion" aria-label="Partidos de sancion" />
-                  </label>
-                  <label className="event-reason-field">Motivo
-                    <input value={eventItem.reason} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Motivo" aria-label="Motivo de sancion" required />
-                  </label>
-                </>
-              ) : (
-                <span className="event-hint">
-                  {eventItem.type === "goal"
-                    ? `Gol de ${eventTeam?.name || "equipo asignado"}`
-                    : eventItem.type === "own_goal"
-                    ? `Autogol a favor de ${eventTeam?.name || "equipo asignado"}`
-                    : `Amonestacion de ${eventTeam?.name || "equipo asignado"}`}
-                </span>
-              )}
-            </article>
-          );
-        })}
+        {latestEvent && (
+          <div className="sheet-latest-event">
+            <span>Ultimo evento registrado</span>
+            {renderEventRow(latestEvent, events.length - 1, true)}
+          </div>
+        )}
+        {previousEvents.length > 0 && (
+          <details className="sheet-previous-events">
+            <summary>
+              <strong>Eventos anteriores</strong>
+              <span>{previousEvents.length} evento(s), tocar para revisar</span>
+            </summary>
+            <div className="sheet-previous-event-list">
+              {previousEvents.map((eventItem, index) => renderEventRow(eventItem, index))}
+            </div>
+          </details>
+        )}
         {!events.length && <p className="empty">Agrega goles, tarjetas amarillas o rojas para completar el acta.</p>}
       </div>
 
@@ -4041,6 +4074,14 @@ function getMatchEventLabel(type) {
   return "Evento";
 }
 
+function getMatchEventIcon(type) {
+  if (type === "goal") return "⚽";
+  if (type === "own_goal") return "↩";
+  if (type === "yellow") return "🟨";
+  if (type === "red") return "🟥";
+  return "•";
+}
+
 function getDelegateStatusLabel(status) {
   if (status === "pending_activation") return "pendiente de activacion";
   if (status === "active") return "activo";
@@ -4058,6 +4099,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction })
   const activeLeague = scopeLeagueToCompetition(league, getDefaultCompetitionId(league));
   const sanctions = activeLeague.sanctions || [];
   const [sanctionNotice, setSanctionNotice] = useState("");
+  const [sanctionIndefinite, setSanctionIndefinite] = useState(false);
 
   function submitSanction(event) {
     event.preventDefault();
@@ -4065,6 +4107,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction })
     onAddPlayerSanction(getFormPayload(event.currentTarget));
     setSanctionNotice("Sancion agregada correctamente.");
     event.currentTarget.reset();
+    setSanctionIndefinite(false);
   }
 
   return (
@@ -4097,8 +4140,26 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction })
         <label>Fecha
           <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
         </label>
+        <label className="event-toggle-field sanction-indefinite-toggle">
+          <input
+            checked={sanctionIndefinite}
+            name="indefinite"
+            onChange={(event) => setSanctionIndefinite(event.target.checked)}
+            type="checkbox"
+          />
+          Inhabilitado indefinido
+        </label>
         <label>Partidos
-          <input name="matches" type="number" min="0" max="99" defaultValue="1" required />
+          <input
+            name="matches"
+            type="number"
+            min="0"
+            max="99"
+            defaultValue="1"
+            required={!sanctionIndefinite}
+            disabled={sanctionIndefinite}
+            placeholder={sanctionIndefinite ? "Indefinido" : "Partidos"}
+          />
         </label>
         <label>Motivo
           <input name="reason" required placeholder="Ej. Golpe a rival, insulto al arbitro" />
@@ -4123,7 +4184,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction })
               </div>
               <div>
                 <small>Castigo</small>
-                <span>{sanction.matches} partido(s)</span>
+                <span>{sanction.indefinite ? "Indefinido" : `${sanction.matches} partido(s)`}</span>
               </div>
               <div>
                 <small>Motivo</small>

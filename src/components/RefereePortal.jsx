@@ -125,18 +125,18 @@ function getPlayersForEvent(match, event) {
 }
 
 function createEvent(match, type, teamId, minute = "") {
-  const draft = {
+  return {
     id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     type,
+    lockedType: type,
     teamId,
     lockedTeamId: teamId,
     playerId: "",
     minute,
     suspensionMatches: type === "red" ? 1 : 0,
+    suspensionIndefinite: false,
     reason: ""
   };
-  const players = getPlayersForEvent(match, draft);
-  return { ...draft, playerId: players[0]?.id || "" };
 }
 
 function readRefereeDraft(key) {
@@ -197,12 +197,22 @@ function getEventLabel(type) {
   return "Evento";
 }
 
+function getEventIcon(type) {
+  if (type === "goal") return "⚽";
+  if (type === "own_goal") return "↩";
+  if (type === "yellow") return "🟨";
+  if (type === "red") return "🟥";
+  return "•";
+}
+
 function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
   const draftKey = `ligatec-referee-draft-${match.id}`;
   const savedEvents = (match.events || []).map((event, index) => ({
     id: `saved-${match.id}-${index}-${event.type}-${event.playerId}`,
+    ...event,
+    lockedType: event.type,
     lockedTeamId: event.teamId || match.homeTeamId,
-    ...event
+    suspensionIndefinite: Boolean(event.suspensionIndefinite)
   }));
   const draft = readRefereeDraft(draftKey);
   const [homeGoals, setHomeGoals] = useState(draft?.homeGoals ?? match.homeGoals ?? 0);
@@ -348,16 +358,18 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
   function updateEvent(eventId, field, value) {
     const currentEvent = events.find((event) => event.id === eventId);
     if (!currentEvent) return;
+    if (currentEvent.lockedType && field === "type") return;
+    if (currentEvent.lockedTeamId && field === "teamId") return;
     const wasGoal = isGoalEventType(currentEvent.type);
+    const nextType = field === "type" ? value : currentEvent.type;
     const nextEvent = {
       ...currentEvent,
       [field]: value,
+      playerId: field === "type" || field === "teamId" ? "" : field === "playerId" ? value : currentEvent.playerId,
       suspensionMatches: field === "type" && value === "red" ? Math.max(Number(currentEvent.suspensionMatches || 1), 1) : currentEvent.suspensionMatches,
+      suspensionIndefinite: nextType === "red" ? field === "suspensionIndefinite" ? Boolean(value) : Boolean(currentEvent.suspensionIndefinite) : false,
       reason: field === "type" && value !== "red" ? "" : currentEvent.reason
     };
-    if (field === "type") {
-      nextEvent.playerId = getPlayersForEvent(match, nextEvent)[0]?.id || "";
-    }
     const isGoal = isGoalEventType(nextEvent.type);
     if (sheetMode === "played" && wasGoal !== isGoal) adjustScore(nextEvent.teamId, isGoal ? 1 : -1);
     setEvents((current) => current.map((event) => (event.id === eventId ? nextEvent : event)));
@@ -388,6 +400,10 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     setMessage("");
     const cleanEvents = events.filter((item) => item.playerId);
     const isDefault = sheetMode !== "played";
+    if (events.some((item) => !item.playerId)) {
+      setMessage("Todos los eventos del acta deben tener jugador seleccionado.");
+      return;
+    }
     if (!isDefault) {
       const homeEventGoals = cleanEvents.filter((item) => ["goal", "own_goal"].includes(item.type) && item.teamId === match.homeTeamId).length;
       const awayEventGoals = cleanEvents.filter((item) => ["goal", "own_goal"].includes(item.type) && item.teamId === match.awayTeamId).length;
@@ -399,6 +415,11 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     const redWithoutReason = cleanEvents.find((item) => item.type === "red" && !String(item.reason || "").trim());
     if (redWithoutReason) {
       setMessage("Toda tarjeta roja debe tener motivo.");
+      return;
+    }
+    const redWithoutMatches = cleanEvents.find((item) => item.type === "red" && !item.suspensionIndefinite && Number(item.suspensionMatches || 0) < 1);
+    if (redWithoutMatches) {
+      setMessage("Toda tarjeta roja debe tener partidos de suspension o marcarse como indefinida.");
       return;
     }
     if (!isDefault && match.homePinRequired && normalizePin(homeCaptainPin).length < 4) {
@@ -433,7 +454,8 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           teamId: item.teamId,
           playerId: item.playerId,
           minute: item.minute,
-          suspensionMatches: item.type === "red" ? item.suspensionMatches || 1 : 0,
+          suspensionMatches: item.type === "red" && !item.suspensionIndefinite ? item.suspensionMatches || 1 : 0,
+          suspensionIndefinite: item.type === "red" ? Boolean(item.suspensionIndefinite) : false,
           reason: item.type === "red" ? item.reason : ""
         }))
       });
@@ -452,6 +474,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     const playerTeam = eventItem.type === "own_goal"
       ? eventItem.teamId === match.homeTeamId ? match.awayTeamName : match.homeTeamName
       : eventTeam;
+    const eventSide = eventItem.teamId === match.homeTeamId ? "home" : "away";
     const playerSearch = playerSearches[eventItem.id] || "";
     const playerQuery = normalizeSearch(playerSearch);
     const filteredPlayers = players.filter((player) => {
@@ -460,22 +483,19 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     });
     const visiblePlayers = filteredPlayers.length ? filteredPlayers : players;
     return (
-      <article className={`referee-event-row ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
+      <article className={`referee-event-row event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
         <div className="referee-event-row-head">
           <div>
-            <strong>#{index + 1} {getEventLabel(eventItem.type)}</strong>
+            <strong>#{index + 1} <span className="event-icon" aria-hidden="true">{getEventIcon(eventItem.type)}</span>{getEventLabel(eventItem.type)}</strong>
             <span>{eventItem.type === "own_goal" ? `A favor de ${eventTeam}` : eventTeam}</span>
           </div>
           <button className="danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
         </div>
-        <label>Tipo de evento
-          <select value={eventItem.type} onChange={(event) => updateEvent(eventItem.id, "type", event.target.value)} aria-label="Tipo de evento">
-            <option value="goal">Gol</option>
-            <option value="own_goal">Autogol</option>
-            <option value="yellow">Amarilla</option>
-            <option value="red">Roja</option>
-          </select>
-        </label>
+        <div className="referee-locked-team">
+          <span>Evento</span>
+          <strong><span className="event-icon" aria-hidden="true">{getEventIcon(eventItem.type)}</span>{getEventLabel(eventItem.type)}</strong>
+          <small>Fijo segun el boton elegido</small>
+        </div>
         <div className="referee-locked-team">
           <span>{eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento"}</span>
           <strong>{eventTeam}</strong>
@@ -502,11 +522,29 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
         </label>
         {eventItem.type === "red" && (
           <>
+            <label className="event-toggle-field">
+              <input
+                checked={Boolean(eventItem.suspensionIndefinite)}
+                onChange={(event) => updateEvent(eventItem.id, "suspensionIndefinite", event.target.checked)}
+                type="checkbox"
+              />
+              Inhabilitado indefinido
+            </label>
             <label>Suspension
-              <input value={eventItem.suspensionMatches || 1} onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)} inputMode="numeric" min="1" max="20" type="number" aria-label="Partidos de suspension" />
+              <input
+                value={eventItem.suspensionIndefinite ? "" : eventItem.suspensionMatches || 1}
+                onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)}
+                inputMode="numeric"
+                min="1"
+                max="20"
+                type="number"
+                placeholder={eventItem.suspensionIndefinite ? "Indefinido" : "Partidos"}
+                aria-label="Partidos de suspension"
+                disabled={Boolean(eventItem.suspensionIndefinite)}
+              />
             </label>
             <label>Motivo
-              <input value={eventItem.reason || ""} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Motivo de roja" aria-label="Motivo de roja" />
+              <input value={eventItem.reason || ""} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Ej. Insultos al arbitro" aria-label="Motivo de roja" />
             </label>
           </>
         )}
@@ -611,14 +649,14 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       )}
 
       <div className="referee-event-buttons">
-        <button className="event-goal" type="button" onClick={() => addEvent("goal", match.homeTeamId)}>Gol local</button>
-        <button className="event-goal" type="button" onClick={() => addEvent("goal", match.awayTeamId)}>Gol visitante</button>
-        <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", match.homeTeamId)}>Autogol a local</button>
-        <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", match.awayTeamId)}>Autogol a visitante</button>
-        <button className="event-yellow" type="button" onClick={() => addEvent("yellow", match.homeTeamId)}>Amarilla local</button>
-        <button className="event-yellow" type="button" onClick={() => addEvent("yellow", match.awayTeamId)}>Amarilla visitante</button>
-        <button className="event-red" type="button" onClick={() => addEvent("red", match.homeTeamId)}>Roja local</button>
-        <button className="event-red" type="button" onClick={() => addEvent("red", match.awayTeamId)}>Roja visitante</button>
+        <button className="event-goal" type="button" onClick={() => addEvent("goal", match.homeTeamId)}><span aria-hidden="true">{getEventIcon("goal")}</span>Gol local</button>
+        <button className="event-goal" type="button" onClick={() => addEvent("goal", match.awayTeamId)}><span aria-hidden="true">{getEventIcon("goal")}</span>Gol visitante</button>
+        <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", match.homeTeamId)}><span aria-hidden="true">{getEventIcon("own_goal")}</span>Autogol a local</button>
+        <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", match.awayTeamId)}><span aria-hidden="true">{getEventIcon("own_goal")}</span>Autogol a visitante</button>
+        <button className="event-yellow" type="button" onClick={() => addEvent("yellow", match.homeTeamId)}><span aria-hidden="true">{getEventIcon("yellow")}</span>Amarilla local</button>
+        <button className="event-yellow" type="button" onClick={() => addEvent("yellow", match.awayTeamId)}><span aria-hidden="true">{getEventIcon("yellow")}</span>Amarilla visitante</button>
+        <button className="event-red" type="button" onClick={() => addEvent("red", match.homeTeamId)}><span aria-hidden="true">{getEventIcon("red")}</span>Roja local</button>
+        <button className="event-red" type="button" onClick={() => addEvent("red", match.awayTeamId)}><span aria-hidden="true">{getEventIcon("red")}</span>Roja visitante</button>
       </div>
 
       <div className="referee-event-list">

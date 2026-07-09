@@ -554,6 +554,7 @@ async function buildTeamPortalPayload(userId) {
       ? {
         type: activeSuspensionByPlayerId.get(player.id).type,
         reason: activeSuspensionByPlayerId.get(player.id).reason,
+        indefinite: Boolean(activeSuspensionByPlayerId.get(player.id).indefinite),
         remainingMatches: activeSuspensionByPlayerId.get(player.id).remainingMatches,
         returnRound: activeSuspensionByPlayerId.get(player.id).returnRound
       }
@@ -641,6 +642,11 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
       const awayRoster = rosterByMatchTeam.get(`${match.id}:${match.awayTeamId}`);
       const homeEligiblePlayers = getEligiblePlayersForTeam(league, match.homeTeamId);
       const awayEligiblePlayers = getEligiblePlayersForTeam(league, match.awayTeamId);
+      const activeSuspensionByPlayerId = new Set(
+        calculateSuspensionNotices(league)
+          .filter((notice) => notice.status === "active" && notice.player?.id)
+          .map((notice) => notice.player.id)
+      );
       const buildRosterPlayers = (players, roster) => {
         const rosterPlayerIds = new Set((roster?.players || []).map((entry) => typeof entry === "string" ? entry : entry.playerId));
         const source = roster ? players.filter((player) => rosterPlayerIds.has(player.id)) : players;
@@ -651,7 +657,7 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
           position: player.position,
           teamId: player.teamId,
           isCaptain: roster?.captainPlayerId === player.id
-        }));
+        })).filter((player) => !activeSuspensionByPlayerId.has(player.id));
       };
       assignedMatches.push({
         id: match.id,
@@ -2440,7 +2446,11 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
   const suspendedPlayerId = requestedPlayerIds.find((playerId) => activeSuspensionByPlayerId.has(playerId));
   if (suspendedPlayerId) {
     const player = league.players.find((item) => item.id === suspendedPlayerId);
-    return response.status(400).json({ error: `${player?.name || "Un jugador"} esta suspendido y no puede ser convocado.` });
+    const notice = activeSuspensionByPlayerId.get(suspendedPlayerId);
+    const detail = notice?.indefinite
+      ? "esta inhabilitado indefinidamente"
+      : `esta suspendido${notice?.remainingMatches ? ` por ${notice.remainingMatches} juego(s)` : ""}`;
+    return response.status(400).json({ error: `${player?.name || "Un jugador"} ${detail} y no puede ser convocado.` });
   }
 
   const rosters = await listMatchRostersForLeagueData(league.id);

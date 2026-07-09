@@ -68,6 +68,11 @@ function runMigrations() {
     db.prepare("ALTER TABLE league_rules ADD COLUMN minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0").run();
   }
 
+  const matchEventColumns = db.prepare("PRAGMA table_info(match_events)").all().map((column) => column.name);
+  if (!matchEventColumns.includes("suspension_indefinite")) {
+    db.prepare("ALTER TABLE match_events ADD COLUMN suspension_indefinite INTEGER NOT NULL DEFAULT 0").run();
+  }
+
   const sponsorColumns = db.prepare("PRAGMA table_info(sponsors)").all().map((column) => column.name);
   if (!sponsorColumns.includes("image_url")) {
     db.prepare("ALTER TABLE sponsors ADD COLUMN image_url TEXT").run();
@@ -145,6 +150,9 @@ function runMigrations() {
   const sanctionColumns = db.prepare("PRAGMA table_info(player_sanctions)").all().map((column) => column.name);
   if (sanctionColumns.length && !sanctionColumns.includes("competition_id")) {
     db.prepare("ALTER TABLE player_sanctions ADD COLUMN competition_id TEXT").run();
+  }
+  if (sanctionColumns.length && !sanctionColumns.includes("indefinite")) {
+    db.prepare("ALTER TABLE player_sanctions ADD COLUMN indefinite INTEGER NOT NULL DEFAULT 0").run();
   }
 
   const competitionColumns = db.prepare("PRAGMA table_info(competitions)").all().map((column) => column.name);
@@ -496,6 +504,7 @@ export function getStore() {
       playerId: row.player_id,
       type: row.type,
       matches: row.matches,
+      indefinite: Boolean(row.indefinite),
       reason: row.reason,
       date: row.date,
       status: row.status,
@@ -596,6 +605,7 @@ export function getStore() {
         teamId: event.team_id,
         minute: event.minute,
         suspensionMatches: event.suspension_matches,
+        suspensionIndefinite: Boolean(event.suspension_indefinite),
         reason: event.reason
       }))
     }));
@@ -857,8 +867,8 @@ export function importStore(store) {
 
       for (const sanction of league.sanctions || []) {
         db.prepare(`
-          INSERT INTO player_sanctions (id, league_id, competition_id, player_id, type, matches, reason, date, status, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO player_sanctions (id, league_id, competition_id, player_id, type, matches, indefinite, reason, date, status, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           sanction.id,
           league.id,
@@ -866,6 +876,7 @@ export function importStore(store) {
           sanction.playerId,
           sanction.type || "Sancion disciplinaria",
           Number(sanction.matches || 0),
+          sanction.indefinite ? 1 : 0,
           sanction.reason || "",
           sanction.date || "",
           sanction.status || "active",
@@ -990,9 +1001,9 @@ export function importStore(store) {
 
         for (const event of match.events || []) {
           db.prepare(`
-            INSERT INTO match_events (match_id, type, player_id, team_id, minute, suspension_matches, reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `).run(match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, event.reason);
+            INSERT INTO match_events (match_id, type, player_id, team_id, minute, suspension_matches, suspension_indefinite, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, event.suspensionIndefinite ? 1 : 0, event.reason);
         }
       }
 

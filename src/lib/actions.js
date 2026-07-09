@@ -191,7 +191,8 @@ export function addPlayerSanction(store, leagueId, payload) {
         competitionId: payload.competitionId || getDefaultCompetitionId(league),
         playerId: payload.playerId,
         type: upperText(payload.type || "Sancion disciplinaria"),
-        matches: Number(payload.matches || 0),
+        matches: checkboxValue(payload.indefinite) ? 0 : Number(payload.matches || 0),
+        indefinite: checkboxValue(payload.indefinite),
         reason: upperText(payload.reason || ""),
         date: payload.date || new Date().toISOString().slice(0, 10),
         status: payload.status || "active",
@@ -1157,7 +1158,7 @@ export function saveMatchSheet(store, leagueId, payload) {
           if (event.type === "red" && !String(event.reason || "").trim()) {
             throw new Error("Toda tarjeta roja debe tener motivo.");
           }
-          if (event.type === "red" && Number(event.suspensionMatches || 0) < 1) {
+          if (event.type === "red" && !event.suspensionIndefinite && Number(event.suspensionMatches || 0) < 1) {
             throw new Error("Toda tarjeta roja debe tener partidos de sancion.");
           }
 
@@ -1167,8 +1168,11 @@ export function saveMatchSheet(store, leagueId, payload) {
             teamId: eventTeamId,
             minute,
             suspensionMatches: event.type === "red"
-              ? Number(event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1)
+              ? event.suspensionIndefinite
+                ? 0
+                : Number(event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1)
               : 0,
+            suspensionIndefinite: event.type === "red" ? Boolean(event.suspensionIndefinite) : false,
             reason: event.type === "red" ? upperText(event.reason || "Tarjeta roja") : ""
           };
         })

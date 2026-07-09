@@ -92,6 +92,8 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS suspension_indefinite BOOLEAN NOT NULL DEFAULT false");
+  await pool.query("ALTER TABLE IF EXISTS player_sanctions ADD COLUMN IF NOT EXISTS indefinite BOOLEAN NOT NULL DEFAULT false");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS discipline_scope TEXT NOT NULL DEFAULT 'competition'");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS playoff_qualifiers INTEGER NOT NULL DEFAULT 8");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0");
@@ -442,6 +444,7 @@ export async function getPostgresStore() {
       playerId: row.player_id,
       type: row.type,
       matches: row.matches,
+      indefinite: toBoolean(row.indefinite),
       reason: row.reason,
       date: rowDate(row, "date"),
       status: row.status,
@@ -525,6 +528,7 @@ export async function getPostgresStore() {
         teamId: event.team_id,
         minute: event.minute,
         suspensionMatches: event.suspension_matches,
+        suspensionIndefinite: toBoolean(event.suspension_indefinite),
         reason: event.reason
       });
       eventsByMatchId.set(event.match_id, events);
@@ -840,8 +844,8 @@ export async function importPostgresStore(store) {
           player.status || "active"
         ]));
 
-      await insertRows(client, "player_sanctions", ["id", "league_id", "competition_id", "player_id", "type", "matches", "reason", "date", "status", "notes"], (league.sanctions || []).map((sanction) => (
-        [sanction.id, league.id, sanction.competitionId || league.currentCompetitionId, sanction.playerId, sanction.type || "Sancion disciplinaria", Number(sanction.matches || 0), sanction.reason || "", sanction.date || "", sanction.status || "active", sanction.notes || ""]
+      await insertRows(client, "player_sanctions", ["id", "league_id", "competition_id", "player_id", "type", "matches", "indefinite", "reason", "date", "status", "notes"], (league.sanctions || []).map((sanction) => (
+        [sanction.id, league.id, sanction.competitionId || league.currentCompetitionId, sanction.playerId, sanction.type || "Sancion disciplinaria", Number(sanction.matches || 0), toBoolean(sanction.indefinite), sanction.reason || "", sanction.date || "", sanction.status || "active", sanction.notes || ""]
       )), { dateColumns: ["date"] });
 
       await insertRows(client, "player_injuries", ["id", "league_id", "competition_id", "player_id", "type", "date", "expected_return", "needs_surgery", "needs_support", "support_detail", "status", "notes"], (league.injuries || []).map((injury) => (
@@ -895,8 +899,8 @@ export async function importPostgresStore(store) {
           match.fourthRefereeUserId || null
         ]), { dateColumns: ["date"] });
 
-      await insertRows(client, "match_events", ["match_id", "type", "player_id", "team_id", "minute", "suspension_matches", "reason"], league.matches.flatMap((match) => (
-        (match.events || []).map((event) => [match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, event.reason])
+      await insertRows(client, "match_events", ["match_id", "type", "player_id", "team_id", "minute", "suspension_matches", "suspension_indefinite", "reason"], league.matches.flatMap((match) => (
+        (match.events || []).map((event) => [match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, toBoolean(event.suspensionIndefinite), event.reason])
       )));
 
       await insertRows(client, "match_rosters", ["id", "league_id", "match_id", "team_id", "submitted_by_user_id", "captain_player_id", "captain_pin", "players_json", "status", "notes", "submitted_at", "updated_at"], (league.matchRosters || []).map((roster) => [

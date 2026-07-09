@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import navGoleoIcon from "../../assets/nav-goleo.png";
-import navInicioIcon from "../../assets/nav-inicio.png";
-import navMasIcon from "../../assets/nav-mas.png";
-import navPartidosIcon from "../../assets/nav-partidos.png";
-import navTablaIcon from "../../assets/nav-tabla.png";
+import ligatecLogo from "../../assets/ligatec-logo.png";
 import {
   calculatePlayerStats,
   calculateStandings,
@@ -50,11 +46,22 @@ function saveLastCompetitionId(leagueId, competitionId) {
   }
 }
 
+const COMPETITION_ACCENTS = ["#28a85a", "#1368d8", "#f97316", "#a855f7", "#eab308", "#0f9ca5", "#dc2626", "#0891b2"];
+
+function getCompetitionAccent(competitions, competitionId) {
+  const index = Math.max(0, competitions.findIndex((competition) => competition.id === competitionId));
+  return COMPETITION_ACCENTS[index % COMPETITION_ACCENTS.length];
+}
+
 export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate }) {
   const [showIntro, setShowIntro] = useState(true);
   const [publicSearch, setPublicSearch] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(() => loadLastCompetitionId(league) || getDefaultCompetitionId(league));
+  const [isCompetitionSheetOpen, setCompetitionSheetOpen] = useState(false);
+  const [showCompetitionGate, setShowCompetitionGate] = useState(() => (
+    (league.competitions || []).length > 1 && !loadLastCompetitionId(league)
+  ));
   const activeLeague = useMemo(
     () => scopeLeagueToCompetition(league, selectedCompetitionId),
     [league, selectedCompetitionId]
@@ -62,9 +69,12 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const regularLeague = useMemo(() => ({ ...activeLeague, matches: regularMatches(activeLeague) }), [activeLeague]);
   const playoffs = useMemo(() => playoffMatches(activeLeague), [activeLeague]);
   const activeCompetition = getCompetition(league, selectedCompetitionId);
+  const competitionAccent = getCompetitionAccent(league.competitions || [], selectedCompetitionId);
+  const hasMultipleCompetitions = (league.competitions || []).length > 1;
   const [selectedSeason, setSelectedSeason] = useState(activeCompetition?.season || league.season);
   const standings = calculateStandings(regularLeague);
   const stats = calculatePlayerStats(activeLeague);
+  const leagueWideStats = useMemo(() => calculatePlayerStats(league), [league]);
   const scheduledMatches = sortPublicMatches(regularLeague.matches.filter((match) => match.status === "scheduled"));
   const nextMatches = scheduledMatches.slice(0, 4);
   const latestResults = sortRecentMatches(finishedMatches(regularLeague)).slice(0, 3);
@@ -75,9 +85,12 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       .sort((a, b) => a - b)
   ), [regularLeague.matches]);
   const defaultRound = useMemo(() => (
+    getCurrentDisplayRound(regularLeague.matches) ||
     (activeCompetition?.activeRound && rounds.includes(Number(activeCompetition.activeRound))
       ? activeCompetition.activeRound
-      : getCurrentDisplayRound(regularLeague.matches)) || rounds.at(-1) || ""
+      : "") ||
+    rounds.at(-1) ||
+    ""
   ), [activeCompetition?.activeRound, regularLeague.matches, rounds]);
   const [selectedRound, setSelectedRound] = useState(defaultRound);
   const selectedRoundMatches = useMemo(() => (
@@ -126,8 +139,8 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   ), [activeLeague, league.highlights]);
   const identityTags = getIdentityTags(league);
   const publicSearchResults = useMemo(
-    () => getPublicSearchResults(activeLeague, stats, publicSearch),
-    [activeLeague, publicSearch, stats]
+    () => getPublicSearchResults(league, leagueWideStats, publicSearch, selectedCompetitionId),
+    [league, leagueWideStats, publicSearch, selectedCompetitionId]
   );
   const selectedPlayer = useMemo(() => (
     activeLeague.players.find((player) => player.id === selectedPlayerId) ||
@@ -150,6 +163,26 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     });
   }
 
+  function selectCompetition(competitionId) {
+    setSelectedCompetitionId(competitionId);
+    setCompetitionSheetOpen(false);
+    setShowCompetitionGate(false);
+  }
+
+  function handlePublicSearchResult(result) {
+    if (result.competitionId && result.competitionId !== selectedCompetitionId) {
+      setSelectedCompetitionId(result.competitionId);
+    }
+    if (result.type === "team") setSelectedTeamId(result.id);
+    if (result.type === "player") setSelectedPlayerId(result.id);
+    if (result.type === "match" && result.round) setSelectedRound(result.round);
+    setPublicSearch("");
+    window.requestAnimationFrame(() => {
+      const targetId = result.type === "player" ? "jugador" : result.type === "team" ? "equipos" : "calendario";
+      document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => setShowIntro(false), 520);
     return () => window.clearTimeout(timer);
@@ -164,10 +197,14 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   }, [league, selectedCompetitionId]);
 
   useEffect(() => {
-    if (league.competitions?.some((competition) => competition.id === selectedCompetitionId)) {
+    if (!showCompetitionGate && league.competitions?.some((competition) => competition.id === selectedCompetitionId)) {
       saveLastCompetitionId(league.id, selectedCompetitionId);
     }
-  }, [league.id, league.competitions, selectedCompetitionId]);
+  }, [league.id, league.competitions, selectedCompetitionId, showCompetitionGate]);
+
+  useEffect(() => {
+    setShowCompetitionGate((league.competitions || []).length > 1 && !loadLastCompetitionId(league));
+  }, [league]);
 
   useEffect(() => {
     if (activeCompetition?.season) setSelectedSeason(activeCompetition.season);
@@ -193,8 +230,20 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     if (!activeLeague.teams.some((team) => team.id === selectedTeamId)) setSelectedTeamId(activeLeague.teams[0].id);
   }, [activeLeague.teams, selectedTeamId]);
 
+  if (showCompetitionGate) {
+    return (
+      <main className="page public-tournament-entry-page" style={{ "--competition-accent": competitionAccent }}>
+        <TournamentEntryGate
+          league={league}
+          selectedCompetitionId={selectedCompetitionId}
+          onSelectCompetition={selectCompetition}
+        />
+      </main>
+    );
+  }
+
   return (
-    <main className="page">
+    <main className="page public-league-page" style={{ "--competition-accent": competitionAccent }}>
       {showIntro && <PublicLoading league={league} />}
       <section className="hero public-hero" id="inicio" style={{ "--hero-image": `url(${heroImage})` }}>
         <div className="hero-content">
@@ -211,6 +260,14 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
         </div>
         <HeroMatchPanel league={activeLeague} match={featuredMatch} standings={standings} />
       </section>
+
+      <PublicCompetitionDock
+        activeCompetition={activeCompetition}
+        competitions={league.competitions || []}
+        league={activeLeague}
+        onOpen={() => setCompetitionSheetOpen(true)}
+        visible={hasMultipleCompetitions}
+      />
 
       <PublicQuickNav />
 
@@ -230,8 +287,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       <PublicUtilityBar
         leagueName={league.name}
         onSearch={setPublicSearch}
-        onSelectPlayer={selectPublicPlayer}
-        onSelectTeam={setSelectedTeamId}
+        onSelectResult={handlePublicSearchResult}
         onShare={shareLeague}
         query={publicSearch}
         results={publicSearchResults}
@@ -244,7 +300,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
           selectedSeason={selectedSeason}
           selectedCompetitionId={selectedCompetitionId}
           onSelectSeason={setSelectedSeason}
-          onSelectCompetition={setSelectedCompetitionId}
+          onSelectCompetition={selectCompetition}
         />
       </section>
 
@@ -380,6 +436,15 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       </section>
 
       <PublicLegalFooter legalPath={legalPath} league={league} onNavigate={onNavigate} />
+      {isCompetitionSheetOpen && (
+        <CompetitionSheet
+          activeCompetitionId={selectedCompetitionId}
+          competitions={league.competitions || []}
+          league={league}
+          onClose={() => setCompetitionSheetOpen(false)}
+          onSelectCompetition={selectCompetition}
+        />
+      )}
     </main>
   );
 }
@@ -414,6 +479,144 @@ function PublicLoading({ league }) {
         <strong>{league.name}</strong>
         <small>{league.season}</small>
       </div>
+    </div>
+  );
+}
+
+function getCompetitionOverview(league, competitionId) {
+  const scoped = scopeLeagueToCompetition(league, competitionId);
+  const competition = getCompetition(league, competitionId);
+  return {
+    competition,
+    teamCount: scoped.teams.length,
+    playerCount: scoped.players.length,
+    matchCount: scoped.matches.length,
+    scheduledCount: scoped.matches.filter((match) => match.status === "scheduled").length,
+    round: competition?.activeRound || getCurrentDisplayRound(scoped.matches) || "-"
+  };
+}
+
+function CompetitionMark({ accent, label = "LT" }) {
+  return (
+    <span className="competition-mark" style={{ "--mark-accent": accent }} aria-hidden="true">
+      {String(label || "LT").slice(0, 2).toLocaleUpperCase("es-MX")}
+    </span>
+  );
+}
+
+function TournamentEntryGate({ league, selectedCompetitionId, onSelectCompetition }) {
+  const competitions = league.competitions || [];
+
+  return (
+    <section className="tournament-entry-gate" aria-label="Seleccionar torneo">
+      <div className="tournament-entry-brand">
+        <img alt="LIGATEC" src={ligatecLogo} />
+        <span>{league.city || "Liga"}</span>
+      </div>
+      <div className="tournament-entry-copy">
+        <span>Primer ingreso</span>
+        <h1>Bienvenido a {league.name}</h1>
+        <p>Selecciona el torneo que deseas consultar.</p>
+      </div>
+      <div className="tournament-entry-list">
+        {competitions.map((competition) => {
+          const overview = getCompetitionOverview(league, competition.id);
+          const accent = getCompetitionAccent(competitions, competition.id);
+          return (
+            <button
+              className={competition.id === selectedCompetitionId ? "active" : ""}
+              key={competition.id}
+              type="button"
+              onClick={() => onSelectCompetition(competition.id)}
+            >
+              <CompetitionMark accent={accent} label={competition.name} />
+              <span>
+                <strong>{competition.name}</strong>
+                <small>{competition.season || league.season}</small>
+              </span>
+              <em>{overview.teamCount} equipos</em>
+            </button>
+          );
+        })}
+      </div>
+      <small className="tournament-entry-note">Podras cambiar de torneo en cualquier momento.</small>
+    </section>
+  );
+}
+
+function PublicCompetitionDock({ activeCompetition, competitions, league, onOpen, visible }) {
+  if (!visible || !activeCompetition) return null;
+  const overview = getCompetitionOverview(league, activeCompetition.id);
+  const accent = getCompetitionAccent(competitions, activeCompetition.id);
+
+  return (
+    <section className="public-competition-dock" aria-label="Torneo actual">
+      <div>
+        <CompetitionMark accent={accent} label={activeCompetition.name} />
+        <span>
+          <small>{activeCompetition.season || "Temporada"}</small>
+          <strong>{activeCompetition.name}</strong>
+        </span>
+      </div>
+      <button type="button" onClick={onOpen}>Cambiar torneo</button>
+      <dl>
+        <div>
+          <dt>Jornada</dt>
+          <dd>{overview.round}</dd>
+        </div>
+        <div>
+          <dt>Equipos</dt>
+          <dd>{overview.teamCount}</dd>
+        </div>
+        <div>
+          <dt>Por jugar</dt>
+          <dd>{overview.scheduledCount}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function CompetitionSheet({ activeCompetitionId, competitions, league, onClose, onSelectCompetition }) {
+  return (
+    <div className="competition-sheet-backdrop" role="presentation" onClick={onClose}>
+      <section
+        aria-label="Cambiar torneo"
+        aria-modal="true"
+        className="competition-sheet"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="competition-sheet-head">
+          <div>
+            <span>Selecciona un torneo</span>
+            <strong>{league.name}</strong>
+          </div>
+          <button type="button" aria-label="Cerrar selector de torneo" onClick={onClose}>X</button>
+        </div>
+        <div className="competition-sheet-list">
+          {competitions.map((competition) => {
+            const overview = getCompetitionOverview(league, competition.id);
+            const accent = getCompetitionAccent(competitions, competition.id);
+            const isActive = competition.id === activeCompetitionId;
+            return (
+              <button
+                className={isActive ? "active" : ""}
+                key={competition.id}
+                type="button"
+                onClick={() => onSelectCompetition(competition.id)}
+              >
+                <CompetitionMark accent={accent} label={competition.name} />
+                <span>
+                  <strong>{competition.name}</strong>
+                  <small>{competition.season || league.season} | {competitionTypeLabel(competition.type)}</small>
+                </span>
+                <em>{isActive ? "Actual" : `${overview.teamCount} equipos`}</em>
+              </button>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
@@ -537,10 +740,11 @@ function sortRecentMatches(matches) {
   ));
 }
 
-function getPublicSearchResults(league, stats, query) {
+function getPublicSearchResults(league, stats, query, selectedCompetitionId) {
   const term = normalizeSearchTerm(query);
   if (term.length < 2) return [];
   const statsByPlayer = new Map((stats || []).map((row) => [row.player.id, row]));
+  const competitionName = (competitionId) => getCompetition(league, competitionId)?.name || "Torneo";
   const teamResults = league.teams
     .filter((team) => normalizeSearchTerm(team.name).includes(term))
     .map((team) => ({
@@ -548,19 +752,24 @@ function getPublicSearchResults(league, stats, query) {
       type: "team",
       href: "#equipos",
       name: team.name,
-      detail: `${league.players.filter((player) => player.teamId === team.id).length} jugador(es)`
+      competitionId: team.competitionId || selectedCompetitionId,
+      isCurrentCompetition: (team.competitionId || selectedCompetitionId) === selectedCompetitionId,
+      detail: `${competitionName(team.competitionId || selectedCompetitionId)} | ${league.players.filter((player) => player.teamId === team.id).length} jugador(es)`
     }));
   const playerResults = league.players
     .filter((player) => normalizeSearchTerm(player.name).includes(term))
     .map((player) => {
       const row = statsByPlayer.get(player.id);
       const team = row?.team || getTeam(league, player.teamId);
+      const competitionId = player.competitionId || team?.competitionId || selectedCompetitionId;
       return {
         id: player.id,
         type: "player",
         href: "#jugador",
         name: player.name,
-        detail: `${team?.name || "Sin equipo"} | ${row?.goals || 0} gol(es)`
+        competitionId,
+        isCurrentCompetition: competitionId === selectedCompetitionId,
+        detail: `${team?.name || "Sin equipo"} | ${competitionName(competitionId)} | ${row?.goals || 0} gol(es)`
       };
     });
   const matchResults = league.matches
@@ -575,11 +784,17 @@ function getPublicSearchResults(league, stats, query) {
       type: "match",
       href: "#calendario",
       name: getMatchShortTitle(league, match),
-      detail: `${match.round ? `Jornada ${match.round}` : "Partido"} | ${match.date ? formatDate(match.date) : "Fecha por definir"}`
+      competitionId: match.competitionId || selectedCompetitionId,
+      isCurrentCompetition: (match.competitionId || selectedCompetitionId) === selectedCompetitionId,
+      round: match.round,
+      detail: `${competitionName(match.competitionId || selectedCompetitionId)} | ${match.round ? `Jornada ${match.round}` : "Partido"} | ${match.date ? formatDate(match.date) : "Fecha por definir"}`
     }));
 
   return [...teamResults, ...playerResults, ...matchResults]
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => (
+      Number((b.competitionId || "") === selectedCompetitionId) - Number((a.competitionId || "") === selectedCompetitionId) ||
+      a.name.localeCompare(b.name)
+    ))
     .slice(0, 8);
 }
 
@@ -1105,19 +1320,34 @@ function HeroMatchTeam({ team, fallback }) {
 }
 
 function PublicQuickNav() {
+  const [activeHref, setActiveHref] = useState(() => (typeof window === "undefined" ? "#inicio" : window.location.hash || "#inicio"));
   const links = [
-    { href: "#inicio", label: "Inicio", icon: navInicioIcon },
-    { href: "#calendario", label: "Partidos", icon: navPartidosIcon },
-    { href: "#tabla", label: "Tabla", icon: navTablaIcon },
-    { href: "#goleo", label: "Goleo", icon: navGoleoIcon },
-    { href: "#mas", label: "Mas", icon: navMasIcon }
+    { href: "#inicio", label: "Inicio", icon: "home" },
+    { href: "#calendario", label: "Partidos", icon: "matches" },
+    { href: "#tabla", label: "Tabla", icon: "table" },
+    { href: "#goleo", label: "Goleo", icon: "scoring" },
+    { href: "#mas", label: "Mas", icon: "more" }
   ];
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const updateActiveHref = () => setActiveHref(window.location.hash || "#inicio");
+    updateActiveHref();
+    window.addEventListener("hashchange", updateActiveHref);
+    return () => window.removeEventListener("hashchange", updateActiveHref);
+  }, []);
 
   return (
     <nav className="public-quick-nav" aria-label="Navegacion publica">
       {links.map((link) => (
-        <a href={link.href} key={link.href}>
-          <span className="quick-nav-icon" aria-hidden="true"><img alt="" src={link.icon} /></span>
+        <a
+          aria-current={activeHref === link.href ? "page" : undefined}
+          className={activeHref === link.href ? "active" : ""}
+          href={link.href}
+          key={link.href}
+          onClick={() => setActiveHref(link.href)}
+        >
+          <span className="quick-nav-icon" aria-hidden="true"><PublicNavIcon type={link.icon} /></span>
           <span>{link.label}</span>
         </a>
       ))}
@@ -1125,7 +1355,60 @@ function PublicQuickNav() {
   );
 }
 
-function PublicUtilityBar({ leagueName, onSearch, onSelectPlayer, onSelectTeam, onShare, query, results }) {
+function PublicNavIcon({ type }) {
+  if (type === "home") {
+    return (
+      <svg viewBox="0 0 24 24" role="img">
+        <path d="M4 11.4 12 4l8 7.4" />
+        <path d="M6.8 10.4V20h10.4v-9.6" />
+        <path d="M9.8 20v-5.2h4.4V20" />
+      </svg>
+    );
+  }
+
+  if (type === "matches") {
+    return (
+      <svg viewBox="0 0 24 24" role="img">
+        <path d="M6.5 4.8v2.8M17.5 4.8v2.8" />
+        <path d="M5 7h14v12H5z" />
+        <path d="M5 10.2h14" />
+        <path d="M8.2 14.8h7.6" />
+        <path d="m13.8 12.9 2 1.9-2 1.9" />
+      </svg>
+    );
+  }
+
+  if (type === "table") {
+    return (
+      <svg viewBox="0 0 24 24" role="img">
+        <path d="M5 5h14v14H5z" />
+        <path d="M5 10h14M5 14.5h14M9.8 5v14" />
+        <path d="M12.5 7.5h3.8M12.5 12.2h2.6M12.5 16.8h4.2" />
+      </svg>
+    );
+  }
+
+  if (type === "scoring") {
+    return (
+      <svg viewBox="0 0 24 24" role="img">
+        <circle cx="10.2" cy="13.8" r="5.6" />
+        <path d="m7.4 13.2 2.1-1.6 2.4 1.2-.5 2.7H8.8z" />
+        <path d="M10.2 8.2v3.4M5.2 12.1l2.2 1.1M13.7 9.9l-1.8 2.9M6.6 17.2l2.2-1.7M14.6 15.8l-3.2-.3" />
+        <path d="M16 5h3v14h-3" />
+        <path d="M16 8.2h2.7M16 12h2.7M16 15.8h2.7" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" role="img">
+      <path d="M6 8h12M6 12h12M6 16h12" />
+      <path d="M4 8h.1M4 12h.1M4 16h.1" />
+    </svg>
+  );
+}
+
+function PublicUtilityBar({ leagueName, onSearch, onSelectResult, onShare, query, results }) {
   return (
     <section className="public-utility-bar" aria-label="Herramientas publicas">
       <label className="public-search-box">
@@ -1144,14 +1427,14 @@ function PublicUtilityBar({ leagueName, onSearch, onSelectPlayer, onSelectTeam, 
             <a
               href={result.href}
               key={`${result.type}-${result.id}`}
-              onClick={() => {
-                if (result.type === "team") onSelectTeam(result.id);
-                if (result.type === "player") onSelectPlayer(result.id);
-                onSearch("");
+              onClick={(event) => {
+                event.preventDefault();
+                onSelectResult(result);
               }}
             >
               <strong>{result.name}</strong>
               <span>{result.detail}</span>
+              {result.competitionId && !result.isCurrentCompetition && <small>Ver en su torneo</small>}
             </a>
           ))}
           {!results.length && <p>Sin resultados para {leagueName}.</p>}
@@ -1675,6 +1958,13 @@ function getPlayerTeamGoalRank(stats, player, teamPlayers) {
 
 function getPlayerDisciplineState(league, row) {
   const yellowLimit = Number(league.rules?.yellowSuspensionLimit || 3);
+  if (row.suspensionIndefinite) {
+    return {
+      label: "Inhabilitado",
+      tone: "danger",
+      detail: "Tiene una suspension indefinida registrada."
+    };
+  }
   if (row.suspensionMatches > 0 || row.redCards > 0) {
     return {
       label: "Suspendido",
@@ -2040,7 +2330,7 @@ function MatchCard({ league, match }) {
           </div>
           <div className="match-card-center">
             <strong>{timeOrScore}</strong>
-            {!isFinished && <small>{timeLabel}</small>}
+            {isFinished && <small>{statusLabel}</small>}
           </div>
           <div className="match-card-team away">
             <TeamMark team={awayTeam} className="match-card-crest" />
@@ -2048,10 +2338,20 @@ function MatchCard({ league, match }) {
           </div>
         </div>
         <div className="match-card-footer">
-          <span>{match.venue || "Cancha por definir"}</span>
-          <span className="match-card-time">{timeLabel}</span>
+          <span className="match-card-meta-pill"><span aria-hidden="true">⏱</span>{timeLabel}</span>
+          <span className="match-card-meta-pill"><span aria-hidden="true">▣</span>{match.venue || "Cancha por definir"}</span>
           <span className={`status ${match.status}`}>{statusLabel}</span>
-          <span className="match-detail-button">Ver detalle</span>
+          <span className="match-touch-hint">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M8.6 11.3V5.8a1.4 1.4 0 0 1 2.8 0v5.1" />
+              <path d="M11.4 10.8V4.6a1.4 1.4 0 0 1 2.8 0v6.2" />
+              <path d="M14.2 11.1V6.8a1.35 1.35 0 0 1 2.7 0v5.1" />
+              <path d="M16.9 12.3V9.8a1.3 1.3 0 0 1 2.6 0v4.6c0 3.4-2.4 5.6-5.9 5.6h-1.2c-1.9 0-3.2-.8-4.4-2.2l-2.6-3.1a1.46 1.46 0 0 1 .18-2.05 1.5 1.5 0 0 1 2.08.13l1.1 1.14" />
+              <path d="M4.5 6.2c.5-2.2 2.2-3.7 4.3-4" />
+              <path d="M3.5 9.4c-.7-3.7 1.7-7.2 5.4-7.9" />
+            </svg>
+            Toca para ver goles
+          </span>
         </div>
       </summary>
       <div className="match-details">
@@ -2091,6 +2391,7 @@ function MatchCard({ league, match }) {
 
 function MatchEventSummary({ league, match, homeTeam, awayTeam }) {
   const events = sortMatchEvents(match.events || []);
+  const showTimeline = events.some((event) => hasEventMinute(event));
   const homeEvents = events.filter((event) => event.teamId === match.homeTeamId);
   const awayEvents = events.filter((event) => event.teamId === match.awayTeamId);
 
@@ -2104,12 +2405,23 @@ function MatchEventSummary({ league, match, homeTeam, awayTeam }) {
   }
 
   return (
-    <div className="match-events-board">
-      <MatchTeamEvents title={homeTeam?.name || "LOCAL"} events={homeEvents} league={league} />
-      <div className="match-events-divider" aria-hidden="true">
-        <span />
+    <div className={`match-event-detail ${showTimeline ? "with-minutes" : "without-minutes"}`}>
+      <div className="match-event-legend">
+        <span><b className="legend-card yellow" />Amarilla</span>
+        <span><b className="legend-card red" />Roja</span>
+        <span><b className="legend-ball">⚽</b>Gol</span>
       </div>
-      <MatchTeamEvents title={awayTeam?.name || "VISITANTE"} events={awayEvents} league={league} />
+      {showTimeline ? (
+        <MatchEventTimeline league={league} match={match} events={events} homeTeam={homeTeam} awayTeam={awayTeam} />
+      ) : (
+        <div className="match-events-board no-minutes">
+          <MatchTeamEvents title={homeTeam?.name || "LOCAL"} events={homeEvents} league={league} showMinutes={false} />
+          <div className="match-events-divider" aria-hidden="true">
+            <span />
+          </div>
+          <MatchTeamEvents title={awayTeam?.name || "VISITANTE"} events={awayEvents} league={league} showMinutes={false} />
+        </div>
+      )}
     </div>
   );
 }
@@ -2140,21 +2452,71 @@ function sortMatchEvents(events) {
     .map(({ event }) => event);
 }
 
-function MatchTeamEvents({ title, events, league }) {
+function MatchEventTimeline({ league, match, events, homeTeam, awayTeam }) {
+  const hasFirstHalf = events.some((event) => hasEventMinute(event) && Number(event.minute) <= 45);
+  const hasSecondHalf = events.some((event) => hasEventMinute(event) && Number(event.minute) > 45);
+  const showHalfTime = hasFirstHalf && hasSecondHalf;
+  const rows = [];
+  let halfTimeInserted = false;
+
+  for (const [index, event] of events.entries()) {
+    if (showHalfTime && !halfTimeInserted && hasEventMinute(event) && Number(event.minute) > 45) {
+      halfTimeInserted = true;
+      rows.push(
+        <div className="match-timeline-half" key="half-time">
+          <span aria-hidden="true">◷</span>
+          <strong>Medio tiempo</strong>
+        </div>
+      );
+    }
+    rows.push(<MatchTimelineEvent event={event} index={index} key={`${event.type}-${event.playerId}-${event.minute}-${index}`} league={league} match={match} />);
+  }
+
+  return (
+    <div className="match-events-timeline">
+      <div className="match-timeline-teams">
+        <strong>{homeTeam?.name || "LOCAL"}</strong>
+        <strong>{awayTeam?.name || "VISITANTE"}</strong>
+      </div>
+      <div className="match-timeline-list">
+        {rows}
+      </div>
+      <p className="match-timeline-note">Los tiempos corresponden al tiempo oficial capturado en el acta.</p>
+    </div>
+  );
+}
+
+function MatchTimelineEvent({ league, match, event, index }) {
+  const player = getPlayer(league, event.playerId);
+  const side = event.teamId === match.awayTeamId ? "away" : "home";
+
+  return (
+    <article className={`match-timeline-event ${side} ${event.type}`}>
+      <span className="match-timeline-minute">{hasEventMinute(event) ? `${event.minute}'` : ""}</span>
+      <div className="match-timeline-card">
+        <span className="match-timeline-icon" aria-hidden="true">{getPublicEventIcon(event.type)}</span>
+        <div>
+          <strong>{player?.name || `Jugador ${index + 1}`}</strong>
+          <small>{getPublicEventDetail(event)}</small>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function MatchTeamEvents({ title, events, league, showMinutes = true }) {
   return (
     <div className="match-team-events">
       <strong>{title}</strong>
       {events.map((event, index) => {
         const player = getPlayer(league, event.playerId);
         return (
-          <article className={`match-event-row ${event.type}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
-            <span className="match-event-minute">{event.minute ? `${event.minute}'` : "--"}</span>
-            <span className="match-event-badge">{event.type === "goal" ? "GOL" : event.type === "own_goal" ? "AG" : event.type === "yellow" ? "AM" : "ROJA"}</span>
+          <article className={`match-event-row ${event.type} ${showMinutes ? "" : "without-minute"}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
+            {showMinutes && <span className="match-event-minute">{event.minute ? `${event.minute}'` : ""}</span>}
+            <span className="match-event-badge">{getPublicEventIcon(event.type)}</span>
             <div>
               <strong>{player?.name || "Jugador"}</strong>
-              {event.type === "red" && event.reason && <small>{event.reason}</small>}
-              {event.type === "yellow" && <small>Amonestacion</small>}
-              {event.type === "own_goal" && <small>Autogol</small>}
+              <small>{getPublicEventDetail(event)}</small>
             </div>
           </article>
         );
@@ -2162,6 +2524,22 @@ function MatchTeamEvents({ title, events, league }) {
       {!events.length && <p>Sin eventos registrados para este equipo.</p>}
     </div>
   );
+}
+
+function getPublicEventIcon(type) {
+  if (type === "goal") return "⚽";
+  if (type === "own_goal") return "↩";
+  if (type === "yellow") return "🟨";
+  if (type === "red") return "🟥";
+  return "•";
+}
+
+function getPublicEventDetail(event) {
+  if (event.type === "goal") return "Gol";
+  if (event.type === "own_goal") return "Autogol";
+  if (event.type === "yellow") return "Amonestacion";
+  if (event.type === "red") return event.reason || "Expulsion";
+  return "Evento";
 }
 
 function MatchVersus({ league, match }) {
@@ -2272,10 +2650,14 @@ function SuspensionNotices({ notices }) {
         <article className={`suspension-notice ${notice.status}`} key={notice.id}>
           <strong>{notice.player.name}</strong>
           <span>{notice.team?.name || "Sin equipo"}</span>
-          <p>
-            {notice.type === "Expulsion" ? "Expulsado" : "Suspendido"} por {notice.totalMatches} partido(s). Le restan {notice.remainingMatches} juego(s) de suspension.
-            {notice.returnRound ? ` Podra regresar en la jornada ${notice.returnRound}.` : ""}
-          </p>
+          {notice.indefinite ? (
+            <p>{notice.type === "Expulsion" ? "Expulsado" : "Suspendido"} con inhabilitacion indefinida hasta resolucion de la liga.</p>
+          ) : (
+            <p>
+              {notice.type === "Expulsion" ? "Expulsado" : "Suspendido"} por {notice.totalMatches} partido(s). Le restan {notice.remainingMatches} juego(s) de suspension.
+              {notice.returnRound ? ` Podra regresar en la jornada ${notice.returnRound}.` : ""}
+            </p>
+          )}
           <small>{notice.reason}</small>
         </article>
       ))}

@@ -213,6 +213,7 @@ export function normalizeStore(data) {
           type: upperText(sanction.type),
           reason: upperText(sanction.reason),
           matches: Number(sanction.matches || 0),
+          indefinite: Boolean(sanction.indefinite),
           status: sanction.status || "active",
           notes: upperText(sanction.notes)
         })),
@@ -280,6 +281,8 @@ export function normalizeStore(data) {
           resolutionNote: match.resolutionNote ? upperText(match.resolutionNote) : null,
           events: (match.events || []).map((event) => ({
             ...event,
+            suspensionMatches: Number(event.suspensionMatches || 0),
+            suspensionIndefinite: Boolean(event.suspensionIndefinite),
             reason: upperText(event.reason)
           }))
         })),
@@ -555,6 +558,7 @@ export function calculatePlayerStats(league) {
         yellowCards: 0,
         redCards: 0,
         suspensionMatches: 0,
+        suspensionIndefinite: false,
         extraSanctions: [],
         reasons: []
       }
@@ -581,7 +585,11 @@ export function calculatePlayerStats(league) {
       }
       if (event.type === "red") {
         row.redCards += 1;
-        row.suspensionMatches += Number(event.suspensionMatches || 1);
+        if (event.suspensionIndefinite) {
+          row.suspensionIndefinite = true;
+        } else {
+          row.suspensionMatches += Number(event.suspensionMatches || 1);
+        }
         row.reasons.push(event.reason || "Tarjeta roja");
         registerTeamActivity(row, event.teamId);
       }
@@ -601,7 +609,11 @@ export function calculatePlayerStats(league) {
     const row = stats.get(sanction.playerId);
     if (!row) continue;
 
-    row.suspensionMatches += Number(sanction.matches || 0);
+    if (sanction.indefinite) {
+      row.suspensionIndefinite = true;
+    } else {
+      row.suspensionMatches += Number(sanction.matches || 0);
+    }
     row.extraSanctions.push(sanction);
     row.reasons.push(sanction.reason || sanction.type || "Sancion disciplinaria");
   }
@@ -885,18 +897,39 @@ function getReturnMatch(league, teamId, remainingMatches, origin) {
   return scheduled[0] || null;
 }
 
-function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, origin }) {
+function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, origin, indefinite = false }) {
   const player = getPlayer(league, playerId);
   if (!player) return null;
 
   const team = getTeam(league, player.teamId);
   const eligibleTeamIds = getEligibleTeamIdsForPlayer(league, playerId);
   const total = Number(totalMatches || 0);
-  if (total <= 0) return null;
+  if (!indefinite && total <= 0) return null;
 
   const servedMatches = sortMatches(finishedMatches(league).filter((match) => (
     eligibleTeamIds.some((teamId) => involvesTeam(match, teamId)) && isAfterOrigin(match, origin)
   )));
+  if (indefinite) {
+    const nextIndefiniteMatch = sortMatches(league.matches.filter((match) => (
+      match.status === "scheduled" && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
+    )))[0] || null;
+    return {
+      id: `${type}-${origin?.matchId || origin?.sanctionId || player.id}-${player.id}`,
+      player,
+      team,
+      type,
+      reason,
+      totalMatches: null,
+      servedMatches: servedMatches.length,
+      remainingMatches: null,
+      status: "active",
+      nextMatch: nextIndefiniteMatch,
+      returnMatch: null,
+      returnRound: "Indefinido",
+      indefinite: true
+    };
+  }
+
   const served = Math.min(servedMatches.length, total);
   const remaining = Math.max(total - served, 0);
   const nextMatch = sortMatches(league.matches.filter((match) => (
@@ -940,7 +973,8 @@ export function calculateSuspensionNotices(league) {
         totalMatches: event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1,
         reason: event.reason || "Tarjeta roja",
         type: "Expulsion",
-        origin: { date: match.date, round: match.round, matchId: match.id }
+        origin: { date: match.date, round: match.round, matchId: match.id },
+        indefinite: Boolean(event.suspensionIndefinite)
       }));
     }
   }
@@ -964,7 +998,8 @@ export function calculateSuspensionNotices(league) {
       totalMatches: sanction.matches,
       reason: sanction.reason || sanction.type || "Sancion disciplinaria",
       type: sanction.type || "Sancion disciplinaria",
-      origin: { date: sanction.date, sanctionId: sanction.id }
+      origin: { date: sanction.date, sanctionId: sanction.id },
+      indefinite: Boolean(sanction.indefinite)
     }));
   }
 
@@ -972,7 +1007,8 @@ export function calculateSuspensionNotices(league) {
     .filter(Boolean)
     .sort((a, b) => (
       (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1) ||
-      b.remainingMatches - a.remainingMatches ||
+      Number(b.indefinite) - Number(a.indefinite) ||
+      Number(b.remainingMatches || 0) - Number(a.remainingMatches || 0) ||
       a.player.name.localeCompare(b.player.name)
     ));
 }
@@ -994,7 +1030,7 @@ export function getCurrentDisplayRound(matches) {
 
   const pending = regular
     .filter((match) => match.status === "scheduled")
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || Number(b.round || 0) - Number(a.round || 0));
+    .sort((a, b) => Number(a.round || 0) - Number(b.round || 0) || String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)));
   if (pending[0]) return pending[0].round;
 
   return rounds.at(-1);

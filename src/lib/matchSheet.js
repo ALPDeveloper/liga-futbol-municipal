@@ -4,9 +4,11 @@ export function updateMatchSheetEventItem(eventItem, field, value, options = {})
   const defaultRedSuspensionMatches = Number(options.defaultRedSuspensionMatches || 1);
   const lockedTeamId = eventItem.lockedTeamId || (options.lockGoalTeam && ["goal", "own_goal"].includes(eventItem.type) ? eventItem.teamId : "");
   if (lockedTeamId && field === "teamId") return eventItem;
+  if (eventItem.lockedType && field === "type") return eventItem;
 
   const nextType = field === "type" ? value : eventItem.type;
   const nextSuspensionMatches = field === "suspensionMatches" ? value : eventItem.suspensionMatches;
+  const nextSuspensionIndefinite = field === "suspensionIndefinite" ? Boolean(value) : Boolean(eventItem.suspensionIndefinite);
   const nextReason = field === "reason" ? value : eventItem.reason;
   const nextTeamId = lockedTeamId || (field === "teamId" ? value : eventItem.teamId);
   const playersForNextEvent = getPlayersForEvent(nextType, nextTeamId);
@@ -15,9 +17,9 @@ export function updateMatchSheetEventItem(eventItem, field, value, options = {})
     ...eventItem,
     [field]: value,
     playerId: field === "teamId"
-      ? playersForNextEvent[0]?.id || ""
+      ? ""
       : field === "type" && !playersForNextEvent.some((player) => player.id === eventItem.playerId)
-        ? playersForNextEvent[0]?.id || ""
+        ? ""
         : field === "playerId"
         ? value
         : eventItem.playerId,
@@ -26,6 +28,7 @@ export function updateMatchSheetEventItem(eventItem, field, value, options = {})
       : field === "type" && value !== "red"
         ? 0
         : nextSuspensionMatches,
+    suspensionIndefinite: nextType === "red" ? nextSuspensionIndefinite : false,
     reason: field === "type" && nextType !== "red" ? "" : nextReason
   };
 }

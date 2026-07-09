@@ -41,6 +41,7 @@ import {
   calculateYellowCardDiscipline,
   buildSmartHighlights,
   getCurrentLeague,
+  getCurrentDisplayRound,
   getEligibleTeamIdsForPlayer,
   getEligiblePlayersForTeam,
   getPlayerNumberForTeam,
@@ -53,6 +54,13 @@ import {
   scopeLeagueToCompetition
 } from "../src/lib/domain.js";
 import { updateMatchSheetEventItem } from "../src/lib/matchSheet.js";
+
+assert.equal(getCurrentDisplayRound([
+  { id: "round-7", round: 7, status: "finished", date: "2026-07-01", time: "10:00" },
+  { id: "round-10", round: 10, status: "scheduled", date: "2026-07-30", time: "10:00" },
+  { id: "round-8", round: 8, status: "scheduled", date: "2026-07-16", time: "10:00" },
+  { id: "round-9", round: 9, status: "scheduled", date: "2026-07-23", time: "10:00" }
+]), 8);
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { hashPassword, verifyPassword } from "../server/password.js";
 
@@ -572,6 +580,25 @@ const marioNotice = calculateSuspensionNotices(league).find((notice) => notice.p
 assert.equal(marioNotice.status, "active");
 assert.equal(marioNotice.remainingMatches, 12);
 
+store = addPlayerSanction(store, league.id, {
+  playerId: "p2",
+  type: "Insultos",
+  indefinite: "on",
+  matches: 4,
+  reason: "Insultos al arbitro hasta resolucion",
+  date: "2026-06-10",
+  notes: "Pendiente de comision disciplinaria"
+});
+league = getCurrentLeague(store);
+const indefiniteSanction = league.sanctions.find((sanction) => sanction.playerId === "p2" && sanction.type === "INSULTOS");
+assert.equal(indefiniteSanction.indefinite, true);
+assert.equal(indefiniteSanction.matches, 0);
+const indefiniteSanctionNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p2" && notice.type === "INSULTOS");
+assert.equal(indefiniteSanctionNotice.indefinite, true);
+assert.equal(indefiniteSanctionNotice.status, "active");
+assert.equal(indefiniteSanctionNotice.returnRound, "Indefinido");
+assert.equal(calculatePlayerStats(league).find((row) => row.player.id === "p2").suspensionIndefinite, true);
+
 store = addPlayerInjury(store, league.id, {
   playerId: "p5",
   type: "Lesion de rodilla",
@@ -797,7 +824,11 @@ const teamChangedEvent = updateMatchSheetEventItem(sheetEvent, "teamId", "union"
   getPlayersForTeam: (teamId) => teamId === "union" ? [{ id: "p3" }] : []
 });
 assert.equal(teamChangedEvent.teamId, "union");
-assert.equal(teamChangedEvent.playerId, "p3");
+assert.equal(teamChangedEvent.playerId, "");
+const typeLockedEvent = updateMatchSheetEventItem({ ...sheetEvent, lockedType: "goal" }, "type", "red", {
+  defaultRedSuspensionMatches: 2
+});
+assert.equal(typeLockedEvent.type, "goal");
 const lockedGoalTeamEvent = updateMatchSheetEventItem(sheetEvent, "teamId", "union", {
   getPlayersForTeam: (teamId) => teamId === "union" ? [{ id: "p3" }] : [],
   lockGoalTeam: true
@@ -817,13 +848,15 @@ const redReasonChangedEvent = updateMatchSheetEventItem(redChangedEvent, "reason
 assert.equal(redReasonChangedEvent.reason, "Conducta violenta");
 const redSuspensionChangedEvent = updateMatchSheetEventItem(redReasonChangedEvent, "suspensionMatches", "3");
 assert.equal(redSuspensionChangedEvent.suspensionMatches, "3");
+const redIndefiniteEvent = updateMatchSheetEventItem(redSuspensionChangedEvent, "suspensionIndefinite", true);
+assert.equal(redIndefiniteEvent.suspensionIndefinite, true);
 const ownGoalChangedEvent = updateMatchSheetEventItem(sheetEvent, "type", "own_goal", {
   getPlayersForTeam: (teamId) => teamId === "halcones" ? [{ id: "p1" }] : [],
   getPlayersForEvent: (type, teamId) => type === "own_goal" && teamId === "halcones" ? [{ id: "p3" }] : [{ id: "p1" }],
   lockGoalTeam: true
 });
 assert.equal(ownGoalChangedEvent.teamId, "halcones");
-assert.equal(ownGoalChangedEvent.playerId, "p3");
+assert.equal(ownGoalChangedEvent.playerId, "");
 
 const multiLeagueStore = normalizeStore({
   ...structuredClone(seedData),
@@ -883,6 +916,25 @@ assert.equal(acta.observations, "ARBITRO REPORTA INCIDENTES AL FINAL DEL PARTIDO
 assert.equal(acta.events.find((event) => event.type === "own_goal").teamId, "union");
 assert.equal(acta.events.find((event) => event.type === "red").suspensionMatches, 2);
 assert.equal(calculatePlayerStats(league).find((row) => row.player.id === "p5").goals, 0);
+
+store = saveMatchSheet(store, league.id, {
+  matchId: "m4",
+  homeGoals: 2,
+  awayGoals: 0,
+  events: [
+    { type: "goal", playerId: "p3", minute: 12 },
+    { type: "own_goal", playerId: "p5", teamId: "union", minute: 55 },
+    { type: "red", playerId: "p5", minute: 70, suspensionIndefinite: true, reason: "Insultos al arbitro" }
+  ]
+});
+league = getCurrentLeague(store);
+const indefiniteRedEvent = league.matches.find((match) => match.id === "m4").events.find((event) => event.type === "red");
+assert.equal(indefiniteRedEvent.suspensionIndefinite, true);
+assert.equal(indefiniteRedEvent.suspensionMatches, 0);
+const indefiniteNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.type === "Expulsion");
+assert.equal(indefiniteNotice.indefinite, true);
+assert.equal(indefiniteNotice.returnRound, "Indefinido");
+assert.equal(calculatePlayerStats(league).find((row) => row.player.id === "p5").suspensionIndefinite, true);
 
 store = saveMatchSheet(store, league.id, {
   matchId: "m3",

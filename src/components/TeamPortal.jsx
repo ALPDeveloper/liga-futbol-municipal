@@ -337,6 +337,9 @@ export function TeamPortal({ authToken, currentUser }) {
                       const blockedByPlayoff = match.isPlayoff && player.playoffEligibility?.applies && !player.playoffEligibility?.eligible;
                       const disabled = blockedBySuspension || blockedByPlayoff;
                       const checked = draft.playerIds.includes(player.id) && !disabled;
+                      const suspensionLabel = player.suspension?.indefinite
+                        ? `Inhabilitado indefinido: ${player.suspension.reason || player.suspension.type || "Sancion activa"}`
+                        : `Suspendido${player.suspension?.remainingMatches ? ` (${player.suspension.remainingMatches} juego(s))` : ""}${player.suspension?.returnRound ? ` | Regresa J${player.suspension.returnRound}` : ""}`;
                       return (
                         <label className={disabled ? "blocked" : ""} key={player.id}>
                           <input
@@ -359,7 +362,7 @@ export function TeamPortal({ authToken, currentUser }) {
                             <strong>#{player.number || "-"} {player.name}</strong>
                             <small>
                               {blockedBySuspension
-                                ? "Suspendido"
+                                ? suspensionLabel
                                 : blockedByPlayoff
                                   ? `No cumple liguilla (${player.playoffEligibility.recognizedAppearances}/${player.playoffEligibility.required})`
                                   : player.position || "Jugador"}

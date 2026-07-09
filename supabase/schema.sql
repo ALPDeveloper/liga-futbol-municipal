@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS match_events (
   team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
   minute INTEGER,
   suspension_matches INTEGER,
+  suspension_indefinite BOOLEAN NOT NULL DEFAULT false,
   reason TEXT
 );
 
@@ -145,6 +146,7 @@ CREATE TABLE IF NOT EXISTS player_sanctions (
   player_id TEXT REFERENCES players(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   matches INTEGER NOT NULL DEFAULT 0,
+  indefinite BOOLEAN NOT NULL DEFAULT false,
   reason TEXT,
   date DATE,
   status TEXT NOT NULL DEFAULT 'active',
