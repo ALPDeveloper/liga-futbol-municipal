@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 import {
   calculatePlayerStats,
@@ -2176,20 +2176,36 @@ function PlayoffCard({ league, match }) {
 }
 
 function RoundSelector({ rounds, selectedRound, onSelectRound }) {
+  const activeButtonRef = useRef(null);
+
+  useEffect(() => {
+    activeButtonRef.current?.scrollIntoView({
+      behavior: "smooth",
+      inline: "center",
+      block: "nearest"
+    });
+  }, [rounds, selectedRound]);
+
   if (!rounds.length) return <p className="empty">Aun no hay jornadas programadas.</p>;
 
   return (
     <div className="round-tabs" aria-label="Seleccionar jornada">
-      {rounds.map((round) => (
-        <button
-          className={Number(selectedRound) === Number(round) ? "active" : ""}
-          key={round}
-          type="button"
-          onClick={() => onSelectRound(round)}
-        >
-          J{round}
-        </button>
-      ))}
+      {rounds.map((round) => {
+        const isActive = Number(selectedRound) === Number(round);
+        return (
+          <button
+            aria-current={isActive ? "true" : undefined}
+            className={isActive ? "active" : ""}
+            key={round}
+            ref={isActive ? activeButtonRef : null}
+            type="button"
+            onClick={() => onSelectRound(round)}
+          >
+            <span>J{round}</span>
+            {isActive && <small>Activa</small>}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -2338,8 +2354,8 @@ function MatchCard({ league, match }) {
           </div>
         </div>
         <div className="match-card-footer">
-          <span className="match-card-meta-pill"><span aria-hidden="true">⏱</span>{timeLabel}</span>
-          <span className="match-card-meta-pill"><span aria-hidden="true">▣</span>{match.venue || "Cancha por definir"}</span>
+          <span className="match-card-meta-pill"><MatchMetaIcon type="time" />{timeLabel}</span>
+          <span className="match-card-meta-pill"><MatchMetaIcon type="venue" />{match.venue || "Cancha por definir"}</span>
           <span className={`status ${match.status}`}>{statusLabel}</span>
           <span className="match-touch-hint">
             <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -2386,6 +2402,27 @@ function MatchCard({ league, match }) {
         {match.resolutionNote && <p className="match-observations"><strong>Resolucion</strong>{match.resolutionNote}</p>}
       </div>
     </details>
+  );
+}
+
+function MatchMetaIcon({ type }) {
+  if (type === "venue") {
+    return (
+      <svg className="match-card-meta-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <rect x="3" y="5" width="18" height="14" rx="2.5" />
+        <path d="M12 5v14" />
+        <circle cx="12" cy="12" r="2.5" />
+        <path d="M3 9h3.2v6H3" />
+        <path d="M21 9h-3.2v6H21" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="match-card-meta-icon" aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.4v5.1l3.4 2" />
+    </svg>
   );
 }
 
