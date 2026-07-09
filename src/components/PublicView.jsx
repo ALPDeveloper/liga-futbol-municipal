@@ -861,8 +861,7 @@ async function shareRoundCard({ league, selectedRound, matches }) {
 async function shareScorersCard({ league, scorers }) {
   await shareGeneratedCard({
     fileName: "tabla-goleo.png",
-    imageBuilder: () => createScorersShareImage({ league, scorers }),
-    title: `Tabla de goleo | ${league.name}`
+    imageBuilder: () => createScorersShareImage({ league, scorers: scorers.slice(0, 10) })
   });
 }
 
@@ -875,10 +874,9 @@ async function shareSuspensionsCard({ league, notices }) {
 }
 
 async function shareYellowCardsCard({ league, rows }) {
-  await shareGeneratedCard({
-    fileName: "tarjetas-amarillas.png",
-    imageBuilder: () => createYellowCardsShareImage({ league, rows }),
-    title: `Tarjetas amarillas | ${league.name}`
+  await shareGeneratedCards({
+    fileBaseName: "tarjetas-amarillas",
+    imageBuilders: createYellowCardsShareImages({ league, rows })
   });
 }
 
@@ -891,18 +889,29 @@ async function shareFeaturedMatchCard({ league, match }) {
 }
 
 async function shareGeneratedCard({ fileName, imageBuilder }) {
-  let blob = null;
+  await shareGeneratedCards({ fileName, imageBuilders: [imageBuilder] });
+}
+
+async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBuilders }) {
+  const blobs = [];
 
   try {
-    const canvas = await imageBuilder();
-    blob = await canvasToPngBlob(canvas);
+    for (const imageBuilder of imageBuilders) {
+      const canvas = await imageBuilder();
+      blobs.push(await canvasToPngBlob(canvas));
+    }
   } catch (error) {
     window.alert("No se pudo generar la imagen para compartir. Intentalo de nuevo.");
     return;
   }
 
-  const file = new File([blob], fileName, { type: "image/png" });
-  const shareData = { files: [file] };
+  const files = blobs.map((blob, index) => {
+    const resolvedName = blobs.length === 1
+      ? fileName || `${fileBaseName}.png`
+      : `${fileBaseName}-${index + 1}.png`;
+    return new File([blob], resolvedName, { type: "image/png" });
+  });
+  const shareData = { files };
 
   if (canShareGeneratedFile(shareData)) {
     try {
@@ -913,13 +922,21 @@ async function shareGeneratedCard({ fileName, imageBuilder }) {
     }
   }
 
-  if (await copyImageBlobToClipboard(blob)) {
+  if (blobs.length === 1 && await copyImageBlobToClipboard(blobs[0])) {
     window.alert("Imagen copiada. Abre WhatsApp y pegala en el chat para enviarla como imagen.");
     return;
   }
 
-  downloadBlob(blob, fileName);
-  window.alert("Tu navegador no permite adjuntar la imagen directamente. Se descargo el PNG para que puedas enviarlo por WhatsApp como imagen.");
+  blobs.forEach((blob, index) => {
+    const resolvedName = blobs.length === 1
+      ? fileName || `${fileBaseName}.png`
+      : `${fileBaseName}-${index + 1}.png`;
+    downloadBlob(blob, resolvedName);
+  });
+  window.alert(blobs.length === 1
+    ? "Tu navegador no permite adjuntar la imagen directamente. Se descargo el PNG para que puedas enviarlo por WhatsApp como imagen."
+    : `Tu navegador no permite adjuntar varias imagenes directamente. Se descargaron ${blobs.length} PNG para enviarlos por WhatsApp.`
+  );
 }
 
 function canShareGeneratedFile(shareData) {
@@ -1102,7 +1119,7 @@ async function createScorersShareImage({ league, scorers }) {
   await drawShareHeader(context, width, {
     eyebrow: league.season,
     league,
-    title: "TABLA DE GOLEO"
+    title: "TOP 10 GOLEO"
   });
 
   drawRoundedRect(context, 60, 166, width - 120, 42, 12, "#e9f7ef");
@@ -1188,15 +1205,30 @@ async function createSuspensionsShareImage({ league, notices }) {
   return canvas;
 }
 
-async function createYellowCardsShareImage({ league, rows }) {
+function createYellowCardsShareImages({ league, rows }) {
+  const pageSize = 8;
+  const chunks = chunkShareRows(rows, pageSize);
+  const pages = chunks.length ? chunks : [[]];
+  return pages.map((pageRows, index) => (
+    () => createYellowCardsShareImage({
+      league,
+      page: index + 1,
+      rows: pageRows,
+      totalPages: pages.length,
+      totalRows: rows.length
+    })
+  ));
+}
+
+async function createYellowCardsShareImage({ league, page = 1, rows, totalPages = 1, totalRows = rows.length }) {
   const width = 1080;
-  const rowHeight = 70;
-  const height = Math.max(520, 232 + Math.max(rows.length, 1) * rowHeight + 86);
+  const rowHeight = 78;
+  const height = Math.max(620, 238 + Math.max(rows.length, 1) * rowHeight + 106);
   const { canvas, context } = createShareCanvas(width, height);
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
-    eyebrow: "Disciplina",
+    eyebrow: totalPages > 1 ? `Disciplina | Pagina ${page} de ${totalPages}` : "Disciplina",
     league,
     title: "TARJETAS AMARILLAS"
   });
@@ -1211,23 +1243,29 @@ async function createYellowCardsShareImage({ league, rows }) {
   }
 
   rows.forEach((row, index) => {
-    const y = 224 + index * rowHeight;
+    const y = 226 + index * rowHeight;
     const danger = row.status === "suspended";
-    drawRoundedRect(context, 60, y, width - 120, 56, 14, danger ? "#fff1f2" : "#ffffff");
+    drawRoundedRect(context, 60, y, width - 120, 64, 14, danger ? "#fff1f2" : "#ffffff");
     context.fillStyle = "#11231d";
-    context.font = "900 23px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    drawCanvasText(context, row.player.name, 86, y + 12, 370, 26, 1);
+    context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.player.name, 86, y + 10, 370, 27, 1);
     context.fillStyle = "#64736b";
-    context.font = "850 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    drawCanvasText(context, row.team?.name || "Sin equipo", 520, y + 15, 230, 22, 1);
-    drawRoundedRect(context, 808, y + 10, 96, 36, 12, danger ? "#ef4444" : "#facc15");
+    context.font = "850 19px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.team?.name || "Sin equipo", 520, y + 20, 230, 22, 1);
+    drawRoundedRect(context, 808, y + 14, 96, 38, 12, danger ? "#ef4444" : "#facc15");
     context.fillStyle = danger ? "#ffffff" : "#3b2f00";
-    context.font = "950 21px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(`${row.yellowCards}/${row.yellowLimit}`, 834, y + 17);
+    context.font = "950 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(`${row.yellowCards}/${row.yellowLimit}`, 834, y + 21);
     context.fillStyle = danger ? "#b91c1c" : "#64736b";
-    context.font = "800 16px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    drawCanvasText(context, row.message, 920, y + 14, 94, 18, 2);
+    context.font = "800 17px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, row.message, 86, y + 40, 820, 19, 1);
   });
+
+  if (totalPages > 1) {
+    context.fillStyle = "#64736b";
+    context.font = "850 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(`Pagina ${page} de ${totalPages} | ${totalRows} jugador(es) con amarillas vigentes`, 60, height - 76);
+  }
 
   drawShareFooter(context, width, height, league);
   return canvas;
@@ -1277,26 +1315,49 @@ async function createFeaturedMatchShareImage({ league, match }) {
 function drawShareBackground(context, width, height) {
   context.fillStyle = "#f6faf7";
   context.fillRect(0, 0, width, height);
-  context.fillStyle = "#0f6b4f";
+
+  const headerGradient = context.createLinearGradient(0, 0, width, 136);
+  headerGradient.addColorStop(0, "#061d2f");
+  headerGradient.addColorStop(0.48, "#0f6b4f");
+  headerGradient.addColorStop(1, "#123f2d");
+  context.fillStyle = headerGradient;
   context.fillRect(0, 0, width, 136);
+
+  context.fillStyle = "rgba(255, 255, 255, 0.08)";
+  context.beginPath();
+  context.moveTo(width - 360, 0);
+  context.lineTo(width - 245, 0);
+  context.lineTo(width - 340, 136);
+  context.lineTo(width - 455, 136);
+  context.closePath();
+  context.fill();
+
   context.fillStyle = "rgba(182, 227, 92, 0.28)";
   context.beginPath();
   context.arc(width - 80, 40, 180, 0, Math.PI * 2);
   context.fill();
+
+  const glow = context.createLinearGradient(0, 126, width, 126);
+  glow.addColorStop(0, "rgba(42, 231, 188, 0)");
+  glow.addColorStop(0.55, "rgba(42, 231, 188, 0.42)");
+  glow.addColorStop(1, "rgba(140, 247, 76, 0.12)");
+  context.fillStyle = glow;
+  context.fillRect(0, 128, width, 8);
 }
 
 async function drawShareHeader(context, width, { eyebrow, league, title }) {
-  drawRoundedRect(context, 60, 34, 62, 62, 16, "#ffffff");
+  drawRoundedRect(context, 60, 32, 66, 66, 18, "rgba(255, 255, 255, 0.96)");
+  drawRoundedStroke(context, 60, 32, 66, 66, 18, "rgba(140, 247, 76, 0.5)", 2);
   context.fillStyle = "#0f6b4f";
   context.font = "950 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  context.fillText(getTeamInitials(league.name), 76, 52);
+  context.fillText(getTeamInitials(league.name), 78, 54);
   context.fillStyle = "#dff7e9";
   context.font = "900 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   context.fillText(String(eyebrow || "").toLocaleUpperCase("es-MX"), 142, 36);
   context.fillStyle = "#ffffff";
   context.font = "950 42px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  drawCanvasText(context, title, 142, 64, 690, 45, 1);
-  await drawLigatecCanvasLogo(context, width - 228, 36, 168, 54);
+  drawCanvasText(context, title, 142, 64, 560, 45, 1);
+  await drawLigatecCanvasBrand(context, width - 318, 28, 258, 78);
 }
 
 function drawShareFooter(context, width, height, league) {
@@ -1339,6 +1400,14 @@ function drawShareEmptyState(context, text, x, y, width) {
   drawCanvasText(context, text, x + 28, y + 30, width - 56, 28, 2);
 }
 
+function chunkShareRows(rows, size) {
+  const chunks = [];
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size));
+  }
+  return chunks;
+}
+
 let ligatecCanvasLogoPromise = null;
 
 function loadLigatecCanvasLogo() {
@@ -1353,33 +1422,78 @@ function loadLigatecCanvasLogo() {
   return ligatecCanvasLogoPromise;
 }
 
-async function drawLigatecCanvasLogo(context, x, y, width, height) {
+async function drawLigatecCanvasBrand(context, x, y, width, height) {
+  context.save();
+  context.shadowColor = "rgba(0, 0, 0, 0.22)";
+  context.shadowBlur = 18;
+  context.shadowOffsetY = 8;
+  drawRoundedRect(context, x, y, width, height, 22, "rgba(2, 18, 24, 0.52)");
+  context.restore();
+
+  drawRoundedStroke(context, x, y, width, height, 22, "rgba(255, 255, 255, 0.22)", 1.5);
+  drawRoundedStroke(context, x + 2, y + 2, width - 4, height - 4, 19, "rgba(42, 231, 188, 0.18)", 1);
+
+  const iconSize = height - 24;
+  const iconX = x + 14;
+  const iconY = y + 12;
+
+  drawRoundedRect(context, iconX - 3, iconY - 3, iconSize + 6, iconSize + 6, 16, "rgba(255, 255, 255, 0.16)");
+  drawRoundedStroke(context, iconX - 3, iconY - 3, iconSize + 6, iconSize + 6, 16, "rgba(140, 247, 76, 0.42)", 1.4);
+
   try {
     const image = await loadLigatecCanvasLogo();
-    const ratio = Math.min(width / image.width, height / image.height);
+    const ratio = Math.max(iconSize / image.width, iconSize / image.height);
     const drawWidth = image.width * ratio;
     const drawHeight = image.height * ratio;
-    context.drawImage(image, x + width - drawWidth, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+    context.save();
+    drawRoundedPath(context, iconX, iconY, iconSize, iconSize, 14);
+    context.clip();
+    context.drawImage(image, iconX + (iconSize - drawWidth) / 2, iconY + (iconSize - drawHeight) / 2, drawWidth, drawHeight);
+    context.restore();
   } catch {
     context.fillStyle = "#ffffff";
-    context.font = "950 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText("LIGATEC", x + 58, y + 15);
+    context.font = "950 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText("L", iconX + 17, iconY + 14);
   }
+
+  context.fillStyle = "#ffffff";
+  context.font = "950 25px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.fillText("LIGATEC", x + 82, y + 17);
+  context.fillStyle = "rgba(223, 247, 233, 0.78)";
+  context.font = "850 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.fillText("PLATAFORMA DEPORTIVA", x + 84, y + 48);
+
+  const accent = context.createLinearGradient(x + 82, y + 65, x + width - 20, y + 65);
+  accent.addColorStop(0, "rgba(42, 231, 188, 0.95)");
+  accent.addColorStop(1, "rgba(140, 247, 76, 0.9)");
+  drawRoundedRect(context, x + 84, y + 62, width - 112, 4, 4, accent);
+}
+
+function drawRoundedPath(context, x, y, width, height, radius) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
 }
 
 function drawRoundedRect(context, x, y, width, height, radius, color) {
   context.fillStyle = color;
-  context.beginPath();
-  context.moveTo(x + radius, y);
-  context.lineTo(x + width - radius, y);
-  context.quadraticCurveTo(x + width, y, x + width, y + radius);
-  context.lineTo(x + width, y + height - radius);
-  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  context.lineTo(x + radius, y + height);
-  context.quadraticCurveTo(x, y + height, x, y + height - radius);
-  context.lineTo(x, y + radius);
-  context.quadraticCurveTo(x, y, x + radius, y);
+  drawRoundedPath(context, x, y, width, height, radius);
   context.fill();
+}
+
+function drawRoundedStroke(context, x, y, width, height, radius, color, lineWidth = 1) {
+  context.strokeStyle = color;
+  context.lineWidth = lineWidth;
+  drawRoundedPath(context, x, y, width, height, radius);
+  context.stroke();
 }
 
 function drawCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines = 2) {
