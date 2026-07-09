@@ -418,7 +418,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             <ShareActionButton
               className="compact-share-button"
               label="Compartir"
-              onClick={() => shareScorersCard({ league: activeLeague, scorers: allScorers })}
+              onClick={() => shareScorersCard({ league: activeLeague, competition: activeCompetition, scorers: allScorers })}
             />
             <Scorers rows={scorers} onSelectPlayer={selectPublicPlayer} />
           </section>
@@ -428,7 +428,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             <ShareActionButton
               className="compact-share-button"
               label="Compartir"
-              onClick={() => shareSuspensionsCard({ league: activeLeague, notices: suspensionNotices })}
+              onClick={() => shareSuspensionsCard({ league: activeLeague, competition: activeCompetition, notices: suspensionNotices })}
             />
             <SuspensionNotices notices={suspensionNotices} />
           </section>
@@ -443,7 +443,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             <ShareActionButton
               className="compact-share-button"
               label="Compartir amarillas"
-              onClick={() => shareYellowCardsCard({ league: disciplineLeague, rows: discipline })}
+              onClick={() => shareYellowCardsCard({ league: disciplineLeague, competition: activeCompetition, rows: discipline })}
             />
             <Discipline rows={discipline} />
           </section>
@@ -858,25 +858,25 @@ async function shareRoundCard({ league, selectedRound, matches }) {
   });
 }
 
-async function shareScorersCard({ league, scorers }) {
+async function shareScorersCard({ league, competition, scorers }) {
   await shareGeneratedCard({
     fileName: "tabla-goleo.png",
-    imageBuilder: () => createScorersShareImage({ league, scorers: scorers.slice(0, 10) })
+    imageBuilder: () => createScorersShareImage({ league, competition, scorers: scorers.slice(0, 10) })
   });
 }
 
-async function shareSuspensionsCard({ league, notices }) {
+async function shareSuspensionsCard({ league, competition, notices }) {
   await shareGeneratedCard({
     fileName: "expulsados-regresos.png",
-    imageBuilder: () => createSuspensionsShareImage({ league, notices }),
+    imageBuilder: () => createSuspensionsShareImage({ league, competition, notices }),
     title: `Expulsados y regresos | ${league.name}`
   });
 }
 
-async function shareYellowCardsCard({ league, rows }) {
+async function shareYellowCardsCard({ league, competition, rows }) {
   await shareGeneratedCards({
     fileBaseName: "tarjetas-amarillas",
-    imageBuilders: createYellowCardsShareImages({ league, rows })
+    imageBuilders: createYellowCardsShareImages({ league, competition, rows })
   });
 }
 
@@ -1007,7 +1007,7 @@ async function createStandingsShareImage({ league, competition, standings }) {
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
-    eyebrow: competition?.name || league.season,
+    eyebrow: getShareHeaderEyebrow(league, { competition, detail: competition?.season || league.season }),
     league,
     title: "TABLA DE POSICIONES"
   });
@@ -1066,7 +1066,7 @@ async function createRoundShareImage({ league, selectedRound, matches }) {
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
-    eyebrow: league.season,
+    eyebrow: getShareHeaderEyebrow(league, { detail: selectedRound ? `Jornada ${selectedRound}` : league.season }),
     league,
     title: `JORNADA ${selectedRound || "-"}`
   });
@@ -1108,7 +1108,7 @@ async function createRoundShareImage({ league, selectedRound, matches }) {
   return canvas;
 }
 
-async function createScorersShareImage({ league, scorers }) {
+async function createScorersShareImage({ league, competition, scorers }) {
   const rows = scorers;
   const width = 1080;
   const rowHeight = 64;
@@ -1117,7 +1117,7 @@ async function createScorersShareImage({ league, scorers }) {
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
-    eyebrow: league.season,
+    eyebrow: getShareHeaderEyebrow(league, { competition, detail: competition?.season || league.season }),
     league,
     title: "TOP 10 GOLEO"
   });
@@ -1156,7 +1156,7 @@ async function createScorersShareImage({ league, scorers }) {
   return canvas;
 }
 
-async function createSuspensionsShareImage({ league, notices }) {
+async function createSuspensionsShareImage({ league, competition, notices }) {
   const rows = notices;
   const width = 1080;
   const rowHeight = 82;
@@ -1165,7 +1165,7 @@ async function createSuspensionsShareImage({ league, notices }) {
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
-    eyebrow: "Siguiente jornada",
+    eyebrow: getShareHeaderEyebrow(league, { competition, detail: "Siguiente jornada" }),
     league,
     title: "EXPULSADOS Y REGRESOS"
   });
@@ -1205,13 +1205,14 @@ async function createSuspensionsShareImage({ league, notices }) {
   return canvas;
 }
 
-function createYellowCardsShareImages({ league, rows }) {
+function createYellowCardsShareImages({ league, competition, rows }) {
   const pageSize = 8;
   const chunks = chunkShareRows(rows, pageSize);
   const pages = chunks.length ? chunks : [[]];
   return pages.map((pageRows, index) => (
     () => createYellowCardsShareImage({
       league,
+      competition,
       page: index + 1,
       rows: pageRows,
       totalPages: pages.length,
@@ -1220,7 +1221,7 @@ function createYellowCardsShareImages({ league, rows }) {
   ));
 }
 
-async function createYellowCardsShareImage({ league, page = 1, rows, totalPages = 1, totalRows = rows.length }) {
+async function createYellowCardsShareImage({ league, competition, page = 1, rows, totalPages = 1, totalRows = rows.length }) {
   const width = 1080;
   const rowHeight = 78;
   const height = Math.max(620, 238 + Math.max(rows.length, 1) * rowHeight + 106);
@@ -1228,7 +1229,10 @@ async function createYellowCardsShareImage({ league, page = 1, rows, totalPages 
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
-    eyebrow: totalPages > 1 ? `Disciplina | Pagina ${page} de ${totalPages}` : "Disciplina",
+    eyebrow: getShareHeaderEyebrow(league, {
+      competition,
+      detail: totalPages > 1 ? `Disciplina | Pagina ${page} de ${totalPages}` : "Disciplina"
+    }),
     league,
     title: "TARJETAS AMARILLAS"
   });
@@ -1282,7 +1286,7 @@ async function createFeaturedMatchShareImage({ league, match }) {
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
-    eyebrow: match.round ? `Jornada ${match.round}` : league.season,
+    eyebrow: getShareHeaderEyebrow(league, { detail: match.round ? `Jornada ${match.round}` : league.season }),
     league,
     title: isFinished ? "PARTIDO DE LA JORNADA" : "PROXIMO PARTIDO"
   });
@@ -1352,12 +1356,23 @@ async function drawShareHeader(context, width, { eyebrow, league, title }) {
   context.font = "950 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   context.fillText(getTeamInitials(league.name), 78, 54);
   context.fillStyle = "#dff7e9";
-  context.font = "900 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  context.fillText(String(eyebrow || "").toLocaleUpperCase("es-MX"), 142, 36);
+  drawCanvasFittedText(context, String(eyebrow || "").toLocaleUpperCase("es-MX"), 142, 36, 576, 20, 15, 900);
   context.fillStyle = "#ffffff";
-  context.font = "950 42px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  drawCanvasText(context, title, 142, 64, 560, 45, 1);
+  drawCanvasFittedText(context, title, 142, 64, 590, 42, 30, 950);
   await drawLigatecCanvasBrand(context, width - 318, 28, 258, 78);
+}
+
+function getShareHeaderEyebrow(league, { competition = null, detail = "" } = {}) {
+  const competitionName = getShareCompetitionName(league, competition);
+  const normalizedDetail = String(detail || "").trim();
+  return [competitionName, normalizedDetail].filter(Boolean).join(" | ");
+}
+
+function getShareCompetitionName(league, competition = null) {
+  const selectedCompetition = competition || getCompetition(league, league.currentCompetitionId);
+  if (selectedCompetition?.name) return selectedCompetition.name;
+  if ((league.competitions || []).length > 1) return "Todos los torneos";
+  return league.season || "Torneo";
 }
 
 function drawShareFooter(context, width, height, league) {
@@ -1518,6 +1533,17 @@ function drawCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines = 2)
   if (line && lines < maxLines) {
     context.fillText(line, x, currentY);
   }
+}
+
+function drawCanvasFittedText(context, text, x, y, maxWidth, startSize, minSize, weight = 900) {
+  const value = String(text || "");
+  let size = startSize;
+  do {
+    context.font = `${weight} ${size}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+    if (context.measureText(value).width <= maxWidth || size <= minSize) break;
+    size -= 1;
+  } while (size >= minSize);
+  context.fillText(value, x, y);
 }
 
 function getFeaturedPublicMatch(league, standings) {
