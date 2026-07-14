@@ -1095,9 +1095,7 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
   });
   const shareData = {
     files,
-    ...(title ? { title } : {}),
-    ...(text ? { text } : {}),
-    ...(url ? { url } : {})
+    ...(title ? { title } : {})
   };
 
   if (canShareGeneratedFile({ files })) {
@@ -1211,30 +1209,31 @@ async function createStandingsShareImage({ league, competition, standings }) {
   });
 
   if (qualifiedCount > 0) {
-    context.fillStyle = "#dce9e4";
-    context.font = "760 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(`Zona de liguilla - Puestos 1 al ${qualifiedCount}${playoffLabel ? ` | ${playoffLabel}` : ""}`, 60, 138);
+    drawRoundedRect(context, 60, 144, width - 120, 34, 10, "rgba(15, 107, 79, 0.08)");
+    context.fillStyle = "#0f6b4f";
+    context.font = "850 21px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(`Zona de liguilla - Puestos 1 al ${qualifiedCount}${playoffLabel ? ` | ${playoffLabel}` : ""}`, 80, 151);
   }
 
   insights.forEach(([label, teamName, value], index) => {
     const cardWidth = 300;
     const x = 60 + index * 330;
-    drawRoundedRect(context, x, 178, cardWidth, 104, 18, "rgba(4, 33, 28, 0.92)");
+    drawRoundedRect(context, x, 196, cardWidth, 104, 18, "rgba(4, 33, 28, 0.92)");
     context.strokeStyle = "rgba(43, 255, 135, 0.34)";
     context.lineWidth = 2;
     context.stroke();
-    drawRoundedRect(context, x, 178, 7, 104, 4, "#8cff45");
+    drawRoundedRect(context, x, 196, 7, 104, 4, "#8cff45");
     context.fillStyle = label === "LIDER" ? "#8cff45" : "#f8fffb";
     context.font = "900 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(label, x + 28, 198);
+    context.fillText(label, x + 28, 216);
     context.fillStyle = "#ffffff";
-    drawCanvasFittedText(context, teamName.toLocaleUpperCase("es-MX"), x + 28, 226, 208, 22, 16, 900);
+    drawCanvasFittedText(context, teamName.toLocaleUpperCase("es-MX"), x + 28, 244, 208, 22, 16, 900);
     context.fillStyle = "#7be34d";
     context.font = "950 31px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(value, x + 28, 252);
+    context.fillText(value, x + 28, 270);
   });
 
-  const boardY = 320;
+  const boardY = 338;
   const boardHeight = rows.length * rowHeight + 74;
   drawRoundedRect(context, 42, boardY, width - 84, boardHeight, 22, "rgba(1, 12, 17, 0.82)");
   context.strokeStyle = "rgba(43, 255, 135, 0.45)";

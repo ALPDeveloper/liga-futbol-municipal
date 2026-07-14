@@ -320,10 +320,11 @@ function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePa
         )}
       </section>
       <footer className="access-footer">
-        <span className="access-footer-ball" aria-hidden="true" />
+        <span className="access-footer-watermark" aria-hidden="true">
+          <span className="access-footer-ball">⚽</span>
+        </span>
         <strong>La evolucion digital del futbol amateur.</strong>
         <span className="access-footer-dev">
-          <small>Desarrollado por</small>
           <img alt="ALP DEV" src={alpLogo} />
         </span>
       </footer>
