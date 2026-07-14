@@ -25,15 +25,6 @@ function getConfiguredOrigins(corsOrigin) {
   return Array.isArray(corsOrigin) ? corsOrigin : [corsOrigin];
 }
 
-function isLocalHttpOrigin(origin) {
-  try {
-    const url = new URL(origin);
-    return url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  } catch {
-    return false;
-  }
-}
-
 function isValidHttpsUrl(value) {
   try {
     const url = new URL(value);
@@ -78,6 +69,7 @@ export const runtimeConfig = {
   supabaseUrl: process.env.SUPABASE_URL || "",
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
   supabaseStorageBucket: process.env.SUPABASE_STORAGE_BUCKET || "ligatec-images",
+  backupStorageBucket: String(process.env.BACKUP_STORAGE_BUCKET || "").trim(),
   storagePublicBaseUrl: process.env.STORAGE_PUBLIC_BASE_URL || "",
   appBaseUrl: process.env.APP_BASE_URL || "",
   emailProvider: process.env.EMAIL_PROVIDER || "",
@@ -108,7 +100,7 @@ export function validateRuntimeConfig() {
         if (!["http:", "https:"].includes(url.protocol)) {
           problems.push(`CORS_ORIGIN invalido: ${origin}`);
         }
-        if (url.protocol !== "https:" && !isLocalHttpOrigin(origin)) {
+        if (url.protocol !== "https:") {
           problems.push(`CORS_ORIGIN debe usar https en produccion: ${origin}`);
         }
       } catch {
@@ -179,6 +171,10 @@ export function validateRuntimeConfig() {
     if (!runtimeConfig.supabaseStorageBucket) {
       problems.push("SUPABASE_STORAGE_BUCKET es obligatorio para subir imagenes en produccion.");
     }
+  }
+
+  if (!runtimeConfig.backupStorageBucket) {
+    problems.push("BACKUP_STORAGE_BUCKET es obligatorio para respaldos externos privados en produccion.");
   }
 
   const apiBaseUrl = String(process.env.VITE_API_BASE_URL || "").trim();

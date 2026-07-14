@@ -16,6 +16,7 @@ export function updateMatchSheetEventItem(eventItem, field, value, options = {})
   return {
     ...eventItem,
     [field]: value,
+    minuteLabel: field === "minute" ? "" : eventItem.minuteLabel,
     playerId: field === "teamId"
       ? ""
       : field === "type" && !playersForNextEvent.some((player) => player.id === eventItem.playerId)

@@ -128,12 +128,123 @@ function normalizeMatchRosterRow(row) {
     teamId: row.team_id ?? row.teamId,
     submittedByUserId: row.submitted_by_user_id ?? row.submittedByUserId ?? "",
     captainPlayerId: row.captain_player_id ?? row.captainPlayerId ?? "",
+    goalkeeperPlayerId: row.goalkeeper_player_id ?? row.goalkeeperPlayerId ?? "",
     captainPin: row.captain_pin ?? row.captainPin ?? "",
     players: parseJsonValue(row.players_json ?? row.playersJson, []),
+    starters: parseJsonValue(row.starters_json ?? row.startersJson, []),
+    substitutes: parseJsonValue(row.substitutes_json ?? row.substitutesJson, []),
+    lineup: parseJsonValue(row.lineup_json ?? row.lineupJson, {}),
     status: row.status || "submitted",
     notes: row.notes || "",
     submittedAt: normalizeDateTime(row.submitted_at ?? row.submittedAt),
+    updatedAt: normalizeDateTime(row.updated_at ?? row.updatedAt),
+    version: Number(row.version || 1)
+  };
+}
+
+function normalizeMatchTeamPinRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    leagueId: row.league_id ?? row.leagueId,
+    matchId: row.match_id ?? row.matchId,
+    teamId: row.team_id ?? row.teamId,
+    rosterId: row.roster_id ?? row.rosterId ?? "",
+    pinHash: row.pin_hash ?? row.pinHash ?? "",
+    pinSalt: row.pin_salt ?? row.pinSalt ?? "",
+    status: row.status || "active",
+    attempts: Number(row.attempts || 0),
+    lockedUntil: normalizeDateTime(row.locked_until ?? row.lockedUntil),
+    generatedByUserId: row.generated_by_user_id ?? row.generatedByUserId ?? "",
+    generatedAt: normalizeDateTime(row.generated_at ?? row.generatedAt),
+    revealedByUserId: row.revealed_by_user_id ?? row.revealedByUserId ?? "",
+    revealedAt: normalizeDateTime(row.revealed_at ?? row.revealedAt),
+    invalidatedAt: normalizeDateTime(row.invalidated_at ?? row.invalidatedAt),
+    usedAt: normalizeDateTime(row.used_at ?? row.usedAt),
+    signedAt: normalizeDateTime(row.signed_at ?? row.signedAt),
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
     updatedAt: normalizeDateTime(row.updated_at ?? row.updatedAt)
+  };
+}
+
+function normalizeMatchSessionRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    leagueId: row.league_id ?? row.leagueId,
+    matchId: row.match_id ?? row.matchId,
+    refereeUserId: row.referee_user_id ?? row.refereeUserId ?? "",
+    captureMode: row.capture_mode ?? row.captureMode ?? "live",
+    status: row.status || "draft",
+    period: row.period || "",
+    startedAt: normalizeDateTime(row.started_at ?? row.startedAt),
+    pausedAt: normalizeDateTime(row.paused_at ?? row.pausedAt),
+    savedAt: normalizeDateTime(row.saved_at ?? row.savedAt),
+    resumedAt: normalizeDateTime(row.resumed_at ?? row.resumedAt),
+    finishedAt: normalizeDateTime(row.finished_at ?? row.finishedAt),
+    suspendedAt: normalizeDateTime(row.suspended_at ?? row.suspendedAt),
+    suspensionReason: row.suspension_reason ?? row.suspensionReason ?? "",
+    clockState: parseJsonValue(row.clock_state_json ?? row.clockStateJson, {}),
+    metadata: parseJsonValue(row.metadata_json ?? row.metadataJson, {}),
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    updatedAt: normalizeDateTime(row.updated_at ?? row.updatedAt)
+  };
+}
+
+function normalizeMatchSessionOperationRow(row) {
+  if (!row) return null;
+  return {
+    operationId: row.operation_id ?? row.operationId,
+    leagueId: row.league_id ?? row.leagueId,
+    matchId: row.match_id ?? row.matchId,
+    sessionId: row.session_id ?? row.sessionId ?? "",
+    refereeUserId: row.referee_user_id ?? row.refereeUserId ?? "",
+    operationType: row.operation_type ?? row.operationType,
+    status: row.status || "synced",
+    payload: parseJsonValue(row.payload_json ?? row.payloadJson, {}),
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    syncedAt: normalizeDateTime(row.synced_at ?? row.syncedAt)
+  };
+}
+
+function normalizeMatchReportRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    leagueId: row.league_id ?? row.leagueId,
+    matchId: row.match_id ?? row.matchId,
+    sessionId: row.session_id ?? row.sessionId ?? "",
+    generatedByUserId: row.generated_by_user_id ?? row.generatedByUserId ?? "",
+    captureMode: row.capture_mode ?? row.captureMode ?? "admin",
+    status: row.status || "draft",
+    version: Number(row.version || 1),
+    payload: parseJsonValue(row.payload_json ?? row.payloadJson, {}),
+    homeGoals: row.home_goals ?? row.homeGoals ?? null,
+    awayGoals: row.away_goals ?? row.awayGoals ?? null,
+    generatedAt: normalizeDateTime(row.generated_at ?? row.generatedAt),
+    finalizedAt: normalizeDateTime(row.finalized_at ?? row.finalizedAt),
+    publishedAt: normalizeDateTime(row.published_at ?? row.publishedAt),
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    updatedAt: normalizeDateTime(row.updated_at ?? row.updatedAt)
+  };
+}
+
+function normalizeMatchReportSignatureRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    reportId: row.report_id ?? row.reportId,
+    leagueId: row.league_id ?? row.leagueId,
+    matchId: row.match_id ?? row.matchId,
+    teamId: row.team_id ?? row.teamId,
+    captainPlayerId: row.captain_player_id ?? row.captainPlayerId ?? "",
+    signedByUserId: row.signed_by_user_id ?? row.signedByUserId ?? "",
+    method: row.method || "pin",
+    status: row.status || "signed",
+    signedAt: normalizeDateTime(row.signed_at ?? row.signedAt),
+    ipAddress: row.ip_address ?? row.ipAddress ?? "",
+    userAgent: row.user_agent ?? row.userAgent ?? "",
+    metadata: parseJsonValue(row.metadata_json ?? row.metadataJson, {})
   };
 }
 
@@ -955,7 +1066,7 @@ export async function listTeamPortalPlayersData(teamId) {
 export async function listMatchRostersForLeagueData(leagueId) {
   if (isPostgres()) {
     const rows = await pgQuery(`
-      SELECT id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at
+      SELECT id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, goalkeeper_player_id, captain_pin, players_json, starters_json, substitutes_json, lineup_json, status, notes, submitted_at, updated_at, version
       FROM match_rosters
       WHERE league_id = $1
       ORDER BY submitted_at DESC
@@ -963,43 +1074,740 @@ export async function listMatchRostersForLeagueData(leagueId) {
     return rows.map(normalizeMatchRosterRow);
   }
   return db.prepare(`
-    SELECT id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at
+    SELECT id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, goalkeeper_player_id, captain_pin, players_json, starters_json, substitutes_json, lineup_json, status, notes, submitted_at, updated_at, version
     FROM match_rosters
     WHERE league_id = ?
     ORDER BY submitted_at DESC
   `).all(leagueId).map(normalizeMatchRosterRow);
 }
 
-export async function upsertMatchRosterData({ id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId, captainPin = "", players, status = "submitted", notes = "" }) {
+export async function upsertMatchRosterData({ id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId, goalkeeperPlayerId = "", captainPin = "", players, starters = [], substitutes = [], lineup = {}, status = "submitted", notes = "" }) {
   const now = new Date().toISOString();
   const payload = JSON.stringify(players || []);
+  const startersPayload = JSON.stringify(starters || []);
+  const substitutesPayload = JSON.stringify(substitutes || []);
+  const lineupPayload = JSON.stringify(lineup || {});
   if (isPostgres()) {
     await pgQuery(`
-      INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $11)
+      INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, goalkeeper_player_id, captain_pin, players_json, starters_json, substitutes_json, lineup_json, status, notes, submitted_at, updated_at, version)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13, $14, $15, $15, 1)
       ON CONFLICT (match_id, team_id) DO UPDATE SET
         submitted_by_user_id = EXCLUDED.submitted_by_user_id,
         captain_player_id = EXCLUDED.captain_player_id,
+        goalkeeper_player_id = EXCLUDED.goalkeeper_player_id,
         captain_pin = EXCLUDED.captain_pin,
         players_json = EXCLUDED.players_json,
+        starters_json = EXCLUDED.starters_json,
+        substitutes_json = EXCLUDED.substitutes_json,
+        lineup_json = EXCLUDED.lineup_json,
         status = EXCLUDED.status,
         notes = EXCLUDED.notes,
-        updated_at = EXCLUDED.updated_at
-    `, [id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId || null, captainPin, payload, status, notes, now]);
+        updated_at = EXCLUDED.updated_at,
+        version = match_rosters.version + 1
+    `, [id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId || null, goalkeeperPlayerId || null, captainPin, payload, startersPayload, substitutesPayload, lineupPayload, status, notes, now]);
     return;
   }
   db.prepare(`
-    INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, goalkeeper_player_id, captain_pin, players_json, starters_json, substitutes_json, lineup_json, status, notes, submitted_at, updated_at, version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(match_id, team_id) DO UPDATE SET
       submitted_by_user_id = excluded.submitted_by_user_id,
       captain_player_id = excluded.captain_player_id,
+      goalkeeper_player_id = excluded.goalkeeper_player_id,
       captain_pin = excluded.captain_pin,
       players_json = excluded.players_json,
+      starters_json = excluded.starters_json,
+      substitutes_json = excluded.substitutes_json,
+      lineup_json = excluded.lineup_json,
       status = excluded.status,
       notes = excluded.notes,
+      updated_at = excluded.updated_at,
+      version = match_rosters.version + 1
+  `).run(id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId || null, goalkeeperPlayerId || null, captainPin, payload, startersPayload, substitutesPayload, lineupPayload, status, notes, now, now);
+}
+
+export async function upsertMatchTeamPinData({ id, leagueId, matchId, teamId, rosterId = "", pinHash, pinSalt = "", generatedByUserId = "" }) {
+  const now = new Date().toISOString();
+  if (!pinHash) throw new Error("PIN hash requerido");
+
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO match_team_pins (
+        id, league_id, match_id, team_id, roster_id, pin_hash, pin_salt, status,
+        attempts, generated_by_user_id, generated_at, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', 0, $8, $9, $9, $9)
+      ON CONFLICT (match_id, team_id) DO UPDATE SET
+        roster_id = EXCLUDED.roster_id,
+        pin_hash = EXCLUDED.pin_hash,
+        pin_salt = EXCLUDED.pin_salt,
+        status = 'active',
+        attempts = 0,
+        locked_until = NULL,
+        generated_by_user_id = EXCLUDED.generated_by_user_id,
+        generated_at = EXCLUDED.generated_at,
+        revealed_by_user_id = NULL,
+        revealed_at = NULL,
+        invalidated_at = NULL,
+        used_at = NULL,
+        signed_at = NULL,
+        updated_at = EXCLUDED.updated_at
+    `, [id, leagueId, matchId, teamId, rosterId || null, pinHash, pinSalt || null, generatedByUserId || null, now]);
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO match_team_pins (
+      id, league_id, match_id, team_id, roster_id, pin_hash, pin_salt, status,
+      attempts, generated_by_user_id, generated_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?)
+    ON CONFLICT(match_id, team_id) DO UPDATE SET
+      roster_id = excluded.roster_id,
+      pin_hash = excluded.pin_hash,
+      pin_salt = excluded.pin_salt,
+      status = 'active',
+      attempts = 0,
+      locked_until = NULL,
+      generated_by_user_id = excluded.generated_by_user_id,
+      generated_at = excluded.generated_at,
+      revealed_by_user_id = NULL,
+      revealed_at = NULL,
+      invalidated_at = NULL,
+      used_at = NULL,
+      signed_at = NULL,
       updated_at = excluded.updated_at
-  `).run(id, leagueId, matchId, teamId, submittedByUserId, captainPlayerId || null, captainPin, payload, status, notes, now, now);
+  `).run(id, leagueId, matchId, teamId, rosterId || null, pinHash, pinSalt || null, generatedByUserId || null, now, now, now);
+}
+
+export async function getMatchTeamPinData(matchId, teamId) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT *
+      FROM match_team_pins
+      WHERE match_id = $1 AND team_id = $2
+      LIMIT 1
+    `, [matchId, teamId]);
+    return normalizeMatchTeamPinRow(rows[0]);
+  }
+
+  return normalizeMatchTeamPinRow(db.prepare(`
+    SELECT *
+    FROM match_team_pins
+    WHERE match_id = ? AND team_id = ?
+    LIMIT 1
+  `).get(matchId, teamId));
+}
+
+export async function updateMatchRosterPinData({ matchId, teamId, captainPin }) {
+  const now = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE match_rosters
+      SET captain_pin = $1, updated_at = $2, version = version + 1
+      WHERE match_id = $3 AND team_id = $4
+    `, [captainPin || "", now, matchId, teamId]);
+    return;
+  }
+
+  db.prepare(`
+    UPDATE match_rosters
+    SET captain_pin = ?, updated_at = ?, version = version + 1
+    WHERE match_id = ? AND team_id = ?
+  `).run(captainPin || "", now, matchId, teamId);
+}
+
+export async function markMatchTeamPinRevealedData({ matchId, teamId, revealedByUserId }) {
+  const now = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE match_team_pins
+      SET revealed_by_user_id = $1, revealed_at = $2, updated_at = $2
+      WHERE match_id = $3 AND team_id = $4
+    `, [revealedByUserId || null, now, matchId, teamId]);
+    return;
+  }
+
+  db.prepare(`
+    UPDATE match_team_pins
+    SET revealed_by_user_id = ?, revealed_at = ?, updated_at = ?
+    WHERE match_id = ? AND team_id = ?
+  `).run(revealedByUserId || null, now, now, matchId, teamId);
+}
+
+export async function listMatchSessionsForRefereeData(refereeUserId) {
+  if (!refereeUserId) return [];
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT *
+      FROM match_sessions
+      WHERE referee_user_id = $1
+      ORDER BY updated_at DESC
+    `, [refereeUserId]);
+    return rows.map(normalizeMatchSessionRow);
+  }
+
+  return db.prepare(`
+    SELECT *
+    FROM match_sessions
+    WHERE referee_user_id = ?
+    ORDER BY updated_at DESC
+  `).all(refereeUserId).map(normalizeMatchSessionRow);
+}
+
+export async function getMatchSessionData(sessionId) {
+  if (!sessionId) return null;
+  if (isPostgres()) {
+    const rows = await pgQuery("SELECT * FROM match_sessions WHERE id = $1", [sessionId]);
+    return normalizeMatchSessionRow(rows[0]);
+  }
+  return normalizeMatchSessionRow(db.prepare("SELECT * FROM match_sessions WHERE id = ?").get(sessionId));
+}
+
+export async function getMatchSessionOperationData(operationId) {
+  if (!operationId) return null;
+  if (isPostgres()) {
+    const rows = await pgQuery("SELECT * FROM match_session_operations WHERE operation_id = $1", [operationId]);
+    return normalizeMatchSessionOperationRow(rows[0]);
+  }
+  return normalizeMatchSessionOperationRow(db.prepare("SELECT * FROM match_session_operations WHERE operation_id = ?").get(operationId));
+}
+
+export async function createMatchSessionOperationData({
+  operationId,
+  leagueId,
+  matchId,
+  sessionId = "",
+  refereeUserId = "",
+  operationType,
+  payload = {},
+  status = "synced"
+}) {
+  if (!operationId) return { operation: null, duplicate: false };
+  const existing = await getMatchSessionOperationData(operationId);
+  if (existing) return { operation: existing, duplicate: true };
+
+  const now = new Date().toISOString();
+  const payloadJson = JSON.stringify(payload || {});
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO match_session_operations (
+        operation_id, league_id, match_id, session_id, referee_user_id, operation_type,
+        status, payload_json, created_at, synced_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $9)
+      ON CONFLICT (operation_id) DO NOTHING
+    `, [operationId, leagueId, matchId, sessionId || null, refereeUserId || null, operationType, status, payloadJson, now]);
+    const operation = await getMatchSessionOperationData(operationId);
+    return { operation, duplicate: operation?.createdAt !== now };
+  }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO match_session_operations (
+      operation_id, league_id, match_id, session_id, referee_user_id, operation_type,
+      status, payload_json, created_at, synced_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(operationId, leagueId, matchId, sessionId || null, refereeUserId || null, operationType, status, payloadJson, now, now);
+  const operation = await getMatchSessionOperationData(operationId);
+  return { operation, duplicate: operation?.createdAt !== now };
+}
+
+export async function upsertMatchSessionData({
+  id,
+  leagueId,
+  matchId,
+  refereeUserId,
+  captureMode = "live",
+  status = "draft",
+  period = "",
+  clockState = {},
+  metadata = {},
+  suspensionReason = ""
+}) {
+  const now = new Date().toISOString();
+  const clockPayload = JSON.stringify(clockState || {});
+  const metadataPayload = JSON.stringify(metadata || {});
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO match_sessions (
+        id, league_id, match_id, referee_user_id, capture_mode, status, period,
+        started_at, paused_at, saved_at, resumed_at, finished_at, suspended_at,
+        suspension_reason, clock_state_json, metadata_json, created_at, updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7,
+        CASE WHEN $6 = 'in_progress' THEN $8::timestamptz ELSE NULL END,
+        CASE WHEN $6 = 'paused' THEN $8::timestamptz ELSE NULL END,
+        CASE WHEN $6 = 'temporarily_saved' THEN $8::timestamptz ELSE NULL END,
+        CASE WHEN $6 = 'in_progress' THEN $8::timestamptz ELSE NULL END,
+        CASE WHEN $6 = 'match_finished' THEN $8::timestamptz ELSE NULL END,
+        CASE WHEN $6 LIKE 'suspended%' THEN $8::timestamptz ELSE NULL END,
+        $9, $10::jsonb, $11::jsonb, $8, $8
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        capture_mode = EXCLUDED.capture_mode,
+        status = EXCLUDED.status,
+        period = EXCLUDED.period,
+        paused_at = CASE WHEN EXCLUDED.status = 'paused' THEN EXCLUDED.updated_at ELSE match_sessions.paused_at END,
+        saved_at = CASE WHEN EXCLUDED.status = 'temporarily_saved' THEN EXCLUDED.updated_at ELSE match_sessions.saved_at END,
+        resumed_at = CASE WHEN EXCLUDED.status = 'in_progress' THEN EXCLUDED.updated_at ELSE match_sessions.resumed_at END,
+        finished_at = CASE WHEN EXCLUDED.status = 'match_finished' THEN EXCLUDED.updated_at ELSE match_sessions.finished_at END,
+        suspended_at = CASE WHEN EXCLUDED.status LIKE 'suspended%' THEN EXCLUDED.updated_at ELSE match_sessions.suspended_at END,
+        suspension_reason = EXCLUDED.suspension_reason,
+        clock_state_json = EXCLUDED.clock_state_json,
+        metadata_json = EXCLUDED.metadata_json,
+        updated_at = EXCLUDED.updated_at
+    `, [id, leagueId, matchId, refereeUserId || null, captureMode, status, period || "", now, suspensionReason || "", clockPayload, metadataPayload]);
+    return getMatchSessionData(id);
+  }
+
+  db.prepare(`
+    INSERT INTO match_sessions (
+      id, league_id, match_id, referee_user_id, capture_mode, status, period,
+      started_at, paused_at, saved_at, resumed_at, finished_at, suspended_at,
+      suspension_reason, clock_state_json, metadata_json, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      capture_mode = excluded.capture_mode,
+      status = excluded.status,
+      period = excluded.period,
+      paused_at = CASE WHEN excluded.status = 'paused' THEN excluded.updated_at ELSE match_sessions.paused_at END,
+      saved_at = CASE WHEN excluded.status = 'temporarily_saved' THEN excluded.updated_at ELSE match_sessions.saved_at END,
+      resumed_at = CASE WHEN excluded.status = 'in_progress' THEN excluded.updated_at ELSE match_sessions.resumed_at END,
+      finished_at = CASE WHEN excluded.status = 'match_finished' THEN excluded.updated_at ELSE match_sessions.finished_at END,
+      suspended_at = CASE WHEN excluded.status LIKE 'suspended%' THEN excluded.updated_at ELSE match_sessions.suspended_at END,
+      suspension_reason = excluded.suspension_reason,
+      clock_state_json = excluded.clock_state_json,
+      metadata_json = excluded.metadata_json,
+      updated_at = excluded.updated_at
+  `).run(
+    id,
+    leagueId,
+    matchId,
+    refereeUserId || null,
+    captureMode,
+    status,
+    period || "",
+    status === "in_progress" ? now : null,
+    status === "paused" ? now : null,
+    status === "temporarily_saved" ? now : null,
+    status === "in_progress" ? now : null,
+    status === "match_finished" ? now : null,
+    status?.startsWith("suspended") ? now : null,
+    suspensionReason || "",
+    clockPayload,
+    metadataPayload,
+    now,
+    now
+  );
+  return getMatchSessionData(id);
+}
+
+export async function updateMatchWorkflowData({ matchId, workflowStatus, captureMode = "", currentReportId = "", finalizedAt = "", publishedAt = "" }) {
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE matches
+      SET workflow_status = COALESCE(NULLIF($1, ''), workflow_status),
+          capture_mode = COALESCE(NULLIF($2, ''), capture_mode),
+          current_report_id = COALESCE(NULLIF($3, ''), current_report_id),
+          finalized_at = COALESCE($4::timestamptz, finalized_at),
+          published_at = COALESCE($5::timestamptz, published_at)
+      WHERE id = $6
+    `, [workflowStatus || "", captureMode || "", currentReportId || "", finalizedAt || null, publishedAt || null, matchId]);
+    return;
+  }
+
+  db.prepare(`
+    UPDATE matches
+    SET workflow_status = COALESCE(NULLIF(?, ''), workflow_status),
+        capture_mode = COALESCE(NULLIF(?, ''), capture_mode),
+        current_report_id = COALESCE(NULLIF(?, ''), current_report_id),
+        finalized_at = COALESCE(NULLIF(?, ''), finalized_at),
+        published_at = COALESCE(NULLIF(?, ''), published_at)
+    WHERE id = ?
+  `).run(workflowStatus || "", captureMode || "", currentReportId || "", finalizedAt || "", publishedAt || "", matchId);
+}
+
+export async function createMatchReportData({ id, leagueId, matchId, sessionId = "", generatedByUserId = "", captureMode = "live", status = "draft", payload = {}, homeGoals = null, awayGoals = null }) {
+  const now = new Date().toISOString();
+  const payloadJson = JSON.stringify(payload || {});
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO match_reports (
+        id, league_id, match_id, session_id, generated_by_user_id, capture_mode, status,
+        version, payload_json, home_goals, away_goals, generated_at, finalized_at, published_at, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8::jsonb, $9, $10, $11, NULL, NULL, $11, $11)
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        payload_json = EXCLUDED.payload_json,
+        home_goals = EXCLUDED.home_goals,
+        away_goals = EXCLUDED.away_goals,
+        generated_at = EXCLUDED.generated_at,
+        updated_at = EXCLUDED.updated_at,
+        version = match_reports.version + 1
+    `, [id, leagueId, matchId, sessionId || null, generatedByUserId || null, captureMode, status, payloadJson, homeGoals, awayGoals, now]);
+    const rows = await pgQuery("SELECT * FROM match_reports WHERE id = $1", [id]);
+    return normalizeMatchReportRow(rows[0]);
+  }
+
+  db.prepare(`
+    INSERT INTO match_reports (
+      id, league_id, match_id, session_id, generated_by_user_id, capture_mode, status,
+      version, payload_json, home_goals, away_goals, generated_at, finalized_at, published_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL, NULL, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      payload_json = excluded.payload_json,
+      home_goals = excluded.home_goals,
+      away_goals = excluded.away_goals,
+      generated_at = excluded.generated_at,
+      updated_at = excluded.updated_at,
+      version = match_reports.version + 1
+  `).run(id, leagueId, matchId, sessionId || null, generatedByUserId || null, captureMode, status, payloadJson, homeGoals, awayGoals, now, now, now);
+  return normalizeMatchReportRow(db.prepare("SELECT * FROM match_reports WHERE id = ?").get(id));
+}
+
+export async function getLatestMatchReportForMatchData(matchId) {
+  if (!matchId) return null;
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT *
+      FROM match_reports
+      WHERE match_id = $1
+      ORDER BY generated_at DESC NULLS LAST, updated_at DESC
+      LIMIT 1
+    `, [matchId]);
+    return normalizeMatchReportRow(rows[0]);
+  }
+
+  return normalizeMatchReportRow(db.prepare(`
+    SELECT *
+    FROM match_reports
+    WHERE match_id = ?
+    ORDER BY COALESCE(generated_at, updated_at) DESC, updated_at DESC
+    LIMIT 1
+  `).get(matchId));
+}
+
+export async function listMatchReportSignaturesData(reportId) {
+  if (!reportId) return [];
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT *
+      FROM match_report_signatures
+      WHERE report_id = $1
+      ORDER BY signed_at ASC
+    `, [reportId]);
+    return rows.map(normalizeMatchReportSignatureRow);
+  }
+
+  return db.prepare(`
+    SELECT *
+    FROM match_report_signatures
+    WHERE report_id = ?
+    ORDER BY signed_at ASC
+  `).all(reportId).map(normalizeMatchReportSignatureRow);
+}
+
+export async function createMatchReportSignatureData({
+  id,
+  reportId,
+  leagueId,
+  matchId,
+  teamId,
+  captainPlayerId = "",
+  signedByUserId = "",
+  method = "pin",
+  ipAddress = "",
+  userAgent = "",
+  metadata = {}
+}) {
+  const now = new Date().toISOString();
+  const metadataPayload = JSON.stringify(metadata || {});
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO match_report_signatures (
+        id, report_id, league_id, match_id, team_id, captain_player_id,
+        signed_by_user_id, method, status, signed_at, ip_address, user_agent, metadata_json
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'signed', $9, $10, $11, $12::jsonb)
+      ON CONFLICT (report_id, team_id) DO UPDATE SET
+        captain_player_id = EXCLUDED.captain_player_id,
+        signed_by_user_id = EXCLUDED.signed_by_user_id,
+        method = EXCLUDED.method,
+        status = 'signed',
+        signed_at = EXCLUDED.signed_at,
+        ip_address = EXCLUDED.ip_address,
+        user_agent = EXCLUDED.user_agent,
+        metadata_json = EXCLUDED.metadata_json
+    `, [id, reportId, leagueId, matchId, teamId, captainPlayerId || null, signedByUserId || null, method, now, ipAddress || "", userAgent || "", metadataPayload]);
+    return listMatchReportSignaturesData(reportId);
+  }
+
+  db.prepare(`
+    INSERT INTO match_report_signatures (
+      id, report_id, league_id, match_id, team_id, captain_player_id,
+      signed_by_user_id, method, status, signed_at, ip_address, user_agent, metadata_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'signed', ?, ?, ?, ?)
+    ON CONFLICT(report_id, team_id) DO UPDATE SET
+      captain_player_id = excluded.captain_player_id,
+      signed_by_user_id = excluded.signed_by_user_id,
+      method = excluded.method,
+      status = 'signed',
+      signed_at = excluded.signed_at,
+      ip_address = excluded.ip_address,
+      user_agent = excluded.user_agent,
+      metadata_json = excluded.metadata_json
+  `).run(id, reportId, leagueId, matchId, teamId, captainPlayerId || null, signedByUserId || null, method, now, ipAddress || "", userAgent || "", metadataPayload);
+  return listMatchReportSignaturesData(reportId);
+}
+
+export async function updateMatchReportStatusData({ reportId, status, finalizedAt = "", publishedAt = "" }) {
+  const now = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE match_reports
+      SET status = $1,
+          finalized_at = COALESCE($2::timestamptz, finalized_at),
+          published_at = COALESCE($3::timestamptz, published_at),
+          updated_at = $4
+      WHERE id = $5
+    `, [status, finalizedAt || null, publishedAt || null, now, reportId]);
+    const rows = await pgQuery("SELECT * FROM match_reports WHERE id = $1", [reportId]);
+    return normalizeMatchReportRow(rows[0]);
+  }
+
+  db.prepare(`
+    UPDATE match_reports
+    SET status = ?,
+        finalized_at = COALESCE(NULLIF(?, ''), finalized_at),
+        published_at = COALESCE(NULLIF(?, ''), published_at),
+        updated_at = ?
+    WHERE id = ?
+  `).run(status, finalizedAt || "", publishedAt || "", now, reportId);
+  return normalizeMatchReportRow(db.prepare("SELECT * FROM match_reports WHERE id = ?").get(reportId));
+}
+
+export async function markMatchTeamPinSignedData({ matchId, teamId }) {
+  const now = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE match_team_pins
+      SET used_at = $1, signed_at = $1, updated_at = $1
+      WHERE match_id = $2 AND team_id = $3
+    `, [now, matchId, teamId]);
+    return;
+  }
+
+  db.prepare(`
+    UPDATE match_team_pins
+    SET used_at = ?, signed_at = ?, updated_at = ?
+    WHERE match_id = ? AND team_id = ?
+  `).run(now, now, now, matchId, teamId);
+}
+
+export async function listMatchReportsData({ leagueId = "", status = "" } = {}) {
+  const statuses = String(status || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (isPostgres()) {
+    const conditions = [];
+    const values = [];
+    if (leagueId) {
+      values.push(leagueId);
+      conditions.push(`league_id = $${values.length}`);
+    }
+    if (statuses.length) {
+      values.push(statuses);
+      conditions.push(`status = ANY($${values.length}::text[])`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = await pgQuery(`
+      SELECT *
+      FROM match_reports
+      ${where}
+      ORDER BY generated_at DESC NULLS LAST, updated_at DESC
+    `, values);
+    return rows.map(normalizeMatchReportRow);
+  }
+
+  const conditions = [];
+  const values = [];
+  if (leagueId) {
+    conditions.push("league_id = ?");
+    values.push(leagueId);
+  }
+  if (statuses.length) {
+    conditions.push(`status IN (${statuses.map(() => "?").join(", ")})`);
+    values.push(...statuses);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  return db.prepare(`
+    SELECT *
+    FROM match_reports
+    ${where}
+    ORDER BY COALESCE(generated_at, updated_at) DESC, updated_at DESC
+  `).all(...values).map(normalizeMatchReportRow);
+}
+
+export async function getMatchReportData(reportId) {
+  if (isPostgres()) {
+    const rows = await pgQuery("SELECT * FROM match_reports WHERE id = $1", [reportId]);
+    return rows[0] ? normalizeMatchReportRow(rows[0]) : null;
+  }
+  const row = db.prepare("SELECT * FROM match_reports WHERE id = ?").get(reportId);
+  return row ? normalizeMatchReportRow(row) : null;
+}
+
+export async function publishOfficialMatchFromReportData({ leagueId, match, reportId, publishedAt = new Date().toISOString() }) {
+  if (!match?.id) throw new Error("Partido requerido para publicar acta.");
+  const events = Array.isArray(match.events) ? match.events : [];
+
+  if (isPostgres()) {
+    await pgQuery("DELETE FROM match_events WHERE match_id = $1", [match.id]);
+    await pgQuery(`
+      UPDATE matches
+      SET status = $1,
+          workflow_status = 'published',
+          current_report_id = $2,
+          published_at = $3,
+          finalized_at = COALESCE(finalized_at, $3),
+          home_goals = $4,
+          away_goals = $5,
+          observations = $6,
+          resolution_type = $7,
+          resolution_note = $8,
+          extra_time_home_goals = $9,
+          extra_time_away_goals = $10,
+          penalty_home_goals = $11,
+          penalty_away_goals = $12
+      WHERE id = $13 AND league_id = $14
+    `, [
+      match.status || "finished",
+      reportId || null,
+      publishedAt,
+      match.homeGoals,
+      match.awayGoals,
+      match.observations || "",
+      match.resolutionType || "normal",
+      match.resolutionNote || null,
+      match.extraTimeHomeGoals ?? null,
+      match.extraTimeAwayGoals ?? null,
+      match.penaltyHomeGoals ?? null,
+      match.penaltyAwayGoals ?? null,
+      match.id,
+      leagueId
+    ]);
+    for (const event of events) {
+      await pgQuery(`
+        INSERT INTO match_events (
+          match_id, type, player_id, team_id, minute, minute_label,
+          suspension_matches, suspension_indefinite, disciplinary_pending, reason,
+          is_official, sync_status, version
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, 'synced', 1)
+      `, [
+        match.id,
+        event.type,
+        event.playerId || null,
+        event.teamId || null,
+        event.minute ?? null,
+        event.minuteLabel || "",
+        event.suspensionMatches ?? null,
+        toBoolean(event.suspensionIndefinite),
+        toBoolean(event.disciplinaryPending),
+        event.reason || ""
+      ]);
+    }
+    if (reportId) {
+      await pgQuery(`
+        UPDATE match_reports
+        SET status = 'published',
+            finalized_at = COALESCE(finalized_at, $1),
+            published_at = $1,
+            updated_at = $1
+        WHERE id = $2
+      `, [publishedAt, reportId]);
+    }
+    return;
+  }
+
+  const transaction = db.transaction(() => {
+    db.prepare("DELETE FROM match_events WHERE match_id = ?").run(match.id);
+    db.prepare(`
+      UPDATE matches
+      SET status = ?,
+          workflow_status = 'published',
+          current_report_id = ?,
+          published_at = ?,
+          finalized_at = COALESCE(finalized_at, ?),
+          home_goals = ?,
+          away_goals = ?,
+          observations = ?,
+          resolution_type = ?,
+          resolution_note = ?,
+          extra_time_home_goals = ?,
+          extra_time_away_goals = ?,
+          penalty_home_goals = ?,
+          penalty_away_goals = ?
+      WHERE id = ? AND league_id = ?
+    `).run(
+      match.status || "finished",
+      reportId || "",
+      publishedAt,
+      publishedAt,
+      match.homeGoals,
+      match.awayGoals,
+      match.observations || "",
+      match.resolutionType || "normal",
+      match.resolutionNote || null,
+      match.extraTimeHomeGoals ?? null,
+      match.extraTimeAwayGoals ?? null,
+      match.penaltyHomeGoals ?? null,
+      match.penaltyAwayGoals ?? null,
+      match.id,
+      leagueId
+    );
+    for (const event of events) {
+      db.prepare(`
+        INSERT INTO match_events (
+          match_id, type, player_id, team_id, minute, minute_label,
+          suspension_matches, suspension_indefinite, disciplinary_pending, reason,
+          is_official, sync_status, version
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced', 1)
+      `).run(
+        match.id,
+        event.type,
+        event.playerId || null,
+        event.teamId || null,
+        event.minute ?? null,
+        event.minuteLabel || "",
+        event.suspensionMatches ?? null,
+        event.suspensionIndefinite ? 1 : 0,
+        event.disciplinaryPending ? 1 : 0,
+        event.reason || ""
+      );
+    }
+    if (reportId) {
+      db.prepare(`
+        UPDATE match_reports
+        SET status = 'published',
+            finalized_at = COALESCE(finalized_at, ?),
+            published_at = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(publishedAt, publishedAt, publishedAt, reportId);
+    }
+  });
+  transaction();
 }
 
 export async function createTeamPortalPlayerData({ id, leagueId, competitionId, teamId, name, number, position, photoUrl, photoAuthorized }) {
@@ -1501,4 +2309,139 @@ export async function listAuditLogsData(limit = 80) {
     ORDER BY datetime(created_at) DESC, id DESC
     LIMIT ?
   `).all(limit);
+}
+
+function normalizeBackupRecord(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    provider: row.provider,
+    kind: row.kind,
+    status: row.status,
+    fileName: row.file_name ?? row.fileName ?? "",
+    filePath: row.file_path ?? row.filePath ?? "",
+    sizeBytes: Number(row.size_bytes ?? row.sizeBytes ?? 0),
+    checksumSha256: row.checksum_sha256 ?? row.checksumSha256 ?? "",
+    storageBucket: row.storage_bucket ?? row.storageBucket ?? "",
+    storagePath: row.storage_path ?? row.storagePath ?? "",
+    createdByUserId: row.created_by_user_id ?? row.createdByUserId ?? "",
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt),
+    completedAt: normalizeDateTime(row.completed_at ?? row.completedAt),
+    errorMessage: row.error_message ?? row.errorMessage ?? ""
+  };
+}
+
+export async function createBackupRecordData(record) {
+  const values = [
+    record.id,
+    record.provider,
+    record.kind,
+    record.status,
+    record.fileName || "",
+    record.filePath || "",
+    Number(record.sizeBytes || 0),
+    record.checksumSha256 || "",
+    record.storageBucket || "",
+    record.storagePath || "",
+    record.createdByUserId || null,
+    record.createdAt,
+    record.completedAt || null,
+    record.errorMessage || ""
+  ];
+
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO backup_records (
+        id, provider, kind, status, file_name, file_path, size_bytes, checksum_sha256,
+        storage_bucket, storage_path, created_by_user_id, created_at, completed_at, error_message
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    `, values);
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO backup_records (
+      id, provider, kind, status, file_name, file_path, size_bytes, checksum_sha256,
+      storage_bucket, storage_path, created_by_user_id, created_at, completed_at, error_message
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(...values);
+}
+
+export async function updateBackupRecordData(recordId, patch) {
+  const current = await getBackupRecordData(recordId);
+  if (!current) return null;
+  const next = { ...current, ...patch };
+  const values = [
+    next.status,
+    next.fileName || "",
+    next.filePath || "",
+    Number(next.sizeBytes || 0),
+    next.checksumSha256 || "",
+    next.storageBucket || "",
+    next.storagePath || "",
+    next.completedAt || null,
+    next.errorMessage || "",
+    recordId
+  ];
+
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE backup_records
+      SET status = $1, file_name = $2, file_path = $3, size_bytes = $4, checksum_sha256 = $5,
+          storage_bucket = $6, storage_path = $7, completed_at = $8, error_message = $9
+      WHERE id = $10
+    `, values);
+    return getBackupRecordData(recordId);
+  }
+
+  db.prepare(`
+    UPDATE backup_records
+    SET status = ?, file_name = ?, file_path = ?, size_bytes = ?, checksum_sha256 = ?,
+        storage_bucket = ?, storage_path = ?, completed_at = ?, error_message = ?
+    WHERE id = ?
+  `).run(...values);
+  return getBackupRecordData(recordId);
+}
+
+export async function getBackupRecordData(recordId) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT id, provider, kind, status, file_name, file_path, size_bytes, checksum_sha256,
+             storage_bucket, storage_path, created_by_user_id, created_at, completed_at, error_message
+      FROM backup_records
+      WHERE id = $1
+    `, [recordId]);
+    return normalizeBackupRecord(rows[0]);
+  }
+
+  return normalizeBackupRecord(db.prepare(`
+    SELECT id, provider, kind, status, file_name, file_path, size_bytes, checksum_sha256,
+           storage_bucket, storage_path, created_by_user_id, created_at, completed_at, error_message
+    FROM backup_records
+    WHERE id = ?
+  `).get(recordId));
+}
+
+export async function listBackupRecordsData(limit = 20) {
+  const safeLimit = Math.min(Math.max(Number(limit || 20), 1), 100);
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT id, provider, kind, status, file_name, file_path, size_bytes, checksum_sha256,
+             storage_bucket, storage_path, created_by_user_id, created_at, completed_at, error_message
+      FROM backup_records
+      ORDER BY created_at DESC
+      LIMIT $1
+    `, [safeLimit]);
+    return rows.map(normalizeBackupRecord);
+  }
+
+  return db.prepare(`
+    SELECT id, provider, kind, status, file_name, file_path, size_bytes, checksum_sha256,
+           storage_bucket, storage_path, created_by_user_id, created_at, completed_at, error_message
+    FROM backup_records
+    ORDER BY datetime(created_at) DESC
+    LIMIT ?
+  `).all(safeLimit).map(normalizeBackupRecord);
 }

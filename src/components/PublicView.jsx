@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import alpLogo from "../../assets/alp-logo.png";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 import {
   calculatePlayerStats,
@@ -31,6 +32,9 @@ function getPublicCompetitionStorageKey(leagueId) {
 
 function loadLastCompetitionId(league) {
   try {
+    const params = new URLSearchParams(window.location.search);
+    const urlCompetitionId = params.get("torneo") || params.get("competition") || params.get("categoria") || "";
+    if (league.competitions?.some((competition) => competition.id === urlCompetitionId)) return urlCompetitionId;
     const competitionId = localStorage.getItem(getPublicCompetitionStorageKey(league.id)) || "";
     return league.competitions?.some((competition) => competition.id === competitionId) ? competitionId : "";
   } catch {
@@ -53,14 +57,47 @@ function getCompetitionAccent(competitions, competitionId) {
   return COMPETITION_ACCENTS[index % COMPETITION_ACCENTS.length];
 }
 
-export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate }) {
+function getPublicCompetitions(league) {
+  return (league.competitions || []).filter((competition) => competition.status !== "archived");
+}
+
+function getArchivedPublicCompetitions(league) {
+  return (league.competitions || []).filter((competition) => competition.status === "archived");
+}
+
+function hasTournamentSelector(league) {
+  return (league.competitions || []).length > 1;
+}
+
+function getSeasonValue(competition, league) {
+  return competition?.season || league?.season || "Temporada actual";
+}
+
+function getSeasonId(value) {
+  const slug = normalizeSearchTerm(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `season-${slug || "actual"}`;
+}
+
+function updatePublicCompetitionUrl(league, competition) {
+  try {
+    if (!competition) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("temporada", getSeasonId(getSeasonValue(competition, league)));
+    url.searchParams.set("torneo", competition.id);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // Si el navegador no permite modificar la URL, la seleccion local sigue funcionando.
+  }
+}
+
+export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate, onEntryModeChange }) {
   const [showIntro, setShowIntro] = useState(true);
   const [publicSearch, setPublicSearch] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(() => loadLastCompetitionId(league) || getDefaultCompetitionId(league));
   const [isCompetitionSheetOpen, setCompetitionSheetOpen] = useState(false);
   const [showCompetitionGate, setShowCompetitionGate] = useState(() => (
-    (league.competitions || []).length > 1 && !loadLastCompetitionId(league)
+    hasTournamentSelector(league)
   ));
   const activeLeague = useMemo(
     () => scopeLeagueToCompetition(league, selectedCompetitionId),
@@ -70,7 +107,9 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const playoffs = useMemo(() => playoffMatches(activeLeague), [activeLeague]);
   const activeCompetition = getCompetition(league, selectedCompetitionId);
   const competitionAccent = getCompetitionAccent(league.competitions || [], selectedCompetitionId);
-  const hasMultipleCompetitions = (league.competitions || []).length > 1;
+  const publicCompetitions = getPublicCompetitions(league);
+  const archivedPublicCompetitions = getArchivedPublicCompetitions(league);
+  const hasMultipleCompetitions = publicCompetitions.length > 1;
   const [selectedSeason, setSelectedSeason] = useState(activeCompetition?.season || league.season);
   const standings = calculateStandings(regularLeague);
   const stats = calculatePlayerStats(activeLeague);
@@ -168,10 +207,25 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     });
   }
 
-  function selectCompetition(competitionId) {
+  function selectCompetition(competitionId, options = {}) {
+    const {
+      clearHash = true,
+      closeGate = true,
+      scrollTop = true,
+      updateUrl = true
+    } = options;
+    const nextCompetition = getCompetition(league, competitionId);
     setSelectedCompetitionId(competitionId);
     setCompetitionSheetOpen(false);
-    setShowCompetitionGate(false);
+    setPublicSearch("");
+    setSelectedPlayerId("");
+    if (nextCompetition?.season) setSelectedSeason(nextCompetition.season);
+    if (closeGate) setShowCompetitionGate(false);
+    if (updateUrl) updatePublicCompetitionUrl(league, nextCompetition);
+    if (clearHash && window.location.hash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+    if (scrollTop) window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   }
 
   function handlePublicSearchResult(result) {
@@ -208,8 +262,19 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   }, [league.id, league.competitions, selectedCompetitionId, showCompetitionGate]);
 
   useEffect(() => {
-    setShowCompetitionGate((league.competitions || []).length > 1 && !loadLastCompetitionId(league));
-  }, [league]);
+    setShowCompetitionGate(hasTournamentSelector(league));
+  }, [league.id]);
+
+  useEffect(() => {
+    if (!showCompetitionGate || !window.location.hash) return;
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+  }, [league.id, showCompetitionGate]);
+
+  useEffect(() => {
+    onEntryModeChange?.(showCompetitionGate);
+    return () => onEntryModeChange?.(false);
+  }, [onEntryModeChange, showCompetitionGate]);
 
   useEffect(() => {
     if (activeCompetition?.season) setSelectedSeason(activeCompetition.season);
@@ -239,7 +304,9 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     return (
       <main className="page public-tournament-entry-page" style={{ "--competition-accent": competitionAccent }}>
         <TournamentEntryGate
+          archivedCompetitions={archivedPublicCompetitions}
           league={league}
+          competitions={publicCompetitions}
           selectedCompetitionId={selectedCompetitionId}
           onSelectCompetition={selectCompetition}
         />
@@ -268,7 +335,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
 
       <PublicCompetitionDock
         activeCompetition={activeCompetition}
-        competitions={league.competitions || []}
+        competitions={publicCompetitions}
         league={activeLeague}
         onOpen={() => setCompetitionSheetOpen(true)}
         visible={hasMultipleCompetitions}
@@ -298,17 +365,6 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
         results={publicSearchResults}
       />
 
-      <section className="panel competition-panel public-competition-panel" aria-label="Temporadas y torneos">
-        <SectionHeading eyebrow="Elige tu torneo" title="Temporada y categoria" />
-        <CompetitionSelector
-          competitions={league.competitions || []}
-          selectedSeason={selectedSeason}
-          selectedCompetitionId={selectedCompetitionId}
-          onSelectSeason={setSelectedSeason}
-          onSelectCompetition={selectCompetition}
-        />
-      </section>
-
       <PublicPulseBar
         league={regularLeague}
         roundMatches={selectedRoundMatches}
@@ -336,13 +392,14 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
 
       <section className="content-grid">
         <div className="main-column">
-          <section className="panel" id="tabla">
-            <SectionHeading eyebrow="Competencia" title="Tabla de posiciones" />
-            <ShareActionButton
-              label="Compartir tabla"
-              onClick={() => shareStandingsCard({ league, competition: activeCompetition, standings })}
+          <section className="panel standings-panel" id="tabla">
+            <StandingsTable
+              rows={standings}
+              rules={activeLeague.rules}
+              league={activeLeague}
+              competition={activeCompetition}
+              onShare={() => shareStandingsCard({ league, competition: activeCompetition, standings })}
             />
-            <StandingsTable rows={standings} rules={activeLeague.rules} />
           </section>
 
           <section className="panel" id="calendario">
@@ -459,7 +516,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       {isCompetitionSheetOpen && (
         <CompetitionSheet
           activeCompetitionId={selectedCompetitionId}
-          competitions={league.competitions || []}
+          competitions={publicCompetitions}
           league={league}
           onClose={() => setCompetitionSheetOpen(false)}
           onSelectCompetition={selectCompetition}
@@ -524,42 +581,125 @@ function CompetitionMark({ accent, label = "LT" }) {
   );
 }
 
-function TournamentEntryGate({ league, selectedCompetitionId, onSelectCompetition }) {
-  const competitions = league.competitions || [];
+function getCompetitionEntryStatus(competition, isSelected) {
+  if (competition.status === "archived") return "Historico";
+  if (competition.status === "pending" || competition.status === "coming_soon") return "Proximamente";
+  return isSelected ? "Publicado activo" : "Publicado";
+}
+
+function getCompetitionEntryDescription(league, competition) {
+  if (competition.description) return competition.description;
+  if (/copa/i.test(competition.name)) return "Torneo de eliminacion directa donde todos buscan la gloria.";
+  if (/fut\s*7|f7/i.test(competition.name)) return "Futbol 7 con calendario, tabla y estadisticas actualizadas.";
+  if (/segunda/i.test(competition.name)) return "Competencia de alto nivel para equipos en desarrollo.";
+  return `Categoria principal de ${league.name} con calendario, tabla y estadisticas.`;
+}
+
+function TournamentEntryGate({ archivedCompetitions = [], league, competitions, selectedCompetitionId, onSelectCompetition }) {
+  const locationTitle = league.city || "Liga";
+  const locationSubtitle = league.state || "Michoacan, Mexico";
+  const accentSource = [...competitions, ...archivedCompetitions];
 
   return (
     <section className="tournament-entry-gate" aria-label="Seleccionar torneo">
       <div className="tournament-entry-brand">
-        <img alt="LIGATEC" src={ligatecLogo} />
-        <span>{league.city || "Liga"}</span>
+        <div className="tournament-entry-logo">
+          <img alt="LIGATEC" src={ligatecLogo} />
+          <strong>LIGA<span>TEC</span></strong>
+        </div>
+        <span className="tournament-entry-location">
+          <b aria-hidden="true" />
+          <strong>{locationTitle}</strong>
+          <small>{locationSubtitle}</small>
+        </span>
       </div>
       <div className="tournament-entry-copy">
         <span>Primer ingreso</span>
-        <h1>Bienvenido a {league.name}</h1>
-        <p>Selecciona el torneo que deseas consultar.</p>
+        <h1>Bienvenido a <strong>{league.name}</strong></h1>
+        <p>Selecciona el torneo activo que deseas consultar.</p>
+      </div>
+      <div className="tournament-entry-section-title">
+        <span />
+        <strong>Torneos activos</strong>
       </div>
       <div className="tournament-entry-list">
+        {!competitions.length && (
+          <p className="tournament-entry-empty">No hay torneos publicados en este momento. Puedes consultar el historial archivado.</p>
+        )}
         {competitions.map((competition) => {
           const overview = getCompetitionOverview(league, competition.id);
-          const accent = getCompetitionAccent(competitions, competition.id);
+          const accent = getCompetitionAccent(accentSource, competition.id);
+          const isSelected = competition.id === selectedCompetitionId;
           return (
             <button
-              className={competition.id === selectedCompetitionId ? "active" : ""}
+              className={isSelected ? "active" : ""}
               key={competition.id}
+              style={{ "--entry-accent": accent }}
               type="button"
               onClick={() => onSelectCompetition(competition.id)}
             >
               <CompetitionMark accent={accent} label={competition.name} />
-              <span>
+              <span className="tournament-entry-info">
+                <small className="tournament-entry-status">
+                  <i aria-hidden="true" />
+                  {getCompetitionEntryStatus(competition, isSelected)}
+                </small>
                 <strong>{competition.name}</strong>
-                <small>{competition.season || league.season}</small>
+                <small className="tournament-entry-season">{competition.season || league.season}</small>
+                <small className="tournament-entry-description">{getCompetitionEntryDescription(league, competition)}</small>
               </span>
-              <em>{overview.teamCount} equipos</em>
+              <em>
+                <strong>{overview.teamCount}</strong>
+                <span>Equipos</span>
+              </em>
+              <b className="tournament-entry-chevron" aria-hidden="true">›</b>
             </button>
           );
         })}
       </div>
-      <small className="tournament-entry-note">Podras cambiar de torneo en cualquier momento.</small>
+      {!!archivedCompetitions.length && (
+        <details className="tournament-entry-history">
+          <summary>
+            <span>Historial de torneos</span>
+            <strong>{archivedCompetitions.length}</strong>
+          </summary>
+          <div className="tournament-entry-history-list">
+            {archivedCompetitions.map((competition) => {
+              const overview = getCompetitionOverview(league, competition.id);
+              const accent = getCompetitionAccent(accentSource, competition.id);
+              const isSelected = competition.id === selectedCompetitionId;
+              return (
+                <button
+                  className={isSelected ? "active" : ""}
+                  key={competition.id}
+                  style={{ "--entry-accent": accent }}
+                  type="button"
+                  onClick={() => onSelectCompetition(competition.id)}
+                >
+                  <CompetitionMark accent={accent} label={competition.name} />
+                  <span>
+                    <small>{competition.season || league.season}</small>
+                    <strong>{competition.name}</strong>
+                  </span>
+                  <em>{overview.teamCount} equipos</em>
+                  <b aria-hidden="true">›</b>
+                </button>
+              );
+            })}
+          </div>
+        </details>
+      )}
+      <div className="tournament-entry-note">
+        <b aria-hidden="true">i</b>
+        <span>
+          <strong>Los torneos archivados quedan como historico</strong>
+          <small>El admin decide que torneos aparecen publicados en esta portada.</small>
+        </span>
+      </div>
+      <footer className="tournament-entry-footer">
+        <span>Desarrollado por:</span>
+        <img alt="ALP DEV" src={alpLogo} />
+      </footer>
     </section>
   );
 }
@@ -840,59 +980,86 @@ function shareWhatsAppItem({ text, url }) {
   window.open(`https://wa.me/?text=${message}`, "_blank", "noopener,noreferrer");
 }
 
+function getLeaguePublicUrl(league) {
+  const leagueId = league?.id ? encodeURIComponent(league.id) : "";
+  if (!leagueId) return typeof window !== "undefined" ? window.location.href : "";
+  if (typeof window === "undefined") return `/liga/${leagueId}`;
+  return `${window.location.origin}/liga/${leagueId}`;
+}
+
 async function shareStandingsCard({ league, competition, standings }) {
   const title = `Tabla de posiciones | ${league.name}`;
+  const url = getLeaguePublicUrl(league);
   await shareGeneratedCard({
     fileName: "tabla-posiciones.png",
     imageBuilder: () => createStandingsShareImage({ league, competition, standings }),
-    title
+    title,
+    text: url,
+    url
   });
 }
 
 async function shareRoundCard({ league, selectedRound, matches }) {
   const title = `Jornada ${selectedRound || ""} | ${league.name}`;
+  const url = getLeaguePublicUrl(league);
   await shareGeneratedCard({
     fileName: `jornada-${selectedRound || "partidos"}.png`,
     imageBuilder: () => createRoundShareImage({ league, selectedRound, matches }),
-    title
+    title,
+    text: url,
+    url
   });
 }
 
 async function shareScorersCard({ league, competition, scorers }) {
+  const url = getLeaguePublicUrl(league);
   await shareGeneratedCard({
     fileName: "tabla-goleo.png",
-    imageBuilder: () => createScorersShareImage({ league, competition, scorers: scorers.slice(0, 10) })
+    imageBuilder: () => createScorersShareImage({ league, competition, scorers: scorers.slice(0, 10) }),
+    title: `Tabla de goleo | ${league.name}`,
+    text: url,
+    url
   });
 }
 
 async function shareSuspensionsCard({ league, competition, notices }) {
+  const url = getLeaguePublicUrl(league);
   await shareGeneratedCard({
     fileName: "expulsados-regresos.png",
     imageBuilder: () => createSuspensionsShareImage({ league, competition, notices }),
-    title: `Expulsados y regresos | ${league.name}`
+    title: `Expulsados y regresos | ${league.name}`,
+    text: url,
+    url
   });
 }
 
 async function shareYellowCardsCard({ league, competition, rows }) {
+  const url = getLeaguePublicUrl(league);
   await shareGeneratedCards({
     fileBaseName: "tarjetas-amarillas",
-    imageBuilders: createYellowCardsShareImages({ league, competition, rows })
+    imageBuilders: createYellowCardsShareImages({ league, competition, rows }),
+    title: `Tarjetas amarillas | ${league.name}`,
+    text: url,
+    url
   });
 }
 
 async function shareFeaturedMatchCard({ league, match }) {
+  const url = getLeaguePublicUrl(league);
   await shareGeneratedCard({
     fileName: "partido-destacado.png",
     imageBuilder: () => createFeaturedMatchShareImage({ league, match }),
-    title: `Partido destacado | ${league.name}`
+    title: `Partido destacado | ${league.name}`,
+    text: url,
+    url
   });
 }
 
-async function shareGeneratedCard({ fileName, imageBuilder }) {
-  await shareGeneratedCards({ fileName, imageBuilders: [imageBuilder] });
+async function shareGeneratedCard({ fileName, imageBuilder, title = "LIGATEC", text = "", url = "" }) {
+  await shareGeneratedCards({ fileName, imageBuilders: [imageBuilder], title, text, url });
 }
 
-async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBuilders }) {
+async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBuilders, title = "LIGATEC", text = "", url = "" }) {
   const blobs = [];
 
   try {
@@ -911,9 +1078,14 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
       : `${fileBaseName}-${index + 1}.png`;
     return new File([blob], resolvedName, { type: "image/png" });
   });
-  const shareData = { files };
+  const shareData = {
+    files,
+    ...(title ? { title } : {}),
+    ...(text ? { text } : {}),
+    ...(url ? { url } : {})
+  };
 
-  if (canShareGeneratedFile(shareData)) {
+  if (canShareGeneratedFile({ files })) {
     try {
       await navigator.share(shareData);
       return;
@@ -1001,9 +1173,20 @@ function createShareCanvas(width, height) {
 async function createStandingsShareImage({ league, competition, standings }) {
   const rows = standings;
   const width = 1080;
-  const rowHeight = 58;
-  const height = Math.max(540, 232 + rows.length * rowHeight + 86);
+  const rowHeight = 70;
+  const height = Math.max(760, 358 + rows.length * rowHeight + 96);
   const { canvas, context } = createShareCanvas(width, height);
+  const playoffQualifiers = Math.max(0, Number(league.rules?.playoffQualifiers ?? 8));
+  const qualifiedCount = Math.min(playoffQualifiers, rows.length);
+  const playoffLabel = getPlayoffPhaseLabel(playoffQualifiers);
+  const leader = rows[0];
+  const bestAttack = [...rows].sort((a, b) => b.goalsFor - a.goalsFor || b.points - a.points)[0];
+  const bestDefense = [...rows].sort((a, b) => a.goalsAgainst - b.goalsAgainst || b.points - a.points)[0];
+  const insights = [
+    leader ? ["LIDER", leader.team.name, `${leader.points} PTS`] : null,
+    bestAttack ? ["MEJOR OFENSIVA", bestAttack.team.name, `${bestAttack.goalsFor} GF`] : null,
+    bestDefense ? ["MEJOR DEFENSA", bestDefense.team.name, `${bestDefense.goalsAgainst} GC`] : null
+  ].filter(Boolean);
 
   drawShareBackground(context, width, height, league);
   await drawShareHeader(context, width, {
@@ -1012,46 +1195,88 @@ async function createStandingsShareImage({ league, competition, standings }) {
     title: "TABLA DE POSICIONES"
   });
 
-  drawRoundedRect(context, 52, 166, width - 104, 42, 12, "#e9f7ef");
+  if (qualifiedCount > 0) {
+    context.fillStyle = "#dce9e4";
+    context.font = "760 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(`Zona de liguilla - Puestos 1 al ${qualifiedCount}${playoffLabel ? ` | ${playoffLabel}` : ""}`, 60, 138);
+  }
+
+  insights.forEach(([label, teamName, value], index) => {
+    const cardWidth = 300;
+    const x = 60 + index * 330;
+    drawRoundedRect(context, x, 178, cardWidth, 104, 18, "rgba(4, 33, 28, 0.92)");
+    context.strokeStyle = "rgba(43, 255, 135, 0.34)";
+    context.lineWidth = 2;
+    context.stroke();
+    drawRoundedRect(context, x, 178, 7, 104, 4, "#8cff45");
+    context.fillStyle = label === "LIDER" ? "#8cff45" : "#f8fffb";
+    context.font = "900 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(label, x + 28, 198);
+    context.fillStyle = "#ffffff";
+    drawCanvasFittedText(context, teamName.toLocaleUpperCase("es-MX"), x + 28, 226, 208, 22, 16, 900);
+    context.fillStyle = "#7be34d";
+    context.font = "950 31px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(value, x + 28, 252);
+  });
+
+  const boardY = 320;
+  const boardHeight = rows.length * rowHeight + 74;
+  drawRoundedRect(context, 42, boardY, width - 84, boardHeight, 22, "rgba(1, 12, 17, 0.82)");
+  context.strokeStyle = "rgba(43, 255, 135, 0.45)";
+  context.lineWidth = 2;
+  context.stroke();
+
   [
-    ["#", 70],
-    ["EQUIPO", 132],
-    ["PTS", 548],
-    ["PJ", 622],
-    ["G", 690],
-    ["E", 748],
-    ["P", 806],
-    ["GF", 860],
-    ["GC", 920],
-    ["DG", 980]
-  ].forEach(([label, x]) => drawShareLabel(context, label, x, 178, "#0f2f24"));
+    ["POS", 78],
+    ["EQUIPO", 162],
+    ["PJ", 502],
+    ["G", 572],
+    ["E", 642],
+    ["P", 712],
+    ["GF", 782],
+    ["GC", 852],
+    ["DG", 922],
+    ["PTS", 990]
+  ].forEach(([label, x]) => drawShareLabel(context, label, x, boardY + 28, label === "PTS" ? "#ffffff" : "#8cff45"));
 
   rows.forEach((row, index) => {
-    const y = 224 + index * rowHeight;
+    const y = boardY + 64 + index * rowHeight;
     const rank = index + 1;
-    const accent = rank === 1 ? "#e7c948" : rank === 2 ? "#34699a" : rank === 3 ? "#b6e35c" : "#0f6b4f";
-    drawRoundedRect(context, 52, y, width - 104, 48, 14, rank <= 3 ? "#09261f" : "#ffffff");
-    context.fillStyle = accent;
-    drawRoundedRect(context, 52, y, 52, 48, 14, accent);
-    context.fillStyle = rank === 1 || rank === 3 ? "#102016" : "#ffffff";
-    context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(String(rank), 70, y + 10);
+    const isQualified = index < qualifiedCount;
+    if (qualifiedCount > 0 && index === qualifiedCount) {
+      context.strokeStyle = "rgba(140, 247, 76, 0.62)";
+      context.setLineDash([8, 8]);
+      context.beginPath();
+      context.moveTo(74, y - 10);
+      context.lineTo(width - 74, y - 10);
+      context.stroke();
+      context.setLineDash([]);
+    }
+    drawRoundedRect(context, 62, y, width - 124, 56, 14, rank <= 3 || isQualified ? "rgba(12, 72, 52, 0.74)" : "rgba(7, 24, 31, 0.88)");
+    if (isQualified) drawRoundedRect(context, 62, y, 6, 56, 4, "#8cff45");
+    const accent = rank === 2 ? "#44caff" : rank <= 3 ? "#8cff45" : "#0fbf9b";
+    drawRoundedRect(context, 78, y + 9, 38, 38, 10, rank <= 3 ? accent : "rgba(4, 48, 39, 0.95)");
+    context.fillStyle = rank === 1 || rank === 3 ? "#06140e" : "#ffffff";
+    context.font = "950 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(String(rank), 91, y + 17);
 
-    drawTeamBubble(context, row.team, 122, y + 8, 32);
-    context.fillStyle = rank <= 3 ? "#ffffff" : "#11231d";
+    drawTeamBubble(context, row.team, 142, y + 10, 36);
+    context.fillStyle = "#ffffff";
     context.font = "900 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    drawCanvasText(context, row.team.name, 164, y + 12, 350, 25, 1);
+    drawCanvasText(context, row.team.name.toLocaleUpperCase("es-MX"), 194, y + 16, 280, 24, 1);
 
-    context.fillStyle = rank <= 3 ? "#dff7e9" : "#0f6b4f";
-    drawShareStatCell(context, row.points, 566, y + 12);
-    context.fillStyle = rank <= 3 ? "#d7e5de" : "#64736b";
-    drawShareStatCell(context, row.played, 632, y + 13);
-    drawShareStatCell(context, row.wins, 694, y + 13);
-    drawShareStatCell(context, row.draws, 752, y + 13);
-    drawShareStatCell(context, row.losses, 810, y + 13);
-    drawShareStatCell(context, row.goalsFor, 872, y + 13);
-    drawShareStatCell(context, row.goalsAgainst, 932, y + 13);
-    drawShareStatCell(context, row.goalDifference, 992, y + 13);
+    context.fillStyle = "#ffffff";
+    drawShareStatCell(context, row.played, 510, y + 18);
+    drawShareStatCell(context, row.wins, 580, y + 18);
+    drawShareStatCell(context, row.draws, 650, y + 18);
+    drawShareStatCell(context, row.losses, 720, y + 18);
+    drawShareStatCell(context, row.goalsFor, 790, y + 18);
+    drawShareStatCell(context, row.goalsAgainst, 860, y + 18);
+    drawShareStatCell(context, row.goalDifference, 930, y + 18);
+    drawRoundedRect(context, 988, y + 8, 46, 40, 10, rank === 1 ? "#8cff45" : "#138f7e");
+    context.fillStyle = rank === 1 ? "#06140e" : "#ffffff";
+    context.font = "950 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    context.fillText(String(row.points), 1002, y + 17);
   });
 
   drawShareFooter(context, width, height, league);
@@ -1176,7 +1401,7 @@ async function createSuspensionsShareImage({ league, competition, notices }) {
 
   rows.forEach((notice, index) => {
     const y = 178 + index * rowHeight;
-    const tone = notice.indefinite ? "#7f1d1d" : notice.status === "suspended" ? "#b91c1c" : "#0f6b4f";
+    const tone = notice.pendingReview ? "#f97316" : notice.indefinite ? "#7f1d1d" : notice.status === "suspended" ? "#b91c1c" : "#0f6b4f";
     drawRoundedRect(context, 60, y, width - 120, 68, 16, "#ffffff");
     drawRoundedRect(context, 76, y + 12, 52, 44, 12, tone);
     context.fillStyle = "#ffffff";
@@ -1190,7 +1415,9 @@ async function createSuspensionsShareImage({ league, competition, notices }) {
     drawCanvasText(context, notice.team?.name || "Sin equipo", 150, y + 40, 390, 22, 1);
     context.fillStyle = tone;
     context.font = "900 21px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    const status = notice.indefinite
+    const status = notice.pendingReview
+      ? "SUJETO A COMISION"
+      : notice.indefinite
       ? "INHABILITADO INDEFINIDO"
       : notice.returnRound
         ? `REGRESA J${notice.returnRound}`
@@ -1379,7 +1606,13 @@ function drawShareFooter(context, width, height, league) {
   context.fillStyle = "#718078";
   context.font = "850 21px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   const footer = `${league.name} | ${league.city || ""}`.toLocaleUpperCase("es-MX");
-  context.fillText(footer, 60, height - 46);
+  context.fillText(footer, 60, height - 58);
+  const publicUrl = getLeaguePublicUrl(league);
+  if (publicUrl) {
+    context.fillStyle = "#21d99a";
+    context.font = "800 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    drawCanvasText(context, publicUrl, 60, height - 30, width - 120, 22, 1);
+  }
 }
 
 function drawTeamBubble(context, team, x, y, size) {
@@ -2486,51 +2719,278 @@ function competitionTypeLabel(type) {
   return labels[type] || String(type || "Torneo").toLocaleUpperCase("es-MX");
 }
 
-function CompetitionSelector({ competitions, selectedSeason, selectedCompetitionId, onSelectSeason, onSelectCompetition }) {
+function TournamentSelector({
+  activeCompetition,
+  competitions,
+  league,
+  selectedCompetitionId,
+  selectedSeason,
+  onSelectCompetition,
+  onSelectSeason
+}) {
+  const [isSeasonSheetOpen, setSeasonSheetOpen] = useState(false);
+  const [isCategorySheetOpen, setCategorySheetOpen] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
+
   if (!competitions.length) return <p className="empty">Aun no hay torneos registrados.</p>;
-  const seasons = [...new Set(competitions.map((competition) => competition.season).filter(Boolean))]
-    .sort((a, b) => String(b).localeCompare(String(a)));
-  const visibleCompetitions = competitions.filter((competition) => competition.season === selectedSeason);
+
+  const seasonOptions = buildSeasonOptions(competitions, league);
+  const selectedSeasonValue = selectedSeason || getSeasonValue(activeCompetition, league) || seasonOptions[0]?.name || league.season;
+  const selectedSeasonId = getSeasonId(selectedSeasonValue);
+  const selectedSeasonOption = seasonOptions.find((season) => season.id === selectedSeasonId) || seasonOptions[0];
+  const seasonCompetitions = competitions.filter((competition) => getSeasonId(getSeasonValue(competition, league)) === selectedSeasonId);
+  const visibleCompetitions = seasonCompetitions.length ? seasonCompetitions : competitions;
+  const visibleLimit = 4;
+  const primaryCompetitions = visibleCompetitions.slice(0, visibleLimit);
+  const shouldShowAllButton = visibleCompetitions.length > visibleLimit;
+  const filteredSheetCompetitions = visibleCompetitions.filter((competition) => (
+    !categorySearch ||
+    normalizeSearchTerm(`${competition.name} ${competition.type || ""} ${competition.description || ""}`)
+      .includes(normalizeSearchTerm(categorySearch))
+  ));
+
+  function selectSeason(season) {
+    const firstCompetition = competitions.find((competition) => getSeasonId(getSeasonValue(competition, league)) === season.id);
+    onSelectSeason(season.name);
+    if (firstCompetition) onSelectCompetition(firstCompetition.id);
+    setSeasonSheetOpen(false);
+  }
+
+  function selectCategory(competitionId) {
+    const competition = competitions.find((item) => item.id === competitionId);
+    if (competition) onSelectSeason(getSeasonValue(competition, league));
+    onSelectCompetition(competitionId);
+    setCategorySheetOpen(false);
+    setCategorySearch("");
+  }
 
   return (
-    <div className="competition-picker" aria-label="Seleccionar temporada o torneo">
-      <div className="competition-choice-group">
+    <div className="tournament-selector" aria-label="Seleccionar temporada y torneo">
+      <header className="tournament-selector-head">
+        <span>Elige tu torneo</span>
+        <h2>Selecciona tu torneo</h2>
+        <p>Elige la temporada y categoria que deseas consultar.</p>
+      </header>
+
+      <div className="tournament-selector-layout">
+        <SeasonSelect
+          isCurrent={selectedSeasonOption?.isCurrent}
+          label={selectedSeasonOption?.name || selectedSeasonValue}
+          onOpen={() => setSeasonSheetOpen(true)}
+        />
+
+        <section className="category-select-block" aria-labelledby="category-selector-label">
+          <div className="selector-step-label" id="category-selector-label">
+            <b>2</b>
+            <span>Categoria</span>
+          </div>
+          <div className="category-options">
+            {primaryCompetitions.map((competition) => (
+              <CategoryOption
+                competition={competition}
+                isSelected={competition.id === selectedCompetitionId}
+                key={competition.id}
+                league={league}
+                onSelect={() => selectCategory(competition.id)}
+              />
+            ))}
+          </div>
+          {shouldShowAllButton && (
+            <button
+              className="category-show-all-button"
+              type="button"
+              onClick={() => setCategorySheetOpen(true)}
+            >
+              <span>Ver todos los torneos</span>
+              <b aria-hidden="true">›</b>
+            </button>
+          )}
+        </section>
+      </div>
+
+      <CurrentTournamentSummary
+        competition={activeCompetition}
+        season={selectedSeasonOption?.name || selectedSeasonValue}
+      />
+
+      {isSeasonSheetOpen && (
+        <TournamentBottomSheet
+          title="Selecciona temporada"
+          subtitle="Temporadas disponibles"
+          onClose={() => setSeasonSheetOpen(false)}
+        >
+          <div className="tournament-sheet-list clean">
+            {seasonOptions.map((season) => (
+              <button
+                aria-selected={season.id === selectedSeasonId}
+                className={season.id === selectedSeasonId ? "active" : ""}
+                key={season.id}
+                role="option"
+                type="button"
+                onClick={() => selectSeason(season)}
+              >
+                <span className="sheet-season-icon" aria-hidden="true">▣</span>
+                <span>
+                  <strong>{season.name}</strong>
+                  <small>{season.isCurrent ? "Temporada actual" : `${season.count} torneo(s)`}</small>
+                </span>
+                <em>{season.id === selectedSeasonId ? "✓" : "›"}</em>
+              </button>
+            ))}
+          </div>
+        </TournamentBottomSheet>
+      )}
+
+      {isCategorySheetOpen && (
+        <TournamentBottomSheet
+          title="Todos los torneos"
+          subtitle={selectedSeasonOption?.name || selectedSeasonValue}
+          onClose={() => {
+            setCategorySheetOpen(false);
+            setCategorySearch("");
+          }}
+        >
+          <label className="tournament-sheet-search">
+            <span>Buscar torneo</span>
+            <input
+              value={categorySearch}
+              placeholder="Primera, Fut 7..."
+              onChange={(event) => setCategorySearch(event.target.value)}
+            />
+          </label>
+          <div className="tournament-sheet-list compact" role="listbox" aria-label="Torneos disponibles">
+            {filteredSheetCompetitions.map((competition) => (
+              <button
+                aria-selected={competition.id === selectedCompetitionId}
+                className={competition.id === selectedCompetitionId ? "active" : ""}
+                key={competition.id}
+                role="option"
+                type="button"
+                onClick={() => selectCategory(competition.id)}
+              >
+                <CompetitionMark
+                  accent={getCompetitionAccent(competitions, competition.id)}
+                  label={competition.name}
+                />
+                <span>
+                  <strong>{competition.name}</strong>
+                  <small>{competitionTypeLabel(competition.type)} | {getSeasonValue(competition, league)}</small>
+                </span>
+                <em>{competition.id === selectedCompetitionId ? "Actual" : "Elegir"}</em>
+              </button>
+            ))}
+            {!filteredSheetCompetitions.length && <p className="empty">No encontramos torneos con esa busqueda.</p>}
+          </div>
+        </TournamentBottomSheet>
+      )}
+    </div>
+  );
+}
+
+function buildSeasonOptions(competitions, league) {
+  const counts = new Map();
+  for (const competition of competitions) {
+    const name = getSeasonValue(competition, league);
+    const id = getSeasonId(name);
+    const current = counts.get(id) || { count: 0, id, isCurrent: name === league.season, name };
+    counts.set(id, { ...current, count: current.count + 1, isCurrent: current.isCurrent || name === league.season });
+  }
+
+  return [...counts.values()].sort((a, b) => (
+    Number(b.isCurrent) - Number(a.isCurrent) ||
+    String(b.name).localeCompare(String(a.name), "es-MX", { numeric: true })
+  ));
+}
+
+function SeasonSelect({ isCurrent, label, onOpen }) {
+  return (
+    <section className="season-select-block" aria-labelledby="season-selector-label">
+      <div className="selector-step-label" id="season-selector-label">
+        <b>1</b>
         <span>Temporada</span>
-        <div className="competition-button-row">
-          {seasons.map((season) => (
-            <button
-              className={season === selectedSeason ? "active" : ""}
-              key={season}
-              type="button"
-              aria-pressed={season === selectedSeason}
-              onClick={() => {
-                const nextCompetition = competitions.find((competition) => competition.season === season);
-                onSelectSeason(season);
-                if (nextCompetition) onSelectCompetition(nextCompetition.id);
-              }}
-            >
-              {season}
-            </button>
-          ))}
-        </div>
       </div>
-      <div className="competition-choice-group">
-        <span>Torneo</span>
-        <div className="competition-button-row">
-          {visibleCompetitions.map((competition) => (
-            <button
-              className={competition.id === selectedCompetitionId ? "active" : ""}
-              key={competition.id}
-              type="button"
-              aria-pressed={competition.id === selectedCompetitionId}
-              onClick={() => onSelectCompetition(competition.id)}
-            >
-              <strong>{competition.name}</strong>
-              {competition.type && <small>{competitionTypeLabel(competition.type)}</small>}
-            </button>
-          ))}
+      <button
+        className="season-select-button"
+        type="button"
+        aria-haspopup="dialog"
+        onClick={onOpen}
+      >
+        <span className="season-select-icon" aria-hidden="true" />
+        <strong>{label}</strong>
+        {isCurrent && <em>Actual</em>}
+        <b aria-hidden="true">⌄</b>
+      </button>
+      <small className="season-select-help">Selecciona la temporada que deseas consultar</small>
+    </section>
+  );
+}
+
+function CategoryOption({ competition, isSelected, league, onSelect }) {
+  return (
+    <button
+      aria-pressed={isSelected}
+      className={isSelected ? "category-option selected" : "category-option"}
+      type="button"
+      onClick={onSelect}
+    >
+      <span className="category-option-icon" aria-hidden="true">
+        {getCompetitionShortCode(competition.name)}
+      </span>
+      <span className="category-option-copy">
+        <strong>{competition.name}</strong>
+        <small>{competition.description || competitionTypeLabel(competition.type)}</small>
+        {!isSelected && <em>Toca para seleccionar</em>}
+      </span>
+      <span className="category-option-action" aria-hidden="true">
+        {isSelected ? "✓" : "›"}
+      </span>
+      {isSelected && <span className="category-option-state">Seleccionado</span>}
+      <span className="sr-only">
+        {getSeasonValue(competition, league)} {isSelected ? "seleccionado" : "disponible"}
+      </span>
+    </button>
+  );
+}
+
+function getCompetitionShortCode(name) {
+  const words = String(name || "LT").trim().split(/\s+/).filter(Boolean);
+  if (/fut\s*7|f7/i.test(name)) return "F7";
+  return words.slice(0, 2).map((word) => word[0]).join("").toLocaleUpperCase("es-MX") || "LT";
+}
+
+function CurrentTournamentSummary({ competition, season }) {
+  return (
+    <div className="current-tournament-summary" aria-live="polite">
+      <span aria-hidden="true" />
+      <p>
+        Mostrando:
+        <strong>{season}</strong>
+        <b aria-hidden="true">•</b>
+        <strong>{competition?.name || "Torneo"}</strong>
+      </p>
+    </div>
+  );
+}
+
+function TournamentBottomSheet({ children, onClose, subtitle, title }) {
+  return (
+    <div className="tournament-selector-sheet-backdrop" role="presentation" onClick={onClose}>
+      <section
+        aria-label={title}
+        aria-modal="true"
+        className="tournament-selector-sheet"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="tournament-selector-sheet-head">
+          <div>
+            <span>{subtitle}</span>
+            <strong>{title}</strong>
+          </div>
+          <button type="button" aria-label="Cerrar selector" onClick={onClose}>×</button>
         </div>
-      </div>
+        {children}
+      </section>
     </div>
   );
 }
@@ -2547,11 +3007,27 @@ function PlayoffList({ league, matches }) {
   );
 }
 
+function hasMatchScoreValue(value) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function getMatchTiebreakerRows(match) {
+  const rows = [];
+  if (hasMatchScoreValue(match.extraTimeHomeGoals) && hasMatchScoreValue(match.extraTimeAwayGoals)) {
+    rows.push({ label: "T.E.", value: `${match.extraTimeHomeGoals} - ${match.extraTimeAwayGoals}` });
+  }
+  if (hasMatchScoreValue(match.penaltyHomeGoals) && hasMatchScoreValue(match.penaltyAwayGoals)) {
+    rows.push({ label: "Penales", value: `${match.penaltyHomeGoals} - ${match.penaltyAwayGoals}` });
+  }
+  return rows;
+}
+
 function PlayoffCard({ league, match }) {
   const home = getTeam(league, match.homeTeamId);
   const away = getTeam(league, match.awayTeamId);
   const result = match.status === "finished" || match.status === "walkover" ? `${match.homeGoals} - ${match.awayGoals}` : match.time || "Por definir";
   const hasAggregate = match.aggregateHome !== null && match.aggregateHome !== undefined && match.aggregateAway !== null && match.aggregateAway !== undefined;
+  const tiebreakerRows = getMatchTiebreakerRows(match);
 
   return (
     <article className="playoff-card">
@@ -2563,6 +3039,7 @@ function PlayoffCard({ league, match }) {
       <div className="playoff-score">
         <strong>{result}</strong>
         {hasAggregate && <span>Global {match.aggregateHome} - {match.aggregateAway}</span>}
+        {tiebreakerRows.map((row) => <span key={row.label}>{row.label} {row.value}</span>)}
       </div>
     </article>
   );
@@ -2612,69 +3089,135 @@ function SummaryStat({ value, label }) {
   );
 }
 
-function StandingsTable({ rows, rules }) {
+function StandingInsightWatermark({ type }) {
+  if (type === "attack") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r="24" />
+        <path d="M32 8v48M8 32h48M16 18c10 7 22 7 32 0M16 46c10-7 22-7 32 0M20 14c6 12 6 24 0 36M44 14c-6 12-6 24 0 36" />
+      </svg>
+    );
+  }
+  if (type === "defense") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 64 64">
+        <path d="M32 7l22 8v15c0 14-8 23-22 29C18 53 10 44 10 30V15l22-8z" />
+        <path d="M22 31l7 7 14-16" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" viewBox="0 0 64 64">
+      <path d="M14 26l7 25h22l7-25-12 9-6-18-6 18-12-9z" />
+      <path d="M21 51h22M32 17v-6M16 25l-5-5M48 25l5-5" />
+    </svg>
+  );
+}
+
+function StandingsTable({ rows, rules, league, competition, onShare }) {
   if (!rows.length) return <p className="empty">Aun no hay equipos registrados.</p>;
   const playoffQualifiers = Math.max(0, Number(rules?.playoffQualifiers ?? 8));
   const qualifiedCount = Math.min(playoffQualifiers, rows.length);
   const playoffLabel = getPlayoffPhaseLabel(playoffQualifiers);
+  const competitionLabel = competition?.name || league?.season || "Competencia";
+  const seasonLabel = competition?.season || league?.season || "";
+  const statLabels = [
+    ["PJ", "played"],
+    ["G", "wins"],
+    ["E", "draws"],
+    ["P", "losses"],
+    ["GF", "goalsFor"],
+    ["GC", "goalsAgainst"],
+    ["DG", "goalDifference"]
+  ];
 
   return (
-    <>
-      <StandingsInsights rows={rows} />
-      {qualifiedCount > 0 && (
-        <div className="standings-legend">
-          <strong>Zona de liguilla</strong>
-          <span>Puestos 1-{qualifiedCount}{playoffLabel ? ` | ${playoffLabel}` : ""}</span>
+    <section className="standings-showcase" aria-label="Tabla de posiciones">
+      <div className="standings-showcase-topbar">
+        <div className="standings-showcase-brand">
+          <img alt="LIGATEC" src={ligatecLogo} />
+          <strong>LIGA<span>TEC</span></strong>
         </div>
-      )}
-      <div className="table-wrap standings-table-wrap">
-        <table className="standings-table">
-          <thead>
-            <tr>
-              <th>Pos</th>
-              <th>Equipo</th>
-              <th>PTS</th>
-              <th>PJ</th>
-              <th>G</th>
-              <th>E</th>
-              <th>P</th>
-              <th>GF</th>
-              <th>GC</th>
-              <th>DG</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => {
-              const isQualified = index < qualifiedCount;
-              const isCutoff = qualifiedCount > 0 && index === qualifiedCount - 1;
-              const rank = index + 1;
-              return (
-                <tr className={[`rank-${rank}`, rank <= 3 ? "top-rank" : "", isQualified ? "qualified-playoff" : "", isCutoff ? "qualification-cutoff" : ""].filter(Boolean).join(" ")} key={row.team.id}>
-                  <td data-label="Pos">
-                    <span className="position-cell">{rank}</span>
-                    {isQualified && <span className="qualification-mark" title="Zona de liguilla">Q</span>}
-                  </td>
-                  <td data-label="Equipo">
-                    <span className="standings-team">
-                      <TeamMark team={row.team} className="standings-crest" />
-                      <span className="team-name-cell">{row.team.name}</span>
-                    </span>
-                  </td>
-                  <td className="points-cell" data-label="PTS"><strong>{row.points}</strong></td>
-                  <td data-label="PJ">{row.played}</td>
-                  <td data-label="G">{row.wins}</td>
-                  <td data-label="E">{row.draws}</td>
-                  <td data-label="P">{row.losses}</td>
-                  <td data-label="GF">{row.goalsFor}</td>
-                  <td data-label="GC">{row.goalsAgainst}</td>
-                  <td data-label="DG">{row.goalDifference}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <span>
+          <small>Competencia</small>
+          <strong>{seasonLabel}</strong>
+        </span>
+        {onShare && (
+          <button type="button" onClick={onShare}>
+            <span className="whatsapp-icon">W</span>
+            <span>
+              <strong>Compartir tabla</strong>
+              <small>Imagen WhatsApp</small>
+            </span>
+          </button>
+        )}
       </div>
-    </>
+      <div className="standings-showcase-heading">
+        <span className="standings-showcase-icon" aria-hidden="true">
+          <span>1</span>
+          <span>2</span>
+          <span>3</span>
+        </span>
+        <div>
+          <h3>Tabla de <strong>posiciones</strong></h3>
+          <p>{competitionLabel}{qualifiedCount > 0 ? ` | Zona de liguilla - Puestos 1 al ${qualifiedCount}${playoffLabel ? ` | ${playoffLabel}` : ""}` : ""}</p>
+        </div>
+      </div>
+      <StandingsInsights rows={rows} />
+      <div className="standings-board" role="table">
+        <div className="standings-board-header" role="row">
+          <span>Pos</span>
+          <span>Equipo</span>
+          {statLabels.map(([label]) => <span key={label}>{label}</span>)}
+          <span>PTS</span>
+        </div>
+        {rows.map((row, index) => {
+          const isQualified = index < qualifiedCount;
+          const rank = index + 1;
+          return (
+            <div className="standings-row-group" key={row.team.id}>
+              {qualifiedCount > 0 && index === qualifiedCount && (
+                <div className="standings-zone-line">
+                  <span>{playoffLabel ? `Zona de liguilla - ${playoffLabel}` : "Zona de liguilla"}</span>
+                </div>
+              )}
+              <article
+                className={[`rank-${rank}`, rank <= 3 ? "top-rank" : "", isQualified ? "qualified-playoff" : ""].filter(Boolean).join(" ")}
+                role="row"
+              >
+                <span className="position-cell" role="cell">{rank}</span>
+                <span className="standings-team" role="cell">
+                  <TeamMark team={row.team} className="standings-crest" />
+                  <span className="team-name-cell">{row.team.name}</span>
+                </span>
+                <span className="standings-row-stats" role="cell">
+                  {statLabels.map(([label, key]) => (
+                    <span key={label}>
+                      <small>{label}</small>
+                      <strong>{row[key]}</strong>
+                    </span>
+                  ))}
+                </span>
+                {statLabels.map(([label, key]) => (
+                  <span className="standing-stat-desktop" key={label} role="cell">{row[key]}</span>
+                ))}
+                <span className="points-cell" role="cell"><strong>{row.points}</strong></span>
+              </article>
+            </div>
+          );
+        })}
+      </div>
+      <div className="standings-legend standings-legend-modern">
+        <span><strong>PJ:</strong> Partidos jugados</span>
+        <span><strong>G:</strong> Ganados</span>
+        <span><strong>E:</strong> Empatados</span>
+        <span><strong>P:</strong> Perdidos</span>
+        <span><strong>GF:</strong> A favor</span>
+        <span><strong>GC:</strong> En contra</span>
+        <span><strong>DG:</strong> Dif. goles</span>
+        <span><strong>PTS:</strong> Puntos</span>
+      </div>
+    </section>
   );
 }
 
@@ -2683,15 +3226,16 @@ function StandingsInsights({ rows }) {
   const bestAttack = [...rows].sort((a, b) => b.goalsFor - a.goalsFor || b.points - a.points)[0];
   const bestDefense = [...rows].sort((a, b) => a.goalsAgainst - b.goalsAgainst || b.points - a.points)[0];
   const insights = [
-    leader ? { label: "Lider", team: leader.team, value: `${leader.points} pts` } : null,
-    bestAttack ? { label: "Mejor ofensiva", team: bestAttack.team, value: `${bestAttack.goalsFor} GF` } : null,
-    bestDefense ? { label: "Mejor defensa", team: bestDefense.team, value: `${bestDefense.goalsAgainst} GC` } : null
+    leader ? { label: "Lider", team: leader.team, value: `${leader.points} pts`, type: "leader" } : null,
+    bestAttack ? { label: "Mejor ofensiva", team: bestAttack.team, value: `${bestAttack.goalsFor} GF`, type: "attack" } : null,
+    bestDefense ? { label: "Mejor defensa", team: bestDefense.team, value: `${bestDefense.goalsAgainst} GC`, type: "defense" } : null
   ].filter(Boolean);
 
   return (
     <div className="standings-insights" aria-label="Resumen rapido de tabla">
       {insights.map((item) => (
-        <article key={item.label}>
+        <article className={`insight-${item.type}`} key={item.label}>
+          <span className="standings-insight-watermark"><StandingInsightWatermark type={item.type} /></span>
           <span>{item.label}</span>
           <strong>{item.team.name}</strong>
           <small>{item.value}</small>
@@ -2714,53 +3258,85 @@ function getMatchStatusLabel(match) {
   return labels[match.status] || "Programado";
 }
 
+function getMatchDateParts(value) {
+  if (!value) return { day: "--", month: "Fecha" };
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return { day: "--", month: "Fecha" };
+  const months = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const monthIndex = Math.max(0, Math.min(11, Number(match[2]) - 1));
+  return {
+    day: String(Number(match[3])).padStart(2, "0"),
+    month: months[monthIndex]
+  };
+}
+
 function MatchCard({ league, match }) {
   const isFinished = match.status === "finished" || match.status === "walkover";
   const timeLabel = match.time ? `${match.time} hrs` : "Hora por definir";
   const timeOrScore = isFinished ? `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}` : "VS";
+  const dateParts = getMatchDateParts(match.date);
   const competition = getCompetition(league, match.competitionId);
   const homeTeam = getTeam(league, match.homeTeamId);
   const awayTeam = getTeam(league, match.awayTeamId);
   const statusLabel = getMatchStatusLabel(match);
   const isPlayoff = (match.stage || "regular") === "playoff";
   const hasAggregate = match.aggregateHome !== null && match.aggregateHome !== undefined && match.aggregateAway !== null && match.aggregateAway !== undefined;
+  const tiebreakerRows = getMatchTiebreakerRows(match);
+  const matchContext = [match.playoffLeg, hasAggregate ? `Global ${match.aggregateHome}-${match.aggregateAway}` : ""].filter(Boolean);
 
   return (
-    <details className="match-card">
+    <details className={`match-card ${isFinished ? "is-finished" : "is-scheduled"}`}>
       <summary>
-        <div className="match-card-kicker">
-          <span>{isPlayoff ? match.playoffRound || "Liguilla" : `Jornada ${match.round || "-"}`}</span>
-          <span>{match.date ? formatDate(match.date) : "Fecha por definir"}</span>
+        <div className="match-card-date" aria-label={match.date ? formatDate(match.date) : "Fecha por definir"}>
+          <MatchMetaIcon type="calendar" />
+          <strong>{dateParts.day}</strong>
+          <span>{dateParts.month}</span>
+          <b>{timeLabel}</b>
         </div>
-        <div className="match-card-scoreline">
-          <div className="match-card-team home">
-            <TeamMark team={homeTeam} className="match-card-crest" />
-            <strong>{homeTeam?.name || "LOCAL"}</strong>
+        <div className="match-card-main">
+          <div className="match-card-kicker">
+            <span><MatchMetaIcon type="venue" />{match.venue || "Cancha por definir"}</span>
+            {isPlayoff && <span>{match.playoffRound || "Liguilla"}</span>}
           </div>
-          <div className="match-card-center">
-            <strong>{timeOrScore}</strong>
-            {isFinished && <small>{statusLabel}</small>}
-          </div>
-          <div className="match-card-team away">
-            <TeamMark team={awayTeam} className="match-card-crest" />
-            <strong>{awayTeam?.name || "VISITANTE"}</strong>
+          <div className="match-card-scoreline">
+            <div className="match-card-team home">
+              <TeamMark team={homeTeam} className="match-card-crest" />
+              <strong>{homeTeam?.name || "LOCAL"}</strong>
+            </div>
+            <div className="match-card-center">
+              <strong>{timeOrScore}</strong>
+              <small>{statusLabel}</small>
+              {isFinished && tiebreakerRows.length > 0 && (
+                <small>{tiebreakerRows.map((row) => `${row.label} ${row.value}`).join(" | ")}</small>
+              )}
+            </div>
+            <div className="match-card-team away">
+              <TeamMark team={awayTeam} className="match-card-crest" />
+              <strong>{awayTeam?.name || "VISITANTE"}</strong>
+            </div>
           </div>
         </div>
-        <div className="match-card-footer">
-          <span className="match-card-meta-pill"><MatchMetaIcon type="time" />{timeLabel}</span>
-          <span className="match-card-meta-pill"><MatchMetaIcon type="venue" />{match.venue || "Cancha por definir"}</span>
+        <div className="match-card-action" aria-label={isFinished ? "Toca para ver goles" : "Partido programado"}>
+          {isFinished ? (
+            <>
+              <MatchMetaIcon type="ball" />
+              <strong>Ver goles</strong>
+            </>
+          ) : (
+            <>
+              <MatchMetaIcon type="time" />
+              <strong>Programado</strong>
+            </>
+          )}
+          <span>{isPlayoff ? match.playoffRound || "Liguilla" : `J${match.round || "-"}`}</span>
+        </div>
+        <div className="match-card-mobile-meta">
           <span className={`status ${match.status}`}>{statusLabel}</span>
-          <span className="match-touch-hint">
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <path d="M8.6 11.3V5.8a1.4 1.4 0 0 1 2.8 0v5.1" />
-              <path d="M11.4 10.8V4.6a1.4 1.4 0 0 1 2.8 0v6.2" />
-              <path d="M14.2 11.1V6.8a1.35 1.35 0 0 1 2.7 0v5.1" />
-              <path d="M16.9 12.3V9.8a1.3 1.3 0 0 1 2.6 0v4.6c0 3.4-2.4 5.6-5.9 5.6h-1.2c-1.9 0-3.2-.8-4.4-2.2l-2.6-3.1a1.46 1.46 0 0 1 .18-2.05 1.5 1.5 0 0 1 2.08.13l1.1 1.14" />
-              <path d="M4.5 6.2c.5-2.2 2.2-3.7 4.3-4" />
-              <path d="M3.5 9.4c-.7-3.7 1.7-7.2 5.4-7.9" />
-            </svg>
-            Toca para ver goles
-          </span>
+          {isFinished ? (
+            <span className="match-touch-hint"><MatchMetaIcon type="ball" />Ver goles</span>
+          ) : (
+            <span><MatchMetaIcon type="time" />{statusLabel}</span>
+          )}
         </div>
       </summary>
       <div className="match-details">
@@ -2778,10 +3354,13 @@ function MatchCard({ league, match }) {
           <div className="match-score-center">
             <span>{statusLabel}</span>
             <strong>{isFinished ? `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}` : "VS"}</strong>
-            {isPlayoff && (
-              <small>
-                {[match.playoffLeg, hasAggregate ? `Global ${match.aggregateHome}-${match.aggregateAway}` : ""].filter(Boolean).join(" | ")}
-              </small>
+            {isPlayoff && matchContext.length > 0 && <small>{matchContext.join(" | ")}</small>}
+            {tiebreakerRows.length > 0 && (
+              <div className="match-tiebreakers" aria-label="Desempate del partido">
+                {tiebreakerRows.map((row) => (
+                  <span key={row.label}><b>{row.label}</b>{row.value}</span>
+                ))}
+              </div>
             )}
           </div>
           <div className="match-score-team away">
@@ -2799,6 +3378,32 @@ function MatchCard({ league, match }) {
 }
 
 function MatchMetaIcon({ type }) {
+  if (type === "calendar") {
+    return (
+      <svg className="match-card-meta-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <rect x="4" y="5" width="16" height="15" rx="2.5" />
+        <path d="M8 3.5v4" />
+        <path d="M16 3.5v4" />
+        <path d="M4 10h16" />
+        <path d="m9 15 2 2 4-5" />
+      </svg>
+    );
+  }
+
+  if (type === "ball") {
+    return (
+      <svg className="match-card-meta-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="m12 7.2 4.1 3-1.55 4.8h-5.1L7.9 10.2Z" />
+        <path d="M12 7.2V3.6" />
+        <path d="m16.1 10.2 3.4-1.1" />
+        <path d="m14.55 15 2.1 2.9" />
+        <path d="m9.45 15-2.1 2.9" />
+        <path d="M7.9 10.2 4.5 9.1" />
+      </svg>
+    );
+  }
+
   if (type === "venue") {
     return (
       <svg className="match-card-meta-icon" aria-hidden="true" viewBox="0 0 24 24">
@@ -2857,7 +3462,30 @@ function MatchEventSummary({ league, match, homeTeam, awayTeam }) {
 }
 
 function hasEventMinute(event) {
-  return event.minute !== "" && event.minute !== null && event.minute !== undefined && !Number.isNaN(Number(event.minute));
+  return parseEventMinute(event) !== null;
+}
+
+function parseEventMinute(event) {
+  const value = event.minute ?? "";
+  if (value === "" || value === null || value === undefined) return null;
+  const numeric = Number(value);
+  return Number.isNaN(numeric) ? null : numeric;
+}
+
+function getEventMinuteLabel(event) {
+  return event.minuteLabel || event.minute;
+}
+
+function isFirstHalfMinute(event) {
+  const label = String(event.minuteLabel || "");
+  const minute = parseEventMinute(event);
+  return /^45\s*\+/.test(label) || (minute !== null && minute <= 45);
+}
+
+function isSecondHalfMinute(event) {
+  const label = String(event.minuteLabel || "");
+  const minute = parseEventMinute(event);
+  return !/^45\s*\+/.test(label) && minute !== null && minute > 45;
 }
 
 function sortMatchEvents(events) {
@@ -2873,7 +3501,7 @@ function sortMatchEvents(events) {
       const leftHasMinute = hasEventMinute(left.event);
       const rightHasMinute = hasEventMinute(right.event);
       if (leftHasMinute && rightHasMinute) {
-        return Number(left.event.minute) - Number(right.event.minute) || left.index - right.index;
+        return parseEventMinute(left.event) - parseEventMinute(right.event) || left.index - right.index;
       }
       if (leftHasMinute) return -1;
       if (rightHasMinute) return 1;
@@ -2883,14 +3511,14 @@ function sortMatchEvents(events) {
 }
 
 function MatchEventTimeline({ league, match, events, homeTeam, awayTeam }) {
-  const hasFirstHalf = events.some((event) => hasEventMinute(event) && Number(event.minute) <= 45);
-  const hasSecondHalf = events.some((event) => hasEventMinute(event) && Number(event.minute) > 45);
+  const hasFirstHalf = events.some((event) => hasEventMinute(event) && isFirstHalfMinute(event));
+  const hasSecondHalf = events.some((event) => hasEventMinute(event) && isSecondHalfMinute(event));
   const showHalfTime = hasFirstHalf && hasSecondHalf;
   const rows = [];
   let halfTimeInserted = false;
 
   for (const [index, event] of events.entries()) {
-    if (showHalfTime && !halfTimeInserted && hasEventMinute(event) && Number(event.minute) > 45) {
+    if (showHalfTime && !halfTimeInserted && hasEventMinute(event) && isSecondHalfMinute(event)) {
       halfTimeInserted = true;
       rows.push(
         <div className="match-timeline-half" key="half-time">
@@ -2922,7 +3550,7 @@ function MatchTimelineEvent({ league, match, event, index }) {
 
   return (
     <article className={`match-timeline-event ${side} ${event.type}`}>
-      <span className="match-timeline-minute">{hasEventMinute(event) ? `${event.minute}'` : ""}</span>
+      <span className="match-timeline-minute">{hasEventMinute(event) ? `${getEventMinuteLabel(event)}'` : ""}</span>
       <div className="match-timeline-card">
         <span className="match-timeline-icon" aria-hidden="true">{getPublicEventIcon(event.type)}</span>
         <div>
@@ -2942,7 +3570,7 @@ function MatchTeamEvents({ title, events, league, showMinutes = true }) {
         const player = getPlayer(league, event.playerId);
         return (
           <article className={`match-event-row ${event.type} ${showMinutes ? "" : "without-minute"}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
-            {showMinutes && <span className="match-event-minute">{event.minute ? `${event.minute}'` : ""}</span>}
+            {showMinutes && <span className="match-event-minute">{event.minute ? `${getEventMinuteLabel(event)}'` : ""}</span>}
             <span className="match-event-badge">{getPublicEventIcon(event.type)}</span>
             <div>
               <strong>{player?.name || "Jugador"}</strong>
@@ -3080,7 +3708,9 @@ function SuspensionNotices({ notices }) {
         <article className={`suspension-notice ${notice.status}`} key={notice.id}>
           <strong>{notice.player.name}</strong>
           <span>{notice.team?.name || "Sin equipo"}</span>
-          {notice.indefinite ? (
+          {notice.pendingReview ? (
+            <p>Expulsado y sujeto a revision por comision disciplinaria. No puede ser alineado hasta resolucion.</p>
+          ) : notice.indefinite ? (
             <p>{notice.type === "Expulsion" ? "Expulsado" : "Suspendido"} con inhabilitacion indefinida hasta resolucion de la liga.</p>
           ) : (
             <p>

@@ -14,6 +14,9 @@ import {
   activateRefereeUserData,
   countActiveSuperAdminsExcept,
   countLeagueAdmins,
+  createMatchReportData,
+  createMatchReportSignatureData,
+  createMatchSessionOperationData,
   countTeamDelegateAssignmentsData,
   createRefereeMatchSheetData,
   createRefereeActivationData,
@@ -34,27 +37,39 @@ import {
   getAdminActivationByHashData,
   getStoreData,
   getPendingRefereeMatchSheetForMatchData,
+  getMatchReportData,
+  getMatchSessionOperationData,
+  getMatchTeamPinData,
   getRefereeActivationByHashData,
   getRefereeMatchSheetData,
   getRefereeProfileData,
   getTeamDelegateContextData,
   getTeamDelegateActivationByHashData,
   getUserById,
+  getMatchSessionData,
+  getLatestMatchReportForMatchData,
   importStoreData,
   initializeData,
   listActivePasswordResetRequests,
+  listBackupRecordsData,
   listRefereeMatchSheetsData,
   listRefereeMatchSheetsForRefereeData,
+  listMatchReportsData,
   listMatchRostersForLeagueData,
   listRefereesData,
+  listMatchSessionsForRefereeData,
+  listMatchReportSignaturesData,
   listTeamDelegatesData,
   listTeamPortalPlayersData,
   listUsersData,
+  markMatchTeamPinRevealedData,
+  markMatchTeamPinSignedData,
   markAdminActivationUsedData,
   markPasswordResetUsed,
   markRefereeActivationUsedData,
   markTeamDelegateActivationUsedData,
   removeRefereeRoleData,
+  publishOfficialMatchFromReportData,
   registerFailedLoginData,
   revokeAdminActivationsData,
   revokeRefereeActivationsData,
@@ -63,15 +78,21 @@ import {
   activateTeamDelegateUserData,
   updateTeamDelegateStatusData,
   updateMatchRefereesData,
+  updateMatchWorkflowData,
+  updateMatchReportStatusData,
   updateRefereeMatchSheetReviewData,
   updateRefereeStatusData,
   updateTeamLogoData,
+  updateMatchRosterPinData,
   updatePasswordData,
   updateTeamPortalPlayerData,
   upsertMatchRosterData,
+  upsertMatchSessionData,
+  upsertMatchTeamPinData,
   updateUserAccessData,
   updateUserData
 } from "./dataLayer.js";
+import { createPlatformBackup, getBackupDownload, getSafeBackupRecord, verifyBackupIntegrity } from "./backupService.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { runtimeConfig, validateRuntimeConfig } from "./runtimeConfig.js";
 import { getLocalUploadDir, uploadImageDataUrl } from "./imageStorage.js";
@@ -90,8 +111,15 @@ import {
   validateUserStatus
 } from "./security.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
-import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, upperText } from "../src/lib/domain.js";
-import { addPlayer, deletePlayer, saveMatchSheet, saveResult, updatePlayer } from "../src/lib/actions.js";
+import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getTeam, upperText } from "../src/lib/domain.js";
+import { addPlayer, deletePlayer, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer } from "../src/lib/actions.js";
+import {
+  MATCH_CAPTURE_MODES,
+  MATCH_REPORT_STATUSES,
+  MATCH_WORKFLOW_STATUSES,
+  getNextWorkflowStatusAfterFinish,
+  normalizeCaptureMode
+} from "../src/lib/matchWorkflow.js";
 
 validateRuntimeConfig();
 await initializeData();
@@ -107,6 +135,15 @@ const DIST_INDEX = path.join(DIST_DIR, "index.html");
 let publicStoreCache = null;
 let publicStoreCacheUntil = 0;
 let publicStoreRefreshPromise = null;
+
+function resolveCorsOrigin(origin, callback) {
+  if (!origin) return callback(null, true);
+  if (runtimeConfig.corsOrigin === "*") return callback(null, true);
+  const allowedOrigins = Array.isArray(runtimeConfig.corsOrigin)
+    ? runtimeConfig.corsOrigin
+    : [runtimeConfig.corsOrigin].filter(Boolean);
+  return callback(null, allowedOrigins.includes(origin) ? origin : false);
+}
 
 app.disable("x-powered-by");
 app.set("trust proxy", runtimeConfig.trustProxy);
@@ -130,7 +167,7 @@ app.use((request, response, next) => {
   next();
 });
 app.use(cors({
-  origin: runtimeConfig.corsOrigin,
+  origin: resolveCorsOrigin,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
   maxAge: 600
@@ -470,6 +507,10 @@ function buildMatchPayload({ league, payload, currentMatch = null, canEditResult
     playoffLeg: stage === "playoff" ? upperText(payload.playoffLeg || currentMatch?.playoffLeg || "") : upperText(payload.playoffLeg || ""),
     aggregateHome: parseOptionalScore(payload.aggregateHome, currentMatch?.aggregateHome ?? null, "Global local"),
     aggregateAway: parseOptionalScore(payload.aggregateAway, currentMatch?.aggregateAway ?? null, "Global visitante"),
+    extraTimeHomeGoals: parseOptionalScore(payload.extraTimeHomeGoals, currentMatch?.extraTimeHomeGoals ?? null, "Tiempo extra local"),
+    extraTimeAwayGoals: parseOptionalScore(payload.extraTimeAwayGoals, currentMatch?.extraTimeAwayGoals ?? null, "Tiempo extra visitante"),
+    penaltyHomeGoals: parseOptionalScore(payload.penaltyHomeGoals, currentMatch?.penaltyHomeGoals ?? null, "Penales local"),
+    penaltyAwayGoals: parseOptionalScore(payload.penaltyAwayGoals, currentMatch?.penaltyAwayGoals ?? null, "Penales visitante"),
     round,
     date,
     time,
@@ -488,6 +529,10 @@ function buildMatchPayload({ league, payload, currentMatch = null, canEditResult
     next.status = status;
     next.homeGoals = parseOptionalScore(payload.homeGoals, null, "Goles local");
     next.awayGoals = parseOptionalScore(payload.awayGoals, null, "Goles visitante");
+    next.extraTimeHomeGoals = parseOptionalScore(payload.extraTimeHomeGoals, null, "Tiempo extra local");
+    next.extraTimeAwayGoals = parseOptionalScore(payload.extraTimeAwayGoals, null, "Tiempo extra visitante");
+    next.penaltyHomeGoals = parseOptionalScore(payload.penaltyHomeGoals, null, "Penales local");
+    next.penaltyAwayGoals = parseOptionalScore(payload.penaltyAwayGoals, null, "Penales visitante");
     next.observations = payload.observations === undefined ? next.observations : upperText(payload.observations || "");
   } else if (next.status !== "scheduled") {
     const error = new Error("Este permiso solo permite programar partidos pendientes, no modificar resultados.");
@@ -554,6 +599,7 @@ async function buildTeamPortalPayload(userId) {
       ? {
         type: activeSuspensionByPlayerId.get(player.id).type,
         reason: activeSuspensionByPlayerId.get(player.id).reason,
+        pendingReview: Boolean(activeSuspensionByPlayerId.get(player.id).pendingReview),
         indefinite: Boolean(activeSuspensionByPlayerId.get(player.id).indefinite),
         remainingMatches: activeSuspensionByPlayerId.get(player.id).remainingMatches,
         returnRound: activeSuspensionByPlayerId.get(player.id).returnRound
@@ -612,10 +658,180 @@ function normalizePin(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 8);
 }
 
-function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], matchRosters = []) {
+function normalizeOperationId(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized.length > 120) return "";
+  return normalized.replace(/[^a-zA-Z0-9:_-]/g, "");
+}
+
+async function registerRefereeOperation({ context, user, sessionId = "", operationId = "", operationType = "", payload = {} }) {
+  const safeOperationId = normalizeOperationId(operationId);
+  if (!safeOperationId) return { duplicate: false, operation: null };
+  return createMatchSessionOperationData({
+    operationId: safeOperationId,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    sessionId,
+    refereeUserId: user.id,
+    operationType,
+    payload
+  });
+}
+
+async function getDuplicateRefereeOperationResponse({ operationId, referee, userId }) {
+  const safeOperationId = normalizeOperationId(operationId);
+  if (!safeOperationId) return null;
+  const operation = await getMatchSessionOperationData(safeOperationId);
+  if (!operation) return null;
+  const session = operation.sessionId ? await getMatchSessionData(operation.sessionId) : null;
+  return {
+    duplicateOperation: true,
+    operation,
+    session,
+    payload: await buildRefereePortalResponse(referee, userId)
+  };
+}
+
+async function verifyCurrentUserPassword(userId, password) {
+  const user = await getUserById(userId, { activeOnly: true });
+  return Boolean(user?.password_hash && verifyPassword(String(password || ""), user.password_hash));
+}
+
+async function getTeamPortalRosterContext(user, matchId) {
+  const context = await getTeamDelegateContextData(user.id);
+  if (!context) return { error: { status: 404, message: "No tienes equipo asignado" } };
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const match = league?.matches?.find((item) => item.id === matchId);
+  if (!league || !match) return { error: { status: 404, message: "Partido no encontrado." } };
+  if (match.homeTeamId !== context.teamId && match.awayTeamId !== context.teamId) {
+    return { error: { status: 403, message: "Solo puedes administrar convocatoria de tu propio equipo." } };
+  }
+
+  const rosters = await listMatchRostersForLeagueData(league.id);
+  const roster = rosters.find((item) => item.matchId === match.id && item.teamId === context.teamId);
+  if (!roster) return { error: { status: 404, message: "Primero envia la convocatoria para generar el PIN." } };
+
+  return { context, store, league, match, roster };
+}
+
+async function getRefereeMatchCaptureContext(user, matchId) {
+  if (!hasActiveRoleAccess(user, "referee")) {
+    return { error: { status: 403, message: "Permiso de arbitro requerido" } };
+  }
+  const referee = await getRefereeProfileData(user.id);
+  if (!referee || referee.status !== "active") {
+    return { error: { status: 403, message: "Tu cuenta de arbitro no esta activa." } };
+  }
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.matches?.some((match) => match.id === matchId));
+  const match = league?.matches?.find((item) => item.id === matchId);
+  if (!league || !match) return { error: { status: 404, message: "Partido no encontrado" } };
+  if (upperText(league.city || "") !== upperText(referee.municipality)) {
+    return { error: { status: 403, message: "No puedes capturar partidos de otro municipio." } };
+  }
+  if (match.centralRefereeUserId !== user.id) {
+    return { error: { status: 403, message: "Solo el arbitro central asignado puede capturar esta acta." } };
+  }
+  if (match.status === "finished" || match.status === "walkover") {
+    return { error: { status: 400, message: "Esta acta ya fue capturada. Solicita correccion al administrador." } };
+  }
+  const pendingSheet = await getPendingRefereeMatchSheetForMatchData(match.id);
+  if (pendingSheet) {
+    return { error: { status: 400, message: "Esta acta ya fue enviada y esta pendiente de revision." } };
+  }
+  return { referee, store, league, match };
+}
+
+async function buildRefereePortalResponse(referee, userId) {
+  const store = await getStoreData();
+  const refereeSheets = await listRefereeMatchSheetsForRefereeData(userId, { status: "all" });
+  const matchRosters = await listMatchRostersForStore(store);
+  const matchSessions = await listMatchSessionsForRefereeData(userId);
+  return buildRefereePortalPayload(store, referee, userId, refereeSheets, matchRosters, matchSessions);
+}
+
+async function buildPreliminaryReportResponse({ report, match }) {
+  const signatures = report ? await listMatchReportSignaturesData(report.id) : [];
+  const homeSignature = signatures.find((signature) => signature.teamId === match.homeTeamId) || null;
+  const awaySignature = signatures.find((signature) => signature.teamId === match.awayTeamId) || null;
+  return {
+    report,
+    signatures,
+    homeSigned: Boolean(homeSignature),
+    awaySigned: Boolean(awaySignature),
+    readyToFinalize: Boolean(homeSignature && awaySignature)
+  };
+}
+
+async function enrichMatchReportForAdmin(report, store) {
+  const league = (store.leagues || []).find((item) => item.id === report.leagueId);
+  const match = league?.matches?.find((item) => item.id === report.matchId);
+  const competition = league?.competitions?.find((item) => item.id === match?.competitionId);
+  const homeTeam = league ? getTeam(league, match?.homeTeamId) : null;
+  const awayTeam = league ? getTeam(league, match?.awayTeamId) : null;
+  const signatures = report?.id ? await listMatchReportSignaturesData(report.id) : [];
+  return {
+    ...report,
+    signatures,
+    match: match ? {
+      id: match.id,
+      round: match.round,
+      date: match.date,
+      time: match.time,
+      venue: match.venue,
+      status: match.status,
+      workflowStatus: match.workflowStatus || match.status,
+      competitionId: match.competitionId,
+      competitionName: competition?.name || "",
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      homeTeamName: homeTeam?.name || "LOCAL",
+      awayTeamName: awayTeam?.name || "VISITANTE"
+    } : null
+  };
+}
+
+function buildOfficialSheetPayloadFromReport(report) {
+  const payload = report?.payload && typeof report.payload === "object" ? report.payload : {};
+  const isWalkover = payload.status === "walkover" || payload.sheetMode === "default";
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  return {
+    matchId: report.matchId,
+    homeGoals: report.homeGoals ?? payload.homeGoals ?? 0,
+    awayGoals: report.awayGoals ?? payload.awayGoals ?? 0,
+    extraTimeHomeGoals: payload.extraTimeHomeGoals,
+    extraTimeAwayGoals: payload.extraTimeAwayGoals,
+    penaltyHomeGoals: payload.penaltyHomeGoals,
+    penaltyAwayGoals: payload.penaltyAwayGoals,
+    observations: payload.observations || "",
+    status: isWalkover ? "walkover" : "finished",
+    captureMode: report.captureMode || payload.captureMode || MATCH_CAPTURE_MODES.MANUAL,
+    resolutionType: payload.resolutionType || (isWalkover ? "no_show" : "normal"),
+    resolutionNote: payload.resolutionNote || "",
+    events: events.map((event) => ({
+      ...event,
+      suspensionMatches: event.type === "red" ? Number(event.suspensionMatches || 0) : event.suspensionMatches,
+      suspensionIndefinite: event.type === "red" ? Boolean(event.suspensionIndefinite) : Boolean(event.suspensionIndefinite),
+      disciplinaryPending: event.type === "red" ? true : Boolean(event.disciplinaryPending),
+      reason: event.type === "red" ? event.reason || "Tarjeta roja sujeta a revision" : event.reason || ""
+    }))
+  };
+}
+
+function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], matchRosters = [], matchSessions = []) {
   const sheetByMatchId = new Map();
   for (const sheet of refereeSheets.filter((item) => item.status === "pending_review" || item.status === "rejected")) {
     if (!sheetByMatchId.has(sheet.matchId)) sheetByMatchId.set(sheet.matchId, sheet);
+  }
+  const sessionByMatchId = new Map();
+  for (const session of matchSessions || []) {
+    const current = sessionByMatchId.get(session.matchId);
+    if (!current || String(session.updatedAt || "").localeCompare(String(current.updatedAt || "")) > 0) {
+      sessionByMatchId.set(session.matchId, session);
+    }
   }
   const rosterByMatchTeam = new Map(matchRosters.map((roster) => [`${roster.matchId}:${roster.teamId}`, roster]));
   const assignedMatches = [];
@@ -640,6 +856,7 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
       const hasPendingReview = reviewSheet?.status === "pending_review";
       const homeRoster = rosterByMatchTeam.get(`${match.id}:${match.homeTeamId}`);
       const awayRoster = rosterByMatchTeam.get(`${match.id}:${match.awayTeamId}`);
+      const activeSession = sessionByMatchId.get(match.id);
       const homeEligiblePlayers = getEligiblePlayersForTeam(league, match.homeTeamId);
       const awayEligiblePlayers = getEligiblePlayersForTeam(league, match.awayTeamId);
       const activeSuspensionByPlayerId = new Set(
@@ -649,6 +866,8 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
       );
       const buildRosterPlayers = (players, roster) => {
         const rosterPlayerIds = new Set((roster?.players || []).map((entry) => typeof entry === "string" ? entry : entry.playerId));
+        const starterIds = new Set(roster?.starters || roster?.lineup?.starters || []);
+        const substituteIds = new Set(roster?.substitutes || roster?.lineup?.substitutes || []);
         const source = roster ? players.filter((player) => rosterPlayerIds.has(player.id)) : players;
         return source.map((player) => ({
           id: player.id,
@@ -656,7 +875,11 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
           number: player.number,
           position: player.position,
           teamId: player.teamId,
-          isCaptain: roster?.captainPlayerId === player.id
+          isCaptain: roster?.captainPlayerId === player.id,
+          isGoalkeeper: roster?.goalkeeperPlayerId === player.id,
+          rosterRole: starterIds.has(player.id) ? "starter" : substituteIds.has(player.id) ? "substitute" : "",
+          isStarter: starterIds.has(player.id),
+          isSubstitute: substituteIds.has(player.id)
         })).filter((player) => !activeSuspensionByPlayerId.has(player.id));
       };
       assignedMatches.push({
@@ -670,8 +893,16 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         time: match.time,
         venue: match.venue,
         status: match.status,
+        workflowStatus: match.workflowStatus || match.status,
+        captureMode: activeSession?.captureMode || match.captureMode || "",
+        session: activeSession || null,
+        sessionStatus: activeSession?.status || "",
         homeGoals: reviewSheet ? reviewPayload.homeGoals : match.homeGoals,
         awayGoals: reviewSheet ? reviewPayload.awayGoals : match.awayGoals,
+        extraTimeHomeGoals: reviewSheet ? reviewPayload.extraTimeHomeGoals : match.extraTimeHomeGoals,
+        extraTimeAwayGoals: reviewSheet ? reviewPayload.extraTimeAwayGoals : match.extraTimeAwayGoals,
+        penaltyHomeGoals: reviewSheet ? reviewPayload.penaltyHomeGoals : match.penaltyHomeGoals,
+        penaltyAwayGoals: reviewSheet ? reviewPayload.penaltyAwayGoals : match.penaltyAwayGoals,
         observations: match.observations || "",
         events: reviewSheet ? reviewPayload.events || [] : match.events || [],
         sheetReviewId: reviewSheet?.id || "",
@@ -691,7 +922,11 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         homeCaptainPlayerId: homeRoster?.captainPlayerId || "",
         awayCaptainPlayerId: awayRoster?.captainPlayerId || "",
         refereeRole,
-        canCapture: refereeRole === "central" && !hasPendingReview && match.status !== "finished" && match.status !== "walkover"
+        canCapture: refereeRole === "central" &&
+          !hasPendingReview &&
+          match.status !== "finished" &&
+          match.status !== "walkover" &&
+          ![MATCH_WORKFLOW_STATUSES.FINALIZED_PENDING_SYNC, MATCH_WORKFLOW_STATUSES.FINALIZED, MATCH_WORKFLOW_STATUSES.PUBLISHED].includes(match.workflowStatus)
       });
     }
   }
@@ -1465,6 +1700,40 @@ app.post("/api/leagues/:leagueId/matches/:matchId/result", requireAuth, async (r
   response.json(nextStore);
 });
 
+app.post("/api/leagues/:leagueId/matches/:matchId/discipline-resolution", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "discipline")) {
+    return response.status(403).json({ error: "No puedes resolver sanciones en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  const match = league?.matches?.find((item) => item.id === request.params.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
+  if (league.status !== "active") return response.status(404).json({ error: "Liga suspendida" });
+
+  let nextStore;
+  try {
+    nextStore = await importStoreData(resolveMatchEventDiscipline(store, leagueId, {
+      ...request.body,
+      matchId: match.id
+    }));
+  } catch (resolutionError) {
+    return response.status(resolutionError.status || 400).json({ error: resolutionError.message || "No se pudo resolver la sancion." });
+  }
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "discipline_resolution",
+    entityType: "match",
+    entityId: match.id,
+    detail: `Resolvio expulsion jornada ${match.round || "-"}`
+  });
+  response.json(nextStore);
+});
+
 app.delete("/api/leagues/:leagueId", requireSuperAdmin, async (request, response) => {
   const currentStore = await getStoreData();
   const league = currentStore.leagues.find((item) => item.id === request.params.leagueId);
@@ -2094,7 +2363,15 @@ app.patch("/api/referee-match-sheets/:sheetId/review", requireAuth, async (reque
   }
 
   const nextStore = saveMatchSheet(store, sheet.leagueId, sheet.payload);
-  await importStoreData(nextStore);
+  const publishedMatch = nextStore.leagues
+    .find((item) => item.id === sheet.leagueId)
+    ?.matches
+    ?.find((item) => item.id === sheet.matchId);
+  if (!publishedMatch) return response.status(404).json({ error: "Partido publicado no encontrado." });
+  await publishOfficialMatchFromReportData({
+    leagueId: sheet.leagueId,
+    match: publishedMatch
+  });
   clearPublicCache();
   const approvedSheet = await createRefereeMatchSheetData({
     id: sheet.id,
@@ -2122,6 +2399,80 @@ app.patch("/api/referee-match-sheets/:sheetId/review", requireAuth, async (reque
     sheet: approvedSheet,
     sheets: await listRefereeMatchSheetsData({ leagueId: sheet.leagueId, status: "pending_review" }),
     store: await getStoreData()
+  });
+});
+
+app.get("/api/match-reports", requireAuth, async (request, response) => {
+  if (!hasAnyAdminPermission(request.user, ["match_sheets"])) {
+    return response.status(403).json({ error: "No puedes ver actas finalizadas" });
+  }
+  const requestedLeagueId = String(request.query.leagueId || getPrimaryAdminLeagueId(request.user, ["match_sheets"]) || "").trim();
+  const status = String(request.query.status || MATCH_REPORT_STATUSES.FINALIZED);
+  if (requestedLeagueId && !hasAdminPermission(request.user, requestedLeagueId, "match_sheets")) {
+    return response.status(403).json({ error: "No puedes ver actas de esta liga" });
+  }
+  if (!requestedLeagueId && request.user.role !== "super_admin") {
+    return response.status(403).json({ error: "Selecciona una liga valida" });
+  }
+  const reports = await listMatchReportsData({ leagueId: requestedLeagueId, status });
+  const store = await getStoreData();
+  response.json(await Promise.all(reports.map((report) => enrichMatchReportForAdmin(report, store))));
+});
+
+app.post("/api/match-reports/:reportId/publish", requireAuth, async (request, response) => {
+  if (!hasAnyAdminPermission(request.user, ["match_sheets"])) {
+    return response.status(403).json({ error: "No puedes publicar actas finalizadas" });
+  }
+  const report = await getMatchReportData(request.params.reportId);
+  if (!report) return response.status(404).json({ error: "Acta finalizada no encontrada" });
+  if (!hasAdminPermission(request.user, report.leagueId, "match_sheets")) {
+    return response.status(403).json({ error: "No puedes publicar actas de esta liga" });
+  }
+  if (report.status !== MATCH_REPORT_STATUSES.FINALIZED) {
+    return response.status(400).json({ error: "Solo se pueden publicar actas finalizadas." });
+  }
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === report.leagueId);
+  const match = league?.matches?.find((item) => item.id === report.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado para esta acta." });
+  if (match.status === "finished" || match.status === "walkover") {
+    return response.status(400).json({ error: "Este partido ya tiene resultado oficial guardado." });
+  }
+
+  const sheetPayload = buildOfficialSheetPayloadFromReport(report);
+  const publishedStore = saveMatchSheet(store, report.leagueId, sheetPayload);
+  const publishedMatch = publishedStore.leagues
+    .find((item) => item.id === report.leagueId)
+    ?.matches
+    ?.find((item) => item.id === report.matchId);
+  if (!publishedMatch) return response.status(404).json({ error: "Partido publicado no encontrado." });
+
+  await publishOfficialMatchFromReportData({
+    leagueId: report.leagueId,
+    match: publishedMatch,
+    reportId: report.id
+  });
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId: report.leagueId,
+    action: "match_report_publish",
+    entityType: "match_report",
+    entityId: report.id,
+    detail: `Publico acta finalizada de partido ${report.matchId}`
+  });
+
+  const nextStore = await getStoreData();
+  const pendingReports = await listMatchReportsData({
+    leagueId: report.leagueId,
+    status: MATCH_REPORT_STATUSES.FINALIZED
+  });
+  response.json({
+    reportId: report.id,
+    reports: await Promise.all(pendingReports.map((item) => enrichMatchReportForAdmin(item, nextStore))),
+    store: nextStore
   });
 });
 
@@ -2212,7 +2563,465 @@ app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
   const store = await getStoreData();
   const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
   const matchRosters = await listMatchRostersForStore(store);
-  response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets, matchRosters));
+  const matchSessions = await listMatchSessionsForRefereeData(request.user.id);
+  response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets, matchRosters, matchSessions));
+});
+
+app.get("/api/referee-portal/matches/:matchId/live-state", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+  const sessions = await listMatchSessionsForRefereeData(request.user.id);
+  const session = sessions.find((item) => item.matchId === context.match.id) || null;
+  const report = await getLatestMatchReportForMatchData(context.match.id);
+  response.json({
+    serverTimestamp: new Date().toISOString(),
+    matchId: context.match.id,
+    workflowStatus: context.match.workflowStatus || context.match.status,
+    captureMode: context.match.captureMode || MATCH_CAPTURE_MODES.MANUAL,
+    session,
+    report: report ? {
+      id: report.id,
+      status: report.status,
+      version: report.version,
+      updatedAt: report.updatedAt
+    } : null
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/sync", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const operations = Array.isArray(request.body.operations) ? request.body.operations.slice(0, 100) : [];
+  const captureMode = normalizeCaptureMode(request.body.captureMode || context.match.captureMode || MATCH_CAPTURE_MODES.LIVE);
+  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  let session = null;
+  if (request.body.clockState || request.body.metadata) {
+    session = await upsertMatchSessionData({
+      id: sessionId,
+      leagueId: context.league.id,
+      matchId: context.match.id,
+      refereeUserId: request.user.id,
+      captureMode,
+      status: request.body.status || "temporarily_saved",
+      period: request.body.period || "",
+      clockState: request.body.clockState || {},
+      metadata: request.body.metadata || {}
+    });
+  }
+
+  const results = [];
+  for (const operation of operations) {
+    const operationId = normalizeOperationId(operation.operationId);
+    if (!operationId) continue;
+    const result = await registerRefereeOperation({
+      context,
+      user: request.user,
+      sessionId: session?.id || sessionId,
+      operationId,
+      operationType: operation.operationType || "sync",
+      payload: operation.payload || {}
+    });
+    results.push({
+      operationId,
+      duplicate: Boolean(result.duplicate),
+      status: result.operation?.status || "synced"
+    });
+  }
+
+  response.json({
+    serverTimestamp: new Date().toISOString(),
+    session,
+    operations: results,
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/start", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const operationId = normalizeOperationId(request.body.operationId);
+  const duplicate = await getDuplicateRefereeOperationResponse({ operationId, referee: context.referee, userId: request.user.id });
+  if (duplicate) return response.json(duplicate);
+
+  const captureMode = normalizeCaptureMode(request.body.captureMode || MATCH_CAPTURE_MODES.LIVE);
+  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const session = await upsertMatchSessionData({
+    id: sessionId,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    refereeUserId: request.user.id,
+    captureMode,
+    status: "in_progress",
+    period: request.body.period || "1T",
+    clockState: request.body.clockState || {},
+    metadata: request.body.metadata || {}
+  });
+  await registerRefereeOperation({
+    context,
+    user: request.user,
+    sessionId: session.id,
+    operationId,
+    operationType: "start",
+    payload: { period: request.body.period || "1T", clockState: request.body.clockState || {} }
+  });
+  await updateMatchWorkflowData({
+    matchId: context.match.id,
+    workflowStatus: MATCH_WORKFLOW_STATUSES.IN_PROGRESS,
+    captureMode
+  });
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "referee_match_session_start",
+    entityType: "match",
+    entityId: context.match.id,
+    detail: "Arbitro inicio sesion de partido"
+  });
+
+  response.status(201).json({
+    session,
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/save", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const operationId = normalizeOperationId(request.body.operationId);
+  const duplicate = await getDuplicateRefereeOperationResponse({ operationId, referee: context.referee, userId: request.user.id });
+  if (duplicate) return response.json(duplicate);
+
+  const captureMode = normalizeCaptureMode(request.body.captureMode || context.match.captureMode || MATCH_CAPTURE_MODES.LIVE);
+  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const session = await upsertMatchSessionData({
+    id: sessionId,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    refereeUserId: request.user.id,
+    captureMode,
+    status: "temporarily_saved",
+    period: request.body.period || "",
+    clockState: request.body.clockState || {},
+    metadata: request.body.metadata || {}
+  });
+  await registerRefereeOperation({
+    context,
+    user: request.user,
+    sessionId: session.id,
+    operationId,
+    operationType: "save",
+    payload: { period: request.body.period || "", clockState: request.body.clockState || {} }
+  });
+  await updateMatchWorkflowData({
+    matchId: context.match.id,
+    workflowStatus: MATCH_WORKFLOW_STATUSES.TEMPORARILY_SAVED,
+    captureMode
+  });
+
+  response.json({
+    session,
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/resume", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+  const operationId = normalizeOperationId(request.body.operationId);
+  const duplicate = await getDuplicateRefereeOperationResponse({ operationId, referee: context.referee, userId: request.user.id });
+  if (duplicate) return response.json(duplicate);
+  const existingSession = request.body.sessionId ? await getMatchSessionData(request.body.sessionId) : null;
+
+  const captureMode = normalizeCaptureMode(existingSession?.captureMode || request.body.captureMode || MATCH_CAPTURE_MODES.LIVE);
+  const sessionId = existingSession?.id || request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const session = await upsertMatchSessionData({
+    id: sessionId,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    refereeUserId: request.user.id,
+    captureMode,
+    status: "in_progress",
+    period: request.body.period || existingSession?.period || "",
+    clockState: request.body.clockState || existingSession?.clockState || {},
+    metadata: request.body.metadata || existingSession?.metadata || {}
+  });
+  await registerRefereeOperation({
+    context,
+    user: request.user,
+    sessionId: session.id,
+    operationId,
+    operationType: "resume",
+    payload: { period: request.body.period || existingSession?.period || "", clockState: request.body.clockState || {} }
+  });
+  await updateMatchWorkflowData({
+    matchId: context.match.id,
+    workflowStatus: MATCH_WORKFLOW_STATUSES.IN_PROGRESS,
+    captureMode
+  });
+
+  response.json({
+    session,
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/suspend", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+  const operationId = normalizeOperationId(request.body.operationId);
+  const duplicate = await getDuplicateRefereeOperationResponse({ operationId, referee: context.referee, userId: request.user.id });
+  if (duplicate) return response.json(duplicate);
+  const reason = upperText(request.body.reason || "");
+  if (!reason) return response.status(400).json({ error: "Indica el motivo de suspension del partido." });
+  const captureMode = normalizeCaptureMode(request.body.captureMode || context.match.captureMode || MATCH_CAPTURE_MODES.LIVE);
+  const workflowStatus = request.body.final === true
+    ? MATCH_WORKFLOW_STATUSES.SUSPENDED_FINAL
+    : MATCH_WORKFLOW_STATUSES.SUSPENDED_PENDING_RESUME;
+  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const session = await upsertMatchSessionData({
+    id: sessionId,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    refereeUserId: request.user.id,
+    captureMode,
+    status: workflowStatus,
+    period: request.body.period || "",
+    clockState: request.body.clockState || {},
+    metadata: request.body.metadata || {},
+    suspensionReason: reason
+  });
+  await registerRefereeOperation({
+    context,
+    user: request.user,
+    sessionId: session.id,
+    operationId,
+    operationType: "suspend",
+    payload: { reason, final: request.body.final === true, clockState: request.body.clockState || {} }
+  });
+  await updateMatchWorkflowData({
+    matchId: context.match.id,
+    workflowStatus,
+    captureMode
+  });
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "referee_match_session_suspend",
+    entityType: "match",
+    entityId: context.match.id,
+    detail: `Arbitro suspendio partido: ${reason}`
+  });
+
+  response.json({
+    session,
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/finish-match", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const operationId = normalizeOperationId(request.body.operationId);
+  const duplicate = await getDuplicateRefereeOperationResponse({ operationId, referee: context.referee, userId: request.user.id });
+  if (duplicate) {
+    const report = await getLatestMatchReportForMatchData(context.match.id);
+    return response.json({ ...duplicate, report });
+  }
+
+  const captureMode = normalizeCaptureMode(request.body.captureMode || context.match.captureMode || MATCH_CAPTURE_MODES.LIVE);
+  const nextWorkflowStatus = getNextWorkflowStatusAfterFinish(captureMode);
+  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const session = await upsertMatchSessionData({
+    id: sessionId,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    refereeUserId: request.user.id,
+    captureMode,
+    status: "match_finished",
+    period: request.body.period || "",
+    clockState: request.body.clockState || {},
+    metadata: request.body.metadata || {}
+  });
+  const reportStatus = captureMode === MATCH_CAPTURE_MODES.LIVE
+    ? MATCH_REPORT_STATUSES.PENDING_CAPTAIN_REVIEW
+    : MATCH_REPORT_STATUSES.FINALIZED;
+  const report = await createMatchReportData({
+    id: request.body.reportId || (operationId ? `match-report-${operationId}` : `match-report-${crypto.randomUUID()}`),
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    sessionId: session.id,
+    generatedByUserId: request.user.id,
+    captureMode,
+    status: reportStatus,
+    payload: request.body.reportPayload || request.body.metadata || {},
+    homeGoals: request.body.homeGoals ?? null,
+    awayGoals: request.body.awayGoals ?? null
+  });
+  await registerRefereeOperation({
+    context,
+    user: request.user,
+    sessionId: session.id,
+    operationId,
+    operationType: "finish_match",
+    payload: {
+      reportId: report.id,
+      captureMode,
+      homeGoals: request.body.homeGoals ?? null,
+      awayGoals: request.body.awayGoals ?? null,
+      clockState: request.body.clockState || {}
+    }
+  });
+  await updateMatchWorkflowData({
+    matchId: context.match.id,
+    workflowStatus: nextWorkflowStatus,
+    captureMode,
+    currentReportId: report.id,
+    finalizedAt: captureMode === MATCH_CAPTURE_MODES.LIVE ? "" : new Date().toISOString()
+  });
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "referee_match_finish",
+    entityType: "match",
+    entityId: context.match.id,
+    detail: captureMode === MATCH_CAPTURE_MODES.LIVE
+      ? "Arbitro finalizo partido y genero acta preliminar"
+      : "Arbitro finalizo acta manual sin firma digital"
+  });
+
+  response.json({
+    session,
+    report,
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.get("/api/referee-portal/matches/:matchId/report", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const report = await getLatestMatchReportForMatchData(context.match.id);
+  if (!report) return response.status(404).json({ error: "Aun no hay acta preliminar para este partido." });
+
+  response.json(await buildPreliminaryReportResponse({ report, match: context.match }));
+});
+
+app.post("/api/referee-portal/matches/:matchId/report/sign", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const report = await getLatestMatchReportForMatchData(context.match.id);
+  if (!report) return response.status(404).json({ error: "Primero finaliza el partido para generar el acta preliminar." });
+  if (report.captureMode !== MATCH_CAPTURE_MODES.LIVE) {
+    return response.status(400).json({ error: "Las actas manuales no requieren firma digital." });
+  }
+  if (![MATCH_REPORT_STATUSES.PENDING_CAPTAIN_REVIEW, MATCH_REPORT_STATUSES.CORRECTION_REQUESTED, MATCH_REPORT_STATUSES.BOTH_SIGNED].includes(report.status)) {
+    return response.status(400).json({ error: "Esta acta no esta disponible para firma." });
+  }
+
+  const teamSide = request.body.teamSide === "away" ? "away" : "home";
+  const teamId = teamSide === "home" ? context.match.homeTeamId : context.match.awayTeamId;
+  const matchRosters = await listMatchRostersForLeagueData(context.league.id);
+  const roster = matchRosters.find((item) => item.matchId === context.match.id && item.teamId === teamId);
+  const securePin = await getMatchTeamPinData(context.match.id, teamId);
+  const pin = normalizePin(request.body.pin);
+  const pinIsValid = securePin?.pinHash
+    ? verifyPassword(pin, securePin.pinHash)
+    : Boolean(roster?.captainPin && pin === normalizePin(roster.captainPin));
+  if (!pinIsValid) return response.status(400).json({ error: "PIN de capitan incorrecto." });
+
+  await createMatchReportSignatureData({
+    id: `match-report-signature-${crypto.randomUUID()}`,
+    reportId: report.id,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    teamId,
+    captainPlayerId: roster?.captainPlayerId || "",
+    signedByUserId: request.user.id,
+    method: "pin",
+    ipAddress: request.ip || "",
+    userAgent: request.get("user-agent") || "",
+    metadata: { teamSide }
+  });
+  await markMatchTeamPinSignedData({ matchId: context.match.id, teamId });
+
+  const reportState = await buildPreliminaryReportResponse({ report, match: context.match });
+  let nextReport = report;
+  if (reportState.readyToFinalize) {
+    nextReport = await updateMatchReportStatusData({
+      reportId: report.id,
+      status: MATCH_REPORT_STATUSES.BOTH_SIGNED
+    });
+    await updateMatchWorkflowData({
+      matchId: context.match.id,
+      workflowStatus: MATCH_WORKFLOW_STATUSES.BOTH_SIGNED,
+      currentReportId: report.id
+    });
+  }
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "match_report_signature",
+    entityType: "match_report",
+    entityId: report.id,
+    detail: `Firma de capitan ${teamSide === "home" ? "local" : "visitante"}`
+  });
+
+  response.json({
+    ...(await buildPreliminaryReportResponse({ report: nextReport, match: context.match })),
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/report/finalize", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const report = await getLatestMatchReportForMatchData(context.match.id);
+  if (!report) return response.status(404).json({ error: "No hay acta preliminar para finalizar." });
+
+  const reportState = await buildPreliminaryReportResponse({ report, match: context.match });
+  if (report.captureMode === MATCH_CAPTURE_MODES.LIVE && !reportState.readyToFinalize) {
+    return response.status(400).json({ error: "Se requiere firma de ambos capitanes antes de finalizar el acta." });
+  }
+
+  const finalizedAt = new Date().toISOString();
+  const store = await getStoreData();
+  const sheetPayload = buildOfficialSheetPayloadFromReport(report);
+  const publishedStore = saveMatchSheet(store, context.league.id, sheetPayload);
+  const publishedMatch = publishedStore.leagues
+    .find((item) => item.id === context.league.id)
+    ?.matches
+    ?.find((item) => item.id === context.match.id);
+  if (!publishedMatch) return response.status(404).json({ error: "Partido publicado no encontrado." });
+
+  await publishOfficialMatchFromReportData({
+    leagueId: context.league.id,
+    match: publishedMatch,
+    reportId: report.id,
+    publishedAt: finalizedAt
+  });
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "match_report_finalize",
+    entityType: "match_report",
+    entityId: report.id,
+    detail: "Arbitro finalizo acta firmada y se publico resultado oficial"
+  });
+
+  const publishedReport = await getMatchReportData(report.id);
+  response.json({
+    ...(await buildPreliminaryReportResponse({ report: publishedReport, match: context.match })),
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
 });
 
 app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (request, response) => {
@@ -2246,12 +3055,21 @@ app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (reque
   const matchRosters = await listMatchRostersForLeagueData(league.id);
   const homeRoster = matchRosters.find((roster) => roster.matchId === match.id && roster.teamId === match.homeTeamId);
   const awayRoster = matchRosters.find((roster) => roster.matchId === match.id && roster.teamId === match.awayTeamId);
+  const homeSecurePin = await getMatchTeamPinData(match.id, match.homeTeamId);
+  const awaySecurePin = await getMatchTeamPinData(match.id, match.awayTeamId);
+  const captureMode = normalizeCaptureMode(request.body.captureMode || MATCH_CAPTURE_MODES.LIVE);
+  const requiresDigitalSignature = captureMode === MATCH_CAPTURE_MODES.LIVE;
+  const isCaptainPinValid = (roster, securePin, value) => {
+    const pin = normalizePin(value);
+    if (securePin?.pinHash) return verifyPassword(pin, securePin.pinHash);
+    return !roster?.captainPin || pin === normalizePin(roster.captainPin);
+  };
   const approvals = request.body.approvals && typeof request.body.approvals === "object" ? request.body.approvals : {};
-  if (!isWalkoverSheet) {
-    if (homeRoster?.captainPin && normalizePin(approvals.homePin) !== normalizePin(homeRoster.captainPin)) {
+  if (requiresDigitalSignature && !isWalkoverSheet) {
+    if (homeRoster?.captainPin && !isCaptainPinValid(homeRoster, homeSecurePin, approvals.homePin)) {
       return response.status(400).json({ error: "PIN de capitan incorrecto para equipo local." });
     }
-    if (awayRoster?.captainPin && normalizePin(approvals.awayPin) !== normalizePin(awayRoster.captainPin)) {
+    if (awayRoster?.captainPin && !isCaptainPinValid(awayRoster, awaySecurePin, approvals.awayPin)) {
       return response.status(400).json({ error: "PIN de capitan incorrecto para equipo visitante." });
     }
   }
@@ -2260,38 +3078,71 @@ app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (reque
     matchId: match.id,
     homeGoals: request.body.homeGoals,
     awayGoals: request.body.awayGoals,
+    extraTimeHomeGoals: request.body.extraTimeHomeGoals,
+    extraTimeAwayGoals: request.body.extraTimeAwayGoals,
+    penaltyHomeGoals: request.body.penaltyHomeGoals,
+    penaltyAwayGoals: request.body.penaltyAwayGoals,
     observations: request.body.observations || "",
     status: isWalkoverSheet ? "walkover" : "finished",
+    captureMode,
     resolutionType: request.body.resolutionType || (isWalkoverSheet ? "no_show" : "normal"),
     resolutionNote: request.body.resolutionNote || "",
-    events: Array.isArray(request.body.events) ? request.body.events : [],
+    events: Array.isArray(request.body.events)
+      ? request.body.events.map((event) => ({
+        ...event,
+        suspensionMatches: event.type === "red" ? 0 : event.suspensionMatches,
+        suspensionIndefinite: false,
+        disciplinaryPending: event.type === "red" ? true : Boolean(event.disciplinaryPending)
+      }))
+      : [],
     captainApprovals: {
       home: !homeRoster?.captainPin || !isWalkoverSheet,
       away: !awayRoster?.captainPin || !isWalkoverSheet,
       approvedAt: !isWalkoverSheet ? new Date().toISOString() : ""
     }
   };
-  saveMatchSheet(store, league.id, sheetPayload);
+  const publishedStore = saveMatchSheet(store, league.id, sheetPayload);
+  const publishedMatch = publishedStore.leagues
+    .find((item) => item.id === league.id)
+    ?.matches
+    ?.find((item) => item.id === match.id);
+  if (!publishedMatch) return response.status(404).json({ error: "Partido publicado no encontrado." });
+  await publishOfficialMatchFromReportData({
+    leagueId: league.id,
+    match: publishedMatch
+  });
+  clearPublicCache();
   const sheet = await createRefereeMatchSheetData({
     id: `referee-sheet-${crypto.randomUUID()}`,
     leagueId: league.id,
     matchId: match.id,
     submittedByUserId: request.user.id,
-    payload: sheetPayload
+    payload: sheetPayload,
+    status: "approved",
+    reviewNote: "Publicada directamente desde panel arbitral",
+    reviewedByUserId: request.user.id,
+    reviewedAt: new Date().toISOString()
   });
 
   await logAudit({
     user: request.user,
     leagueId: league.id,
-    action: "referee_match_sheet_submit",
+    action: "referee_match_sheet_publish",
     entityType: "referee_match_sheet",
     entityId: sheet.id,
-    detail: `Arbitro central envio acta de ${match.id} a revision`
+    detail: `Arbitro central publico acta oficial de ${match.id}`
   });
 
   const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
   const nextStore = await getStoreData();
-  response.status(201).json(buildRefereePortalPayload(nextStore, referee, request.user.id, refereeSheets, await listMatchRostersForStore(nextStore)));
+  response.status(201).json(buildRefereePortalPayload(
+    nextStore,
+    referee,
+    request.user.id,
+    refereeSheets,
+    await listMatchRostersForStore(nextStore),
+    await listMatchSessionsForRefereeData(request.user.id)
+  ));
 });
 
 app.post("/api/team-portal/players", requireAuth, async (request, response) => {
@@ -2447,7 +3298,9 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
   if (suspendedPlayerId) {
     const player = league.players.find((item) => item.id === suspendedPlayerId);
     const notice = activeSuspensionByPlayerId.get(suspendedPlayerId);
-    const detail = notice?.indefinite
+    const detail = notice?.pendingReview
+      ? "esta sujeto a revision por comision disciplinaria"
+      : notice?.indefinite
       ? "esta inhabilitado indefinidamente"
       : `esta suspendido${notice?.remainingMatches ? ` por ${notice.remainingMatches} juego(s)` : ""}`;
     return response.status(400).json({ error: `${player?.name || "Un jugador"} ${detail} y no puede ser convocado.` });
@@ -2472,18 +3325,68 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
   if (!captainPlayerId || !requestedPlayerIds.includes(captainPlayerId)) {
     return response.status(400).json({ error: "Selecciona un capitan dentro de la convocatoria." });
   }
+  const goalkeeperPlayerId = String(request.body.goalkeeperPlayerId || "").trim();
+  if (!goalkeeperPlayerId || !requestedPlayerIds.includes(goalkeeperPlayerId)) {
+    return response.status(400).json({ error: "Selecciona un portero dentro de la convocatoria." });
+  }
+  const requestedPlayerIdSet = new Set(requestedPlayerIds);
+  const starters = [...new Set((Array.isArray(request.body.starters) ? request.body.starters : [])
+    .map((playerId) => String(playerId || "").trim())
+    .filter((playerId) => requestedPlayerIdSet.has(playerId)))];
+  const substitutes = [...new Set((Array.isArray(request.body.substitutes) ? request.body.substitutes : [])
+    .map((playerId) => String(playerId || "").trim())
+    .filter((playerId) => requestedPlayerIdSet.has(playerId)))];
+  const starterSet = new Set(starters);
+  const substituteSet = new Set(substitutes);
+  const overlapPlayerId = starters.find((playerId) => substituteSet.has(playerId));
+  if (overlapPlayerId) {
+    const player = league.players.find((item) => item.id === overlapPlayerId);
+    return response.status(400).json({ error: `${player?.name || "Un jugador"} no puede estar como titular y suplente al mismo tiempo.` });
+  }
+  const missingRolePlayerId = requestedPlayerIds.find((playerId) => !starterSet.has(playerId) && !substituteSet.has(playerId));
+  const normalizedStarters = starters.length || substitutes.length
+    ? starters
+    : requestedPlayerIds;
+  const normalizedSubstitutes = starters.length || substitutes.length
+    ? substitutes
+    : [];
+  if (missingRolePlayerId && (starters.length || substitutes.length)) {
+    const player = league.players.find((item) => item.id === missingRolePlayerId);
+    return response.status(400).json({ error: `${player?.name || "Un jugador"} debe estar marcado como titular o suplente.` });
+  }
+
+  const rosterId = existingRoster?.id || `match-roster-${crypto.randomUUID()}`;
+  const captainPin = existingRoster?.captainPin || generateCaptainPin();
 
   await upsertMatchRosterData({
-    id: `match-roster-${crypto.randomUUID()}`,
+    id: rosterId,
     leagueId: league.id,
     matchId: match.id,
     teamId: context.teamId,
     submittedByUserId: request.user.id,
     captainPlayerId,
-    captainPin: existingRoster?.captainPin || generateCaptainPin(),
+    goalkeeperPlayerId,
+    captainPin,
     players: requestedPlayerIds.map((playerId) => ({ playerId })),
+    starters: normalizedStarters,
+    substitutes: normalizedSubstitutes,
+    lineup: {
+      captainPlayerId,
+      goalkeeperPlayerId,
+      starters: normalizedStarters,
+      substitutes: normalizedSubstitutes
+    },
     status: "submitted",
     notes: request.body.notes || ""
+  });
+  await upsertMatchTeamPinData({
+    id: `match-team-pin-${crypto.randomUUID()}`,
+    leagueId: league.id,
+    matchId: match.id,
+    teamId: context.teamId,
+    rosterId,
+    pinHash: hashPassword(normalizePin(captainPin)),
+    generatedByUserId: request.user.id
   });
 
   await logAudit({
@@ -2498,6 +3401,82 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
   response.status(201).json(await buildTeamPortalPayload(request.user.id));
 });
 
+app.post("/api/team-portal/matches/:matchId/pin/reveal", requireAuth, async (request, response) => {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  if (!(await verifyCurrentUserPassword(request.user.id, request.body.password))) {
+    return response.status(401).json({ error: "Confirma tu contrasena para mostrar el PIN." });
+  }
+
+  const context = await getTeamPortalRosterContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+  if (!context.roster.captainPin) return response.status(404).json({ error: "Esta convocatoria no tiene PIN generado." });
+
+  await markMatchTeamPinRevealedData({
+    matchId: context.match.id,
+    teamId: context.context.teamId,
+    revealedByUserId: request.user.id
+  });
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "team_match_pin_reveal",
+    entityType: "match_roster",
+    entityId: context.roster.id,
+    detail: `Delegado revelo PIN de ${context.context.teamName} para partido ${context.match.id}`
+  });
+
+  response.json({
+    pin: context.roster.captainPin,
+    payload: await buildTeamPortalPayload(request.user.id)
+  });
+});
+
+app.post("/api/team-portal/matches/:matchId/pin/regenerate", requireAuth, async (request, response) => {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  if (!(await verifyCurrentUserPassword(request.user.id, request.body.password))) {
+    return response.status(401).json({ error: "Confirma tu contrasena para regenerar el PIN." });
+  }
+
+  const context = await getTeamPortalRosterContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+  if (context.match.status !== "scheduled") {
+    return response.status(400).json({ error: "Solo puedes regenerar el PIN antes de que el partido sea capturado." });
+  }
+
+  const captainPin = generateCaptainPin();
+  await updateMatchRosterPinData({
+    matchId: context.match.id,
+    teamId: context.context.teamId,
+    captainPin
+  });
+  await upsertMatchTeamPinData({
+    id: `match-team-pin-${crypto.randomUUID()}`,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    teamId: context.context.teamId,
+    rosterId: context.roster.id,
+    pinHash: hashPassword(normalizePin(captainPin)),
+    generatedByUserId: request.user.id
+  });
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "team_match_pin_regenerate",
+    entityType: "match_roster",
+    entityId: context.roster.id,
+    detail: `Delegado regenero PIN de ${context.context.teamName} para partido ${context.match.id}`
+  });
+
+  response.json({
+    pin: captainPin,
+    payload: await buildTeamPortalPayload(request.user.id)
+  });
+});
+
 app.get("/api/users", requireSuperAdmin, async (_request, response) => {
   const users = await listUsersData();
   response.json(users.map(toPublicUser));
@@ -2505,6 +3484,74 @@ app.get("/api/users", requireSuperAdmin, async (_request, response) => {
 
 app.get("/api/audit-logs", requireSuperAdmin, async (request, response) => {
   response.json(await listAuditLogs(Number(request.query.limit || 80)));
+});
+
+app.get("/api/backups", requireSuperAdmin, async (request, response) => {
+  const records = await listBackupRecordsData(Number(request.query.limit || 20));
+  response.json(records.map(getSafeBackupRecord));
+});
+
+app.post("/api/backups", requireSuperAdmin, async (request, response) => {
+  try {
+    const backup = await createPlatformBackup({ user: request.user });
+    await logAudit({
+      user: request.user,
+      action: "backup_create",
+      entityType: "backup",
+      entityId: backup.id,
+      detail: `Creo respaldo ${backup.fileName || backup.id} (${backup.provider}, ${backup.kind}, ${backup.sizeBytes} bytes)`
+    });
+    response.status(201).json(backup);
+  } catch (error) {
+    await logAudit({
+      user: request.user,
+      action: "backup_create_failed",
+      entityType: "backup",
+      detail: "No se pudo crear respaldo desde panel"
+    });
+    response.status(500).json({ error: "No se pudo crear el respaldo." });
+  }
+});
+
+app.get("/api/backups/:backupId/download", requireSuperAdmin, async (request, response) => {
+  try {
+    const download = await getBackupDownload(request.params.backupId);
+    if (!download) return response.status(404).json({ error: "Respaldo no disponible." });
+    await logAudit({
+      user: request.user,
+      action: "backup_download",
+      entityType: "backup",
+      entityId: download.record.id,
+      detail: `Descargo respaldo ${download.record.fileName || download.record.id}`
+    });
+    response.setHeader("Content-Type", download.contentType);
+    return response.download(download.filePath, download.fileName);
+  } catch (_error) {
+    return response.status(404).json({ error: "Respaldo no disponible." });
+  }
+});
+
+app.post("/api/backups/:backupId/verify", requireSuperAdmin, async (request, response) => {
+  try {
+    const result = await verifyBackupIntegrity(request.params.backupId);
+    await logAudit({
+      user: request.user,
+      action: result.ok ? "backup_verify" : "backup_verify_failed",
+      entityType: "backup",
+      entityId: request.params.backupId,
+      detail: result.reason
+    });
+    response.status(result.backup ? 200 : 404).json(result);
+  } catch (_error) {
+    await logAudit({
+      user: request.user,
+      action: "backup_verify_failed",
+      entityType: "backup",
+      entityId: request.params.backupId,
+      detail: "No se pudo verificar respaldo desde panel"
+    });
+    response.status(404).json({ ok: false, error: "No se pudo verificar el respaldo." });
+  }
 });
 
 app.post("/api/users", requireSuperAdmin, async (request, response) => {
@@ -2697,12 +3744,12 @@ app.patch("/api/users/:userId", requireSuperAdmin, async (request, response) => 
 app.post("/api/users/:userId/invitation", requireSuperAdmin, async (request, response) => {
   const user = await getUserById(request.params.userId);
   if (!user) return response.status(404).json({ error: "Usuario no encontrado" });
-  if (isPortalOnlyRole(user.role)) {
+  const access = (user.accesses || []).find((item) => ["super_admin", "league_admin", "admin_limited"].includes(item.role)) || null;
+  if (isPortalOnlyRole(user.role) && !access) {
     return response.status(400).json({ error: "Delegados y arbitros regeneran invitacion desde sus modulos." });
   }
   if (user.status === "deleted") return response.status(400).json({ error: "No se puede invitar a un usuario eliminado." });
 
-  const access = (user.accesses || []).find((item) => ["super_admin", "league_admin", "admin_limited"].includes(item.role)) || null;
   const league = access?.leagueId ? (await getStoreData()).leagues.find((item) => item.id === access.leagueId) : null;
   if (user.status === "active") {
     const roleLabel = (access?.role || user.role) === "super_admin"

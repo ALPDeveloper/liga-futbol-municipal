@@ -84,6 +84,26 @@ export async function reviewRefereeMatchSheet(token, sheetId, payload) {
   return parseResponse(response, "No se pudo revisar el acta arbitral");
 }
 
+export async function fetchFinalizedMatchReports(token, { leagueId = "", status = "finalized" } = {}) {
+  const params = new URLSearchParams();
+  if (leagueId) params.set("leagueId", leagueId);
+  if (status) params.set("status", status);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/match-reports${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return parseResponse(response, "No se pudieron cargar las actas finalizadas");
+}
+
+export async function publishFinalizedMatchReport(token, reportId) {
+  const response = await fetch(`${API_BASE_URL}/match-reports/${encodeURIComponent(reportId)}/publish`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify({})
+  });
+  return parseResponse(response, "No se pudo publicar el acta finalizada");
+}
+
 export async function fetchRefereePortal(token) {
   const response = await fetch(`${API_BASE_URL}/referee-portal/me`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -98,4 +118,90 @@ export async function saveRefereeMatchSheet(token, matchId, payload) {
     body: JSON.stringify(payload)
   });
   return parseResponse(response, "No se pudo guardar el acta");
+}
+
+export async function startRefereeMatchSession(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/start`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo iniciar el partido");
+}
+
+export async function saveRefereeMatchSession(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/save`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo guardar la sesion del partido");
+}
+
+export async function resumeRefereeMatchSession(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/resume`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo reanudar el partido");
+}
+
+export async function suspendRefereeMatchSession(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/suspend`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo suspender el partido");
+}
+
+export async function finishRefereeMatchSession(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/finish-match`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo finalizar el partido");
+}
+
+export async function fetchRefereeLiveState(token, matchId) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/live-state`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return parseResponse(response, "No se pudo consultar el estado en vivo");
+}
+
+export async function syncRefereeLiveState(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/sync`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo sincronizar el estado en vivo");
+}
+
+export async function fetchRefereeMatchReport(token, matchId) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/report`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return parseResponse(response, "No se pudo cargar el acta preliminar");
+}
+
+export async function signRefereeMatchReport(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/report/sign`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo firmar el acta");
+}
+
+export async function finalizeRefereeMatchReport(token, matchId, payload = {}) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/report/finalize`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo finalizar el acta");
 }

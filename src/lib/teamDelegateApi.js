@@ -121,3 +121,27 @@ export async function submitTeamMatchRoster(token, matchId, payload) {
   });
   return parseResponse(response, "No se pudo enviar la convocatoria");
 }
+
+export async function revealTeamMatchPin(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/team-portal/matches/${matchId}/pin/reveal`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo mostrar el PIN");
+}
+
+export async function regenerateTeamMatchPin(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/team-portal/matches/${matchId}/pin/regenerate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo regenerar el PIN");
+}

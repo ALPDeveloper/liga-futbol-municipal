@@ -31,7 +31,6 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(APP_SHELL_CACHE)
       .then((cache) => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -43,7 +42,6 @@ self.addEventListener("activate", (event) => {
           .filter((key) => ![APP_SHELL_CACHE, RUNTIME_CACHE].includes(key))
           .map((key) => caches.delete(key))
       ))
-      .then(() => self.clients.claim())
   );
 });
 

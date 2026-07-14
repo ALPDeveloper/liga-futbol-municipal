@@ -33,6 +33,7 @@ import {
   generateSchedule,
   generatePlayoffBracket,
   mergeDuplicatePlayer,
+  resolveMatchEventDiscipline,
   saveIdentity,
   saveMatchSheet,
   saveResult,
@@ -51,7 +52,7 @@ import {
 } from "../lib/actions.js";
 import { createUser } from "../lib/userApi.js";
 import { deleteLeagueFromApi } from "../lib/leagueApi.js";
-import { createMatchInApi, deleteMatchInApi, saveMatchResultInApi, updateMatchInApi } from "../lib/matchApi.js";
+import { createMatchInApi, deleteMatchInApi, resolveMatchDisciplineInApi, saveMatchResultInApi, updateMatchInApi } from "../lib/matchApi.js";
 import { createPlayerInApi, deletePlayerInApi, updatePlayerInApi } from "../lib/playerApi.js";
 import { updateLeagueRulesInApi } from "../lib/rulesApi.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../lib/playerValidation.js";
@@ -278,6 +279,22 @@ export function AdminRoute({
     }
   }
 
+  async function resolveMatchDisciplineFromPanel(payload) {
+    if (!authToken) {
+      commit(resolveMatchEventDiscipline(store, league.id, payload));
+      return true;
+    }
+    try {
+      const apiStore = await resolveMatchDisciplineInApi(authToken, league.id, payload.matchId, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (disciplineError) {
+      window.alert(disciplineError.message || "No se pudo resolver la sancion.");
+      return false;
+    }
+  }
+
   return (
     <AdminView
       adminPanel={adminPanel}
@@ -328,6 +345,7 @@ export function AdminRoute({
       onSaveMatchSheet={(payload) => commit(saveMatchSheet(store, league.id, payload))}
       onSaveRules={saveRules}
       onSaveResult={saveResultFromPanel}
+      onResolveMatchDiscipline={resolveMatchDisciplineFromPanel}
       onSetAdminPanel={setAdminPanel}
       onToggleLeague={(leagueId) => commit(toggleLeagueStatus(store, leagueId))}
       onUpdateAnnouncement={(announcementId, payload) => commit(updateAnnouncement(store, league.id, announcementId, payload))}

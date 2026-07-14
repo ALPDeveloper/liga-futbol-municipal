@@ -2,6 +2,7 @@ node_modules/
 dist/
 /data/
 /backups/
+/deliverables/
 /uploads/
 /uploads-local-test*/
 .env

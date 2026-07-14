@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_IDENTITY } from "../data/seedData.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
+import { createBackup, downloadBackup, fetchBackups, verifyBackup } from "../lib/backupApi.js";
 import { MAX_IMAGE_DATA_URL_LENGTH, calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, scopeLeagueToCompetition } from "../lib/domain.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
 import { createUser, deleteUser, disableUser, fetchUsers, resendUserInvitation, updateUser } from "../lib/userApi.js";
 import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamDelegateInvitation, updateTeamDelegate, updateTeamRosterPermission } from "../lib/teamDelegateApi.js";
-import { createReferee, deleteReferee, fetchReferees, fetchRefereeMatchSheets, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
+import { createReferee, deleteReferee, fetchFinalizedMatchReports, fetchReferees, fetchRefereeMatchSheets, publishFinalizedMatchReport, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
 import { updateMatchSheetEventItem } from "../lib/matchSheet.js";
+import ligatecLogo from "../../assets/ligatec-logo.png";
 
 const PLAYOFF_PHASE_OPTIONS = [
   { value: "round32", label: "16vos de final", teams: 32 },
@@ -77,6 +79,7 @@ export function AdminView({
   onGenerateSchedule,
   onGeneratePlayoffBracket,
   onResetDemo,
+  onResolveMatchDiscipline,
   onSaveIdentity,
   onSaveMatchSheet,
   onSaveRules,
@@ -151,6 +154,7 @@ export function AdminView({
               onDeleteVenue={onDeleteVenue}
               onGenerateSchedule={onGenerateSchedule}
               onGeneratePlayoffBracket={onGeneratePlayoffBracket}
+              onResolveMatchDiscipline={onResolveMatchDiscipline}
               onSaveIdentity={onSaveIdentity}
               onSaveMatchSheet={onSaveMatchSheet}
               onSaveRules={onSaveRules}
@@ -221,6 +225,7 @@ function LeagueAdmin({
   onDeleteVenue,
   onGenerateSchedule,
   onGeneratePlayoffBracket,
+  onResolveMatchDiscipline,
   onSaveIdentity,
   onSaveMatchSheet,
   onSaveRules,
@@ -244,7 +249,7 @@ function LeagueAdmin({
   const activeRole = selectedAccess?.role || currentUser?.role;
   const accessPermissions = new Set(Array.isArray(selectedAccess?.permissions) ? selectedAccess.permissions : []);
   const hasFullLeagueAccess = ["super_admin", "league_admin"].includes(activeRole);
-  const limitedSectionIds = new Set(["capture", "lists", "delegates", "referees", "rules"]);
+  const limitedSectionIds = new Set(["capture", "lists", "delegates", "referees", "rules", "sheet", "sanctions"]);
   const canUseSection = (requiredPermissions = []) => (
     hasFullLeagueAccess ||
     (activeRole === "admin_limited" &&
@@ -255,11 +260,11 @@ function LeagueAdmin({
     { id: "tournaments", label: "Torneos", permissions: ["settings"] },
     { id: "squads", label: "Plantillas", permissions: ["players", "teams", "read_only"] },
     { id: "delegates", label: "Delegados", permissions: ["delegates"] },
-    { id: "referees", label: "Arbitros", permissions: ["referees", "match_sheets"] },
+    { id: "referees", label: "Arbitros", permissions: ["referees"] },
     { id: "venues", label: "Canchas", permissions: ["settings", "calendar"] },
     { id: "announcements", label: "Avisos", permissions: ["settings"] },
     { id: "lists", label: "Listados", permissions: ["matches", "teams", "players", "read_only"] },
-    { id: "sheet", label: "Acta", permissions: ["match_sheets"] },
+    { id: "sheet", label: "Actas", permissions: ["match_sheets"] },
     { id: "affiliations", label: "Afiliaciones", permissions: ["players", "teams"] },
     { id: "discipline", label: "Disciplina", permissions: ["discipline"] },
     { id: "sanctions", label: "Sanciones", permissions: ["discipline"] },
@@ -425,6 +430,7 @@ function LeagueAdmin({
           league={league}
           onAddPlayerSanction={onAddPlayerSanction}
           onDeletePlayerSanction={onDeletePlayerSanction}
+          onResolveMatchDiscipline={onResolveMatchDiscipline}
         />
       )}
 
@@ -493,8 +499,8 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
       <SectionHeading eyebrow="Temporadas" title="Torneos de la liga" />
       {tournamentNotice && <p className="auth-ok">{tournamentNotice}</p>}
       <p className="helper-text">Cada torneo/categoria tiene sus propios equipos, jugadores, calendario, tabla y actas. Usa nombres como LIGA PRIMERA, LIGA SEGUNDA, JUVENIL o FEMENIL.</p>
-      <p className="helper-text">Usa activo para torneos visibles. Archiva temporadas viejas para guardarlas sin saturar la portada publica. Inicio y fin son opcionales.</p>
-      <p className="helper-text">Torneos activos: {activeCompetitions.length}. Puedes registrar las categorias que necesite la liga.</p>
+      <p className="helper-text">Usa Publicado en portada para torneos activos visibles en el selector principal. Mueve torneos terminados a Historico archivado para conservar tabla, calendario, goleo y actas sin saturar la portada publica.</p>
+      <p className="helper-text">Torneos publicados: {activeCompetitions.length}. Puedes tener distintas temporadas activas al mismo tiempo, por ejemplo Primera Fuerza Apertura 2026 y Fut 7 Clausura 2026.</p>
       <form className="tournament-form" onSubmit={(event) => {
         event.preventDefault();
         if (!window.confirm("¿Confirmas crear este torneo/categoria?")) return;
@@ -514,17 +520,17 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
         <label>Fin<input name="endsAt" type="date" /></label>
         <label>Estado
           <select name="status" defaultValue="active">
-            <option value="active">Activo</option>
-            <option value="archived">Archivado</option>
+            <option value="active">Publicado en portada</option>
+            <option value="archived">Historico archivado</option>
           </select>
         </label>
         <button className="primary" type="submit">Crear torneo</button>
       </form>
 
-      <TournamentList title="Torneos activos" competitions={activeCompetitions} league={league} onUpdateCompetition={updateCompetitionWithNotice} />
+      <TournamentList title="Torneos publicados en portada" competitions={activeCompetitions} league={league} onUpdateCompetition={updateCompetitionWithNotice} />
       {!!archivedCompetitions.length && (
         <details className="archive-box">
-          <summary>Historial archivado ({archivedCompetitions.length})</summary>
+          <summary>Historico archivado ({archivedCompetitions.length})</summary>
           <TournamentList title="" competitions={archivedCompetitions} league={league} onUpdateCompetition={updateCompetitionWithNotice} />
         </details>
       )}
@@ -1053,24 +1059,38 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   const [busyAction, setBusyAction] = useState("");
   const [lastInvitation, setLastInvitation] = useState(null);
   const [pendingSheets, setPendingSheets] = useState([]);
+  const [finalizedReports, setFinalizedReports] = useState([]);
   const [refereeSearch, setRefereeSearch] = useState("");
   const [refereeStatusFilter, setRefereeStatusFilter] = useState("all");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(getDefaultCompetitionId(league));
   const [matchSearch, setMatchSearch] = useState("");
   const [matchStatusFilter, setMatchStatusFilter] = useState("scheduled");
   const [assignmentCoverageFilter, setAssignmentCoverageFilter] = useState("missing_central");
+  const [selectedRoundFilter, setSelectedRoundFilter] = useState("next");
   const [assignmentFeedback, setAssignmentFeedback] = useState({});
   const [activeRefereeTask, setActiveRefereeTask] = useState("assign");
+  const [selectedAssignmentMatch, setSelectedAssignmentMatch] = useState(null);
+  const [showRefereeCreateSheet, setShowRefereeCreateSheet] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showRefereeHelp, setShowRefereeHelp] = useState(false);
   const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
   const selectedCompetition = getCompetition(league, selectedCompetitionId);
   const competitionLeague = useMemo(
     () => scopeLeagueToCompetition(league, selectedCompetitionId || getDefaultCompetitionId(league)),
     [league, selectedCompetitionId]
   );
+  const displayRound = useMemo(() => getCurrentDisplayRound(competitionLeague.matches), [competitionLeague.matches]);
+  const roundOptions = useMemo(() => (
+    [...new Set(competitionLeague.matches.map((match) => match.round).filter(Boolean))]
+      .sort((a, b) => Number(a) - Number(b))
+  ), [competitionLeague.matches]);
   const activeReferees = useMemo(
     () => referees.filter((referee) => referee.status === "active"),
     [referees]
   );
+  const pendingReferees = useMemo(() => referees.filter((referee) => referee.status === "pending_activation"), [referees]);
+  const inactiveReferees = useMemo(() => referees.filter((referee) => referee.status === "disabled"), [referees]);
+  const suspendedReferees = useMemo(() => referees.filter((referee) => referee.status === "suspended"), [referees]);
   const filteredReferees = useMemo(() => {
     const query = normalizeAdminSearchTerm(refereeSearch);
     return referees.filter((referee) => {
@@ -1085,17 +1105,22 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       .filter((match) => {
         if (matchStatusFilter === "scheduled" && match.status !== "scheduled") return false;
         if (matchStatusFilter === "finished" && match.status !== "finished" && match.status !== "walkover") return false;
+        if (selectedRoundFilter !== "all") {
+          const targetRound = selectedRoundFilter === "next" ? displayRound : Number(selectedRoundFilter);
+          if (targetRound && Number(match.round || 0) !== Number(targetRound)) return false;
+        }
         if (assignmentCoverageFilter === "missing_central" && match.centralRefereeUserId) return false;
         if (assignmentCoverageFilter === "incomplete" && isMatchRefereeAssignmentComplete(match)) return false;
+        if (assignmentCoverageFilter === "complete" && !isMatchRefereeAssignmentComplete(match)) return false;
         if (!query) return true;
         return normalizeAdminSearchTerm(`${getMatchAdminLabel(league, match)} ${match.venue || ""} ${match.date || ""}`).includes(query);
       })
       .sort((a, b) => (
-        Number(a.round || 0) - Number(b.round || 0) ||
         String(a.date || "").localeCompare(String(b.date || "")) ||
+        Number(a.round || 0) - Number(b.round || 0) ||
         String(a.time || "").localeCompare(String(b.time || ""))
       ));
-  }, [assignmentCoverageFilter, competitionLeague.matches, league, matchSearch, matchStatusFilter]);
+  }, [assignmentCoverageFilter, competitionLeague.matches, displayRound, league, matchSearch, matchStatusFilter, selectedRoundFilter]);
   const assignmentPendingCount = useMemo(
     () => competitionLeague.matches.filter((match) => match.status === "scheduled" && !match.centralRefereeUserId).length,
     [competitionLeague.matches]
@@ -1104,16 +1129,29 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     () => competitionLeague.matches.filter((match) => match.status === "scheduled" && !isMatchRefereeAssignmentComplete(match)).length,
     [competitionLeague.matches]
   );
-  const matchRounds = useMemo(() => {
+  const assignmentCompleteCount = useMemo(
+    () => competitionLeague.matches.filter((match) => match.status === "scheduled" && isMatchRefereeAssignmentComplete(match)).length,
+    [competitionLeague.matches]
+  );
+  const scheduledMatches = useMemo(
+    () => competitionLeague.matches.filter((match) => match.status === "scheduled"),
+    [competitionLeague.matches]
+  );
+  const nextScheduledMatch = useMemo(() => (
+    [...scheduledMatches].sort((a, b) => (
+      String(a.date || "").localeCompare(String(b.date || "")) ||
+      String(a.time || "").localeCompare(String(b.time || ""))
+    ))[0] || null
+  ), [scheduledMatches]);
+  const matchGroups = useMemo(() => {
     const groups = new Map();
     for (const match of filteredMatches) {
-      const key = (match.stage || "regular") === "playoff"
-        ? `playoff-${match.playoffRound || "liguilla"}`
-        : `round-${match.round || "sin-jornada"}`;
+      const key = match.date || `round-${match.round || "sin-fecha"}`;
       if (!groups.has(key)) {
         groups.set(key, {
           id: key,
-          title: (match.stage || "regular") === "playoff" ? (match.playoffRound || "Liguilla") : `Jornada ${match.round || "-"}`,
+          title: match.date ? String(formatDate(match.date)).toLocaleUpperCase("es-MX") : "FECHA POR DEFINIR",
+          subtitle: (match.stage || "regular") === "playoff" ? (match.playoffRound || "Liguilla") : `Jornada ${match.round || "-"}`,
           matches: []
         });
       }
@@ -1121,16 +1159,26 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     }
     return [...groups.values()];
   }, [filteredMatches]);
+  const activeFilterChips = [
+    selectedCompetition ? { id: "competition", label: selectedCompetition.name, clear: null } : null,
+    selectedRoundFilter !== "all" ? { id: "round", label: selectedRoundFilter === "next" ? `Jornada ${displayRound || "-"}` : `Jornada ${selectedRoundFilter}`, clear: () => setSelectedRoundFilter("all") } : null,
+    matchStatusFilter !== "all" ? { id: "status", label: matchStatusFilter === "scheduled" ? "Programados" : "Capturados", clear: () => setMatchStatusFilter("all") } : null,
+    assignmentCoverageFilter !== "all" ? { id: "coverage", label: getAssignmentCoverageLabel(assignmentCoverageFilter), clear: () => setAssignmentCoverageFilter("all") } : null,
+    matchSearch ? { id: "search", label: matchSearch, clear: () => setMatchSearch("") } : null
+  ].filter(Boolean);
+  const actaAttentionCount = pendingSheets.length + finalizedReports.length;
 
   async function reloadReferees() {
     setLoading(true);
     try {
-      const [nextReferees, nextSheets] = await Promise.all([
+      const [nextReferees, nextSheets, nextReports] = await Promise.all([
         fetchReferees(authToken, league.city),
-        fetchRefereeMatchSheets(authToken, { leagueId: league.id, status: "pending_review" })
+        fetchRefereeMatchSheets(authToken, { leagueId: league.id, status: "pending_review" }),
+        fetchFinalizedMatchReports(authToken, { leagueId: league.id, status: "finalized" })
       ]);
       setReferees(nextReferees);
       setPendingSheets(nextSheets);
+      setFinalizedReports(nextReports);
       setError("");
     } catch (loadError) {
       setError(loadError.message || "No se pudieron cargar los arbitros.");
@@ -1142,10 +1190,6 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   useEffect(() => {
     reloadReferees();
   }, [authToken, league.city]);
-
-  useEffect(() => {
-    if (pendingSheets.length) setActiveRefereeTask("review");
-  }, [pendingSheets.length]);
 
   useEffect(() => {
     const fallbackId = getDefaultCompetitionId(league);
@@ -1170,6 +1214,28 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     } catch (saveError) {
       setNotice("");
       setError(saveError.message || "No se pudo revisar el acta.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function publishFinalizedReport(report) {
+    const match = report.match || league.matches.find((item) => item.id === report.matchId);
+    const confirmed = window.confirm(
+      `¿Publicar esta acta finalizada como resultado oficial?\n\n${match?.homeTeamName || "LOCAL"} vs ${match?.awayTeamName || "VISITANTE"}\nMarcador: ${report.homeGoals ?? 0}-${report.awayGoals ?? 0}\n\nEsto actualizara la parte publica, tabla, goleo y disciplina.`
+    );
+    if (!confirmed) return;
+    const actionKey = `publish-report-${report.id}`;
+    setBusyAction(actionKey);
+    try {
+      const response = await publishFinalizedMatchReport(authToken, report.id);
+      setFinalizedReports(response.reports || []);
+      if (response.store) applyApiStore?.(response.store);
+      setNotice("Acta finalizada publicada como resultado oficial.");
+      setError("");
+    } catch (publishError) {
+      setNotice("");
+      setError(publishError.message || "No se pudo publicar el acta finalizada.");
     } finally {
       setBusyAction("");
     }
@@ -1264,6 +1330,19 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   async function saveMatchReferees(event, match) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
+    const submitter = event.nativeEvent?.submitter;
+    if (submitter?.value === "central-only") {
+      payload.assistantReferee1UserId = "";
+      payload.assistantReferee2UserId = "";
+      payload.fourthRefereeUserId = "";
+    }
+    if (submitter?.value === "clear") {
+      if (!window.confirm("¿Eliminar toda la designacion arbitral de este partido?")) return;
+      payload.centralRefereeUserId = "";
+      payload.assistantReferee1UserId = "";
+      payload.assistantReferee2UserId = "";
+      payload.fourthRefereeUserId = "";
+    }
     const selectedReferees = [
       payload.centralRefereeUserId,
       payload.assistantReferee1UserId,
@@ -1288,6 +1367,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       }));
       setNotice(successMessage);
       setError("");
+      setSelectedAssignmentMatch(null);
     } catch (saveError) {
       const errorMessage = saveError.message || "No se pudo guardar la designacion arbitral.";
       setAssignmentFeedback((current) => ({
@@ -1302,275 +1382,589 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   }
 
   return (
-    <section className="panel">
-      <SectionHeading eyebrow="Arbitraje" title="Arbitros e invitaciones" />
-      <p className="helper-text">
-        Crea arbitros por municipio, envia su enlace de activacion y asigna central o auxiliares a los partidos. El panel de arbitro vive separado en /arbitro.
-      </p>
-      <div className="module-guide">
-        <span>1. Crea o activa arbitro</span>
-        <span>2. Designa partidos pendientes</span>
-        <span>3. Revisa actas enviadas</span>
+    <section className="panel referee-ops-shell">
+      <div className="referee-ops-header">
+        <div>
+          <span className="eyebrow">Arbitraje</span>
+          <h2>Centro de Operaciones Arbitrales</h2>
+          <p>Gestiona arbitros, designaciones y actas de la liga.</p>
+        </div>
+        <button aria-label="Ayuda de arbitraje" type="button" onClick={() => setShowRefereeHelp((value) => !value)}>i</button>
       </div>
+      {showRefereeHelp && (
+        <div className="referee-help-box">
+          <strong>Operacion arbitral</strong>
+          <span>Programa designaciones, administra arbitros y da seguimiento a actas publicadas o casos legacy. Las actas finalizadas por el arbitro no requieren revision previa.</span>
+        </div>
+      )}
       {notice && <p className="auth-ok">{notice}</p>}
       {error && <p className="auth-error">{error}</p>}
 
       <div className="referee-command-center">
-        <button className={activeRefereeTask === "review" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("review")}>
-          <span>Paso 1</span>
-          <strong>Revisar actas</strong>
-          <small>{pendingSheets.length} pendiente(s)</small>
-        </button>
-        <button className={activeRefereeTask === "invite" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("invite")}>
-          <span>Paso 2</span>
-          <strong>Crear / invitar</strong>
-          <small>{referees.filter((referee) => referee.status === "pending_activation").length} por activar</small>
-        </button>
         <button className={activeRefereeTask === "assign" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("assign")}>
-          <span>Paso 3</span>
-          <strong>Designar partidos</strong>
+          <span>Programacion</span>
+          <strong>Partidos</strong>
           <small>{filteredMatches.length} partido(s)</small>
         </button>
         <button className={activeRefereeTask === "manage" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("manage")}>
-          <span>Control</span>
-          <strong>Administrar arbitros</strong>
+          <span>Arbitros</span>
+          <strong>Registrados</strong>
           <small>{activeReferees.length} activo(s)</small>
+        </button>
+        <button className={activeRefereeTask === "review" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("review")}>
+          <span>Actas</span>
+          <strong>Seguimiento</strong>
+          <small>{actaAttentionCount} por atender</small>
         </button>
       </div>
 
+      {activeRefereeTask === "assign" && (
+        <>
+          <div className="referee-operations-card">
+            <div className="referee-operations-head">
+              <div>
+                <span>Centro de operaciones</span>
+                <strong>{selectedCompetition?.name || "Torneo"} · Jornada {displayRound || "-"}</strong>
+              </div>
+              <button type="button" aria-label="Ver actas" onClick={() => setActiveRefereeTask("review")}>{actaAttentionCount}</button>
+            </div>
+            <div className="referee-progress-ring">
+              <strong>{assignmentCompleteCount}</strong>
+              <span>de {scheduledMatches.length || 0}</span>
+            </div>
+            <div className="referee-progress-copy">
+              <b>{assignmentCompleteCount} de {scheduledMatches.length || 0} designaciones completas.</b>
+              <div><span style={{ width: `${scheduledMatches.length ? Math.round((assignmentCompleteCount / scheduledMatches.length) * 100) : 0}%` }} /></div>
+              <small>{scheduledMatches.length ? Math.round((assignmentCompleteCount / scheduledMatches.length) * 100) : 0}% de cobertura</small>
+            </div>
+            <div className="referee-operations-next">
+              <span>Proximo partido</span>
+              <strong>{nextScheduledMatch ? getMatchAdminLabel(league, nextScheduledMatch) : "Sin partidos programados"}</strong>
+              {nextScheduledMatch && <small>{formatDate(nextScheduledMatch.date)} · {nextScheduledMatch.time || "Hora por definir"}</small>}
+            </div>
+          </div>
+
+          <div className="referee-metric-grid">
+            <ArbitrationMetricCard label="Arbitros activos" tone="ok" value={activeReferees.length} onClick={() => setActiveRefereeTask("manage")} />
+            <ArbitrationMetricCard label="Sin central" tone="warning" value={assignmentPendingCount} onClick={() => setAssignmentCoverageFilter("missing_central")} />
+            <ArbitrationMetricCard label="Incompletas" tone="amber" value={assignmentIncompleteCount} onClick={() => setAssignmentCoverageFilter("incomplete")} />
+            <ArbitrationMetricCard label="Actas pendientes" tone="info" value={actaAttentionCount} onClick={() => setActiveRefereeTask("review")} />
+          </div>
+
+          <div className="referee-quick-actions">
+            <button className="primary" type="button" onClick={() => setShowRefereeCreateSheet(true)}>+ Nuevo arbitro</button>
+            <button type="button" onClick={() => setActiveRefereeTask("manage")}>Arbitros</button>
+            <button type="button" onClick={() => setActiveRefereeTask("review")}>Actas</button>
+            <button type="button" onClick={() => {
+              setAssignmentCoverageFilter("all");
+              setMatchStatusFilter("all");
+              setSelectedRoundFilter("all");
+            }}>Programacion completa</button>
+          </div>
+
+          <div className="referee-filter-chips" aria-label="Filtros de programacion">
+            <select aria-label="Torneo o categoria" value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.target.value)}>
+              {competitions.map((competition) => (
+                <option key={competition.id} value={competition.id}>{competition.name}</option>
+              ))}
+            </select>
+            <select aria-label="Jornada" value={selectedRoundFilter} onChange={(event) => setSelectedRoundFilter(event.target.value)}>
+              <option value="next">Jornada {displayRound || "-"}</option>
+              <option value="all">Todas</option>
+              {roundOptions.map((round) => <option key={round} value={round}>Jornada {round}</option>)}
+            </select>
+            <select aria-label="Estado del partido" value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
+              <option value="scheduled">Programados</option>
+              <option value="finished">Capturados</option>
+              <option value="all">Todos</option>
+            </select>
+            <select aria-label="Estado de designacion" value={assignmentCoverageFilter} onChange={(event) => setAssignmentCoverageFilter(event.target.value)}>
+              <option value="missing_central">Sin central</option>
+              <option value="incomplete">Incompletos</option>
+              <option value="complete">Completos</option>
+              <option value="all">Todos</option>
+            </select>
+            <button type="button" onClick={() => setShowAdvancedFilters(true)}>Mas filtros</button>
+            <label className="referee-search-chip">
+              <span>Buscar</span>
+              <input type="search" value={matchSearch} onChange={(event) => setMatchSearch(event.target.value)} placeholder="Equipo o cancha" />
+            </label>
+          </div>
+
+          {!!activeFilterChips.length && (
+            <div className="referee-active-filters">
+              {activeFilterChips.map((chip) => (
+                <span key={chip.id}>
+                  {chip.label}
+                  {chip.clear && <button type="button" aria-label={`Quitar ${chip.label}`} onClick={chip.clear}>x</button>}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="referee-match-groups">
+            {loading ? (
+              <RefereeSkeletonList />
+            ) : matchGroups.map((group) => (
+              <section className="referee-day-group" key={group.id}>
+                <div className="referee-day-head">
+                  <strong>{group.title}</strong>
+                  <span>{group.subtitle}</span>
+                  <b>{group.matches.length}</b>
+                </div>
+                <div className="referee-match-list">
+                  {group.matches.map((match) => (
+                    <RefereeMatchOpsCard
+                      key={match.id}
+                      feedback={assignmentFeedback[match.id]}
+                      league={league}
+                      match={match}
+                      onOpen={() => setSelectedAssignmentMatch(match)}
+                      referees={referees}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+            {!loading && !competitionLeague.matches.length && (
+              <ArbitrationEmptyState
+                actionLabel="Ver todos los partidos"
+                description="Cuando se publique la jornada, los partidos apareceran aqui para realizar las designaciones."
+                onAction={() => setMatchStatusFilter("all")}
+                title="Aun no hay partidos programados"
+              />
+            )}
+            {!loading && competitionLeague.matches.length > 0 && !filteredMatches.length && (
+              <ArbitrationEmptyState
+                actionLabel="Limpiar filtros"
+                description="Prueba cambiando el torneo, la jornada o el estado de designacion."
+                onAction={() => {
+                  setMatchSearch("");
+                  setMatchStatusFilter("all");
+                  setAssignmentCoverageFilter("all");
+                  setSelectedRoundFilter("all");
+                }}
+                title="No encontramos partidos"
+              />
+            )}
+          </div>
+
+          {selectedAssignmentMatch && (
+            <RefereeAssignmentSheet
+              activeReferees={activeReferees}
+              busyAction={busyAction}
+              league={league}
+              match={selectedAssignmentMatch}
+              matches={competitionLeague.matches}
+              onClose={() => setSelectedAssignmentMatch(null)}
+              onSubmit={saveMatchReferees}
+              selectedCompetition={selectedCompetition}
+            />
+          )}
+        </>
+      )}
+
+      {activeRefereeTask === "manage" && (
+        <div className="referee-task-panel referee-tab-panel">
+          <div className="referee-tab-head">
+            <h3>Arbitros registrados</h3>
+            <button className="primary" type="button" onClick={() => setShowRefereeCreateSheet(true)}>+ Nuevo arbitro</button>
+          </div>
+          <div className="referee-metric-grid compact">
+            <ArbitrationMetricCard label="Activos" tone="ok" value={activeReferees.length} />
+            <ArbitrationMetricCard label="Pendientes" tone="warning" value={pendingReferees.length} />
+            <ArbitrationMetricCard label="Inactivos" tone="neutral" value={inactiveReferees.length} />
+            <ArbitrationMetricCard label="Suspendidos" tone="danger" value={suspendedReferees.length} />
+          </div>
+          <div className="referee-list-tools">
+            <input
+              aria-label="Buscar arbitro"
+              type="search"
+              value={refereeSearch}
+              onChange={(event) => setRefereeSearch(event.target.value)}
+              placeholder="Buscar arbitro..."
+            />
+            <select aria-label="Estado de arbitro" value={refereeStatusFilter} onChange={(event) => setRefereeStatusFilter(event.target.value)}>
+              <option value="all">Todos</option>
+              <option value="pending_activation">Pendientes</option>
+              <option value="active">Activos</option>
+              <option value="disabled">Inactivos</option>
+              <option value="suspended">Suspendidos</option>
+            </select>
+          </div>
+          <div className="referee-card-list">
+            {loading ? <RefereeSkeletonList /> : filteredReferees.map((referee) => (
+              <AdminRefereeCard
+                busyAction={busyAction}
+                key={referee.userId}
+                onDelete={deleteRefereeUser}
+                onInvite={regenerateRefereeInvitation}
+                onStatus={changeRefereeStatus}
+                referee={referee}
+              />
+            ))}
+            {!loading && !filteredReferees.length && (
+              <ArbitrationEmptyState
+                actionLabel="Limpiar filtros"
+                description="No hay arbitros con ese nombre o estado."
+                onAction={() => {
+                  setRefereeSearch("");
+                  setRefereeStatusFilter("all");
+                }}
+                title="No encontramos arbitros"
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       {activeRefereeTask === "review" && (
-        <div className="referee-task-panel">
-          <div className="referee-task-head">
-            <span>Primero atiende lo urgente</span>
-            <h3>Actas enviadas por arbitros</h3>
-            <p>Aprueba para aplicar marcador, goles y tarjetas al partido oficial. Rechaza si el arbitro debe corregir el acta.</p>
+        <div className="referee-task-panel referee-tab-panel">
+          <div className="referee-tab-head">
+            <div>
+              <span>Actas</span>
+              <h3>Seguimiento de actas</h3>
+              <p>Las actas finalizadas por arbitros se publican directamente. Aqui se atienden pendientes legacy, actas finalizadas no publicadas e incidencias.</p>
+            </div>
+          </div>
+          <div className="referee-metric-grid compact">
+            <ArbitrationMetricCard label="Pendientes" tone="warning" value={pendingSheets.length} />
+            <ArbitrationMetricCard label="Finalizadas" tone="info" value={finalizedReports.length} />
+            <ArbitrationMetricCard label="Publicadas" tone="ok" value={competitionLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover").length} />
+            <ArbitrationMetricCard label="Incidencia" tone="danger" value={0} />
           </div>
           <RefereeSheetReviewPanel
             busyAction={busyAction}
+            finalizedReports={finalizedReports}
             league={league}
+            onPublishReport={publishFinalizedReport}
             onReview={reviewSheet}
             sheets={pendingSheets}
           />
         </div>
       )}
 
-      {activeRefereeTask === "invite" && (
-        <div className="referee-task-panel">
-          <div className="referee-task-head">
-            <span>Alta de usuario</span>
-            <h3>Crear arbitro y generar invitacion</h3>
-            <p>Captura sus datos, LIGATEC genera el enlace de activacion y el mensaje listo para WhatsApp.</p>
-          </div>
-          <form className="delegate-create-form referee-create-card" onSubmit={submitReferee}>
-            <label>Municipio
-              <input name="municipality" value={league.city || ""} readOnly />
-            </label>
-            <label>Nombre del arbitro<input name="name" required placeholder="Nombre completo" /></label>
-            <label>Telefono<input name="phone" required inputMode="tel" placeholder="354..." /></label>
-            <label>Correo<input name="email" required type="email" placeholder="arbitro@correo.com" /></label>
-            <button className="primary" type="submit" disabled={busyAction === "create-referee"}>
-              {busyAction === "create-referee" ? "Creando invitacion..." : "Crear invitacion"}
-            </button>
-          </form>
-
-          {lastInvitation && (
-            <div className="delegate-invitation-box">
-              <strong>Mensaje listo para WhatsApp</strong>
-              <textarea readOnly value={lastInvitation.whatsappMessage || ""} />
-              <div className="inline-actions">
-                <button type="button" onClick={() => navigator.clipboard?.writeText(lastInvitation.whatsappMessage || "")}>Copiar mensaje</button>
-                <a href={`https://wa.me/?text=${encodeURIComponent(lastInvitation.whatsappMessage || "")}`} rel="noreferrer" target="_blank">Abrir WhatsApp</a>
-              </div>
-              <small>Expira: {lastInvitation.expiresAt ? new Date(lastInvitation.expiresAt).toLocaleString("es-MX") : "segun configuracion"}</small>
+      {showAdvancedFilters && (
+        <div className="referee-sheet-backdrop" role="presentation" onClick={() => setShowAdvancedFilters(false)}>
+          <div className="referee-bottom-sheet" role="dialog" aria-modal="true" aria-label="Filtros avanzados" onClick={(event) => event.stopPropagation()}>
+            <div className="referee-bottom-sheet-head">
+              <strong>Filtros avanzados</strong>
+              <button type="button" onClick={() => setShowAdvancedFilters(false)}>Cerrar</button>
             </div>
-          )}
-        </div>
-      )}
-
-      {activeRefereeTask === "manage" && (
-        <div className="referee-task-panel">
-          <div className="referee-task-head">
-            <span>Control de accesos</span>
-            <h3>Administrar arbitros registrados</h3>
-            <p>Busca al arbitro, regenera invitaciones o suspende acceso sin afectar partidos ya capturados.</p>
-          </div>
-          <div className="delegate-filter-bar referee-filter-bar referee-filter-bar-list">
-            <label>Buscar arbitro
-              <input
-                type="search"
-                value={refereeSearch}
-                onChange={(event) => setRefereeSearch(event.target.value)}
-                placeholder="Nombre, correo, telefono"
-              />
-            </label>
-            <label>Estado
-              <select value={refereeStatusFilter} onChange={(event) => setRefereeStatusFilter(event.target.value)}>
-                <option value="all">Todos</option>
-                <option value="pending_activation">Pendiente</option>
-                <option value="active">Activo</option>
-                <option value="disabled">Desactivado</option>
-                <option value="suspended">Suspendido</option>
-              </select>
-            </label>
-            <button type="button" onClick={() => {
-              setRefereeSearch("");
-              setRefereeStatusFilter("all");
-            }}>
-              Limpiar filtros
-            </button>
-          </div>
-          <div className="delegate-summary-strip">
-            <span><strong>{referees.length}</strong> arbitros</span>
-            <span><strong>{activeReferees.length}</strong> activos</span>
-            <span><strong>{referees.filter((referee) => referee.status === "pending_activation").length}</strong> pendientes</span>
-          </div>
-          <div className="delegate-list compact referee-compact-list">
-            {loading ? <p className="empty">Cargando arbitros...</p> : filteredReferees.map((referee) => {
-              const isActivating = busyAction === `active-${referee.userId}`;
-              const isDisabling = busyAction === `disabled-${referee.userId}`;
-              const isSuspending = busyAction === `suspended-${referee.userId}`;
-              const isInviting = busyAction === `invite-${referee.userId}`;
-              const isDeleting = busyAction === `delete-${referee.userId}`;
-              const isBusyReferee = isActivating || isDisabling || isSuspending || isInviting || isDeleting;
-              return (
-                <details className="delegate-card compact delegate-user-card referee-user-card" key={referee.userId}>
-                  <summary>
-                    <span>
-                      <strong>{referee.name}</strong>
-                      <small>{referee.municipality} | {getRefereeStatusLabel(referee.status)}</small>
-                    </span>
-                    <b>{referee.status === "active" ? "Activo" : "Sin acceso"}</b>
-                  </summary>
-                  <span>{referee.email}</span>
-                  {referee.phone && <span>{referee.phone}</span>}
-                  <div className="inline-actions delegate-action-grid">
-                    <button type="button" disabled={referee.status === "active" || referee.status === "pending_activation" || isBusyReferee} onClick={() => changeRefereeStatus(referee, "active")}>
-                      {isActivating ? "Activando..." : "Activar"}
-                    </button>
-                    <button type="button" disabled={isBusyReferee} onClick={() => regenerateRefereeInvitation(referee)}>
-                      {isInviting ? "Generando..." : referee.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
-                    </button>
-                    <button className="danger" type="button" disabled={referee.status === "disabled" || isBusyReferee} onClick={() => changeRefereeStatus(referee, "disabled")}>
-                      {isDisabling ? "Desactivando..." : "Desactivar"}
-                    </button>
-                    <button className="danger" type="button" disabled={referee.status === "suspended" || isBusyReferee} onClick={() => changeRefereeStatus(referee, "suspended")}>
-                      {isSuspending ? "Suspendiendo..." : "Suspender"}
-                    </button>
-                    <button className="danger ghost-danger" type="button" disabled={isBusyReferee} onClick={() => deleteRefereeUser(referee)}>
-                      {isDeleting ? "Eliminando..." : "Eliminar definitivo"}
-                    </button>
-                  </div>
-                </details>
-              );
-            })}
-            {!loading && !filteredReferees.length && <p className="empty">No hay arbitros que coincidan con los filtros.</p>}
+            <div className="referee-sheet-form-grid">
+              <label>Torneo
+                <select value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.target.value)}>
+                  {competitions.map((competition) => <option key={competition.id} value={competition.id}>{competition.name}</option>)}
+                </select>
+              </label>
+              <label>Jornada
+                <select value={selectedRoundFilter} onChange={(event) => setSelectedRoundFilter(event.target.value)}>
+                  <option value="next">Jornada {displayRound || "-"}</option>
+                  <option value="all">Todas</option>
+                  {roundOptions.map((round) => <option key={round} value={round}>Jornada {round}</option>)}
+                </select>
+              </label>
+              <label>Estado partido
+                <select value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
+                  <option value="scheduled">Programados</option>
+                  <option value="finished">Capturados</option>
+                  <option value="all">Todos</option>
+                </select>
+              </label>
+              <label>Designacion
+                <select value={assignmentCoverageFilter} onChange={(event) => setAssignmentCoverageFilter(event.target.value)}>
+                  <option value="missing_central">Sin central</option>
+                  <option value="incomplete">Incompletos</option>
+                  <option value="complete">Completos</option>
+                  <option value="all">Todos</option>
+                </select>
+              </label>
+              <label>Buscar
+                <input value={matchSearch} onChange={(event) => setMatchSearch(event.target.value)} placeholder="Equipo, cancha o fecha" />
+              </label>
+            </div>
+            <div className="referee-sheet-actions">
+              <button type="button" onClick={() => {
+                setMatchSearch("");
+                setMatchStatusFilter("scheduled");
+                setAssignmentCoverageFilter("missing_central");
+                setSelectedRoundFilter("next");
+              }}>Limpiar</button>
+              <button className="primary" type="button" onClick={() => setShowAdvancedFilters(false)}>Aplicar filtros</button>
+            </div>
           </div>
         </div>
       )}
 
-      {activeRefereeTask === "assign" && (
-        <div className="referee-task-panel">
-          <div className="referee-task-head">
-            <span>Programacion arbitral</span>
-            <h3>Designar arbitros por partido</h3>
-            <p>Por defecto solo veras partidos sin arbitro central. Cambia a incompletos si tambien quieres revisar auxiliares.</p>
-          </div>
-          <div className="delegate-filter-bar referee-filter-bar referee-filter-bar-matches">
-            <label>Torneo / categoria
-              <select value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.target.value)}>
-                {competitions.map((competition) => (
-                  <option key={competition.id} value={competition.id}>{competition.name}</option>
-                ))}
-              </select>
-            </label>
-            <label>Estado partido
-              <select value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
-                <option value="scheduled">Programados</option>
-                <option value="finished">Capturados</option>
-                <option value="all">Todos</option>
-              </select>
-            </label>
-            <label>Designacion
-              <select value={assignmentCoverageFilter} onChange={(event) => setAssignmentCoverageFilter(event.target.value)}>
-                <option value="missing_central">Sin central</option>
-                <option value="incomplete">Incompletos</option>
-                <option value="all">Todos</option>
-              </select>
-            </label>
-            <label>Buscar partido
-              <input
-                type="search"
-                value={matchSearch}
-                onChange={(event) => setMatchSearch(event.target.value)}
-                placeholder="Equipo, cancha o fecha"
-              />
-            </label>
-          </div>
-          <div className="delegate-summary-strip">
-            <span><strong>{activeReferees.length}</strong> arbitros activos</span>
-            <span><strong>{assignmentPendingCount}</strong> sin central</span>
-            <span><strong>{assignmentIncompleteCount}</strong> incompletos</span>
-            <span><strong>{matchRounds.length}</strong> grupos</span>
-          </div>
-          <div className="delegate-group-list referee-match-groups">
-            {matchRounds.map((group) => (
-              <details className="delegate-compact-group" key={group.id} open={Boolean(matchSearch) || matchStatusFilter !== "scheduled"}>
-                <summary>
-                  <strong>{group.title}</strong>
-                  <span>{group.matches.length} partido(s)</span>
-                </summary>
-                <div className="delegate-list compact">
-                  {group.matches.map((match) => {
-                    const feedback = assignmentFeedback[match.id];
-                    return (
-                      <form className="delegate-card compact referee-match-card" key={match.id} onSubmit={(event) => saveMatchReferees(event, match)}>
-                        <div className="delegate-card-head">
-                          <strong>{getMatchAdminLabel(league, match)}</strong>
-                          <small>{formatDate(match.date)} | {match.time || "POR DEFINIR"} | {match.venue || "CANCHA POR DEFINIR"}</small>
-                        </div>
-                        <div className="referee-assignment-form">
-                          <RefereeSelect label="Central" name="centralRefereeUserId" referees={activeReferees} defaultValue={match.centralRefereeUserId || ""} />
-                          <RefereeSelect label="Auxiliar 1" name="assistantReferee1UserId" referees={activeReferees} defaultValue={match.assistantReferee1UserId || ""} />
-                          <RefereeSelect label="Auxiliar 2" name="assistantReferee2UserId" referees={activeReferees} defaultValue={match.assistantReferee2UserId || ""} />
-                          <RefereeSelect label="Cuarto arbitro" name="fourthRefereeUserId" referees={activeReferees} defaultValue={match.fourthRefereeUserId || ""} />
-                        </div>
-                        <button className="primary" type="submit" disabled={busyAction === `match-referees-${match.id}`}>
-                          {busyAction === `match-referees-${match.id}` ? "Guardando..." : "Guardar designacion"}
-                        </button>
-                        {feedback?.message && (
-                          <p className={feedback.type === "error" ? "auth-error inline-feedback" : "auth-ok inline-feedback"}>
-                            {feedback.message}
-                          </p>
-                        )}
-                      </form>
-                    );
-                  })}
-                </div>
-              </details>
-            ))}
-            {!competitionLeague.matches.length && <p className="empty">Aun no hay partidos programados en esta categoria.</p>}
-            {competitionLeague.matches.length > 0 && !filteredMatches.length && <p className="empty">No hay partidos que coincidan con los filtros.</p>}
-          </div>
-        </div>
+      {showRefereeCreateSheet && (
+        <RefereeCreateSheet
+          busyAction={busyAction}
+          lastInvitation={lastInvitation}
+          league={league}
+          onClose={() => setShowRefereeCreateSheet(false)}
+          onSubmit={submitReferee}
+        />
       )}
     </section>
   );
 }
 
-function RefereeSelect({ defaultValue = "", label, name, referees }) {
+function ArbitrationMetricCard({ label, onClick, tone = "neutral", value }) {
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag className={`arbitration-metric-card tone-${tone}`} type={onClick ? "button" : undefined} onClick={onClick}>
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </Tag>
+  );
+}
+
+function ArbitrationEmptyState({ actionLabel, description, onAction, title }) {
+  return (
+    <div className="arbitration-empty-state">
+      <span aria-hidden="true">□</span>
+      <strong>{title}</strong>
+      <p>{description}</p>
+      {onAction && <button type="button" onClick={onAction}>{actionLabel}</button>}
+    </div>
+  );
+}
+
+function RefereeSkeletonList() {
+  return (
+    <div className="referee-skeleton-list" aria-label="Cargando">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
+function getAssignmentCoverageLabel(value) {
+  if (value === "missing_central") return "Sin central";
+  if (value === "incomplete") return "Incompletos";
+  if (value === "complete") return "Completos";
+  return "Todos";
+}
+
+function getRefereeInitials(name = "") {
+  const parts = String(name || "AR").trim().split(/\s+/).filter(Boolean);
+  return (parts[0]?.[0] || "A") + (parts[1]?.[0] || parts[0]?.[1] || "R");
+}
+
+function findReferee(referees, userId) {
+  return referees.find((referee) => referee.userId === userId) || null;
+}
+
+function getRefereeDisplayName(referees, userId) {
+  return findReferee(referees, userId)?.name || "Pendiente";
+}
+
+function getAssignmentState(match) {
+  if (!match.centralRefereeUserId) return { id: "missing", label: "Sin arbitro central", action: "Asignar arbitro" };
+  if (!isMatchRefereeAssignmentComplete(match)) return { id: "incomplete", label: "Designacion incompleta", action: "Completar" };
+  return { id: "complete", label: "Designacion completa", action: "Editar" };
+}
+
+function getMatchStatusLabel(status) {
+  if (status === "finished") return "Finalizado";
+  if (status === "walkover") return "Default";
+  if (status === "suspended") return "Suspendido";
+  return "Programado";
+}
+
+function isRefereeAssignedToMatch(match, refereeId) {
+  return [
+    match.centralRefereeUserId,
+    match.assistantReferee1UserId,
+    match.assistantReferee2UserId,
+    match.fourthRefereeUserId
+  ].includes(refereeId);
+}
+
+function hasRefereeTimeConflict(matches, targetMatch, refereeId) {
+  if (!refereeId || !targetMatch?.date || !targetMatch?.time) return false;
+  return (matches || []).some((match) => (
+    match.id !== targetMatch.id &&
+    match.date === targetMatch.date &&
+    match.time === targetMatch.time &&
+    isRefereeAssignedToMatch(match, refereeId)
+  ));
+}
+
+function countRefereeAssignmentsInRound(matches, targetMatch, refereeId) {
+  if (!refereeId) return 0;
+  return (matches || []).filter((match) => (
+    match.id !== targetMatch.id &&
+    Number(match.round || 0) === Number(targetMatch.round || 0) &&
+    isRefereeAssignedToMatch(match, refereeId)
+  )).length;
+}
+
+function RefereeMatchOpsCard({ feedback, league, match, onOpen, referees }) {
+  const homeTeam = getTeam(league, match.homeTeamId);
+  const awayTeam = getTeam(league, match.awayTeamId);
+  const assignment = getAssignmentState(match);
+  return (
+    <article className="referee-ops-match-card">
+      <div className="referee-match-timebox">
+        <span>{match.time || "--:--"}</span>
+        <small>{match.date ? formatDate(match.date) : "Sin fecha"}</small>
+      </div>
+      <div className="referee-match-core">
+        <span className="referee-venue-pill">{match.venue || "Cancha por definir"}</span>
+        <div className="referee-match-teams">
+          <strong>{homeTeam?.name || "LOCAL"}</strong>
+          <b>VS</b>
+          <strong>{awayTeam?.name || "VISITANTE"}</strong>
+        </div>
+        <div className="referee-assignment-lines">
+          <span>Central: <b>{getRefereeDisplayName(referees, match.centralRefereeUserId)}</b></span>
+          {match.assistantReferee1UserId && <span>Aux 1: <b>{getRefereeDisplayName(referees, match.assistantReferee1UserId)}</b></span>}
+          {match.assistantReferee2UserId && <span>Aux 2: <b>{getRefereeDisplayName(referees, match.assistantReferee2UserId)}</b></span>}
+          {match.fourthRefereeUserId && <span>Cuarto: <b>{getRefereeDisplayName(referees, match.fourthRefereeUserId)}</b></span>}
+        </div>
+        {feedback?.message && <p className={feedback.type === "error" ? "auth-error inline-feedback" : "auth-ok inline-feedback"}>{feedback.message}</p>}
+      </div>
+      <div className="referee-match-action">
+        <span className={`referee-status-badge ${assignment.id}`}>{assignment.label}</span>
+        <small>{getMatchStatusLabel(match.status)}</small>
+        <button type="button" onClick={onOpen}>{assignment.action}</button>
+      </div>
+    </article>
+  );
+}
+
+function RefereeAssignmentSheet({ activeReferees, busyAction, league, match, matches, onClose, onSubmit, selectedCompetition }) {
+  return (
+    <div className="referee-sheet-backdrop" role="presentation" onClick={onClose}>
+      <form className="referee-bottom-sheet referee-assignment-sheet" role="dialog" aria-modal="true" aria-label="Asignar equipo arbitral" onClick={(event) => event.stopPropagation()} onSubmit={(event) => onSubmit(event, match)}>
+        <div className="referee-bottom-sheet-head">
+          <div>
+            <span>Asignar equipo arbitral</span>
+            <strong>{getMatchAdminLabel(league, match)}</strong>
+          </div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </div>
+        <div className="referee-sheet-match-summary">
+          <span>{formatDate(match.date)} · {match.time || "Hora por definir"}</span>
+          <strong>{match.venue || "Cancha por definir"}</strong>
+          <small>{selectedCompetition?.name || "Torneo"} · Jornada {match.round || "-"}</small>
+        </div>
+        <div className="referee-sheet-form-grid">
+          <RefereeSelect label="Arbitro central" match={match} matches={matches} name="centralRefereeUserId" referees={activeReferees} defaultValue={match.centralRefereeUserId || ""} />
+          <RefereeSelect label="Auxiliar 1" match={match} matches={matches} name="assistantReferee1UserId" referees={activeReferees} defaultValue={match.assistantReferee1UserId || ""} />
+          <RefereeSelect label="Auxiliar 2" match={match} matches={matches} name="assistantReferee2UserId" referees={activeReferees} defaultValue={match.assistantReferee2UserId || ""} />
+          <RefereeSelect label="Cuarto arbitro" match={match} matches={matches} name="fourthRefereeUserId" referees={activeReferees} defaultValue={match.fourthRefereeUserId || ""} />
+        </div>
+        <div className="referee-sheet-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button type="submit" name="saveMode" value="central-only" disabled={busyAction === `match-referees-${match.id}`}>Guardar solo central</button>
+          {(match.centralRefereeUserId || match.assistantReferee1UserId || match.assistantReferee2UserId || match.fourthRefereeUserId) && (
+            <button className="danger ghost-danger" type="submit" name="saveMode" value="clear" disabled={busyAction === `match-referees-${match.id}`}>Eliminar designacion</button>
+          )}
+          <button className="primary" type="submit" disabled={busyAction === `match-referees-${match.id}`}>
+            {busyAction === `match-referees-${match.id}` ? "Guardando..." : "Guardar designacion"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function RefereeCreateSheet({ busyAction, lastInvitation, league, onClose, onSubmit }) {
+  return (
+    <div className="referee-sheet-backdrop" role="presentation" onClick={onClose}>
+      <div className="referee-bottom-sheet" role="dialog" aria-modal="true" aria-label="Nuevo arbitro" onClick={(event) => event.stopPropagation()}>
+        <div className="referee-bottom-sheet-head">
+          <strong>Nuevo arbitro</strong>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </div>
+        <form className="referee-sheet-form-grid" onSubmit={onSubmit}>
+          <label>Nombre completo<input name="name" required placeholder="Ej. Juan Perez Lopez" /></label>
+          <label>Correo electronico<input name="email" required type="email" placeholder="ejemplo@correo.com" /></label>
+          <label>Telefono<input name="phone" required inputMode="tel" placeholder="351 123 4567" /></label>
+          <label>Municipio<input name="municipality" value={league.city || ""} readOnly /></label>
+          <div className="referee-role-checks">
+            <span>Roles</span>
+            <label><input name="roles" type="checkbox" value="central" defaultChecked /> Central</label>
+            <label><input name="roles" type="checkbox" value="assistant" defaultChecked /> Auxiliar</label>
+            <label><input name="roles" type="checkbox" value="fourth" /> Cuarto arbitro</label>
+          </div>
+          <label className="wide-field">Observaciones<textarea name="notes" placeholder="Observaciones adicionales (opcional)" /></label>
+          <div className="referee-sheet-actions wide-field">
+            <button type="button" onClick={onClose}>Cancelar</button>
+            <button className="primary" type="submit" disabled={busyAction === "create-referee"}>
+              {busyAction === "create-referee" ? "Creando..." : "Crear e invitar"}
+            </button>
+          </div>
+        </form>
+        {lastInvitation && (
+          <div className="delegate-invitation-box">
+            <strong>Invitacion lista</strong>
+            <textarea readOnly value={lastInvitation.whatsappMessage || ""} />
+            <div className="inline-actions">
+              <button type="button" onClick={() => navigator.clipboard?.writeText(lastInvitation.whatsappMessage || "")}>Copiar mensaje</button>
+              <a href={`https://wa.me/?text=${encodeURIComponent(lastInvitation.whatsappMessage || "")}`} rel="noreferrer" target="_blank">Abrir WhatsApp</a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminRefereeCard({ busyAction, onDelete, onInvite, onStatus, referee }) {
+  const isActivating = busyAction === `active-${referee.userId}`;
+  const isDisabling = busyAction === `disabled-${referee.userId}`;
+  const isSuspending = busyAction === `suspended-${referee.userId}`;
+  const isInviting = busyAction === `invite-${referee.userId}`;
+  const isDeleting = busyAction === `delete-${referee.userId}`;
+  const isBusyReferee = isActivating || isDisabling || isSuspending || isInviting || isDeleting;
+  return (
+    <article className="admin-referee-card">
+      <span className="admin-referee-avatar">{getRefereeInitials(referee.name)}</span>
+      <div>
+        <strong>{referee.name}</strong>
+        <small>{referee.phone || referee.email} · {referee.municipality}</small>
+        <div className="admin-referee-tags">
+          <span>Central</span>
+          <span>Auxiliar</span>
+          <span>{referee.assignedMatches || 0} partidos</span>
+        </div>
+      </div>
+      <b className={`referee-access-badge ${referee.status}`}>{getRefereeStatusLabel(referee.status)}</b>
+      <div className="admin-referee-actions">
+        <button type="button" disabled={isBusyReferee} onClick={() => onInvite(referee)}>{isInviting ? "Generando..." : "Invitacion"}</button>
+        <button type="button" disabled={referee.status === "active" || referee.status === "pending_activation" || isBusyReferee} onClick={() => onStatus(referee, "active")}>{isActivating ? "Activando..." : "Activar"}</button>
+        <button type="button" disabled={referee.status === "disabled" || isBusyReferee} onClick={() => onStatus(referee, "disabled")}>{isDisabling ? "Desactivando..." : "Desactivar"}</button>
+        <button className="danger ghost-danger" type="button" disabled={referee.status === "suspended" || isBusyReferee} onClick={() => onStatus(referee, "suspended")}>{isSuspending ? "Suspendiendo..." : "Suspender"}</button>
+        <button className="danger ghost-danger" type="button" disabled={isBusyReferee} onClick={() => onDelete(referee)}>{isDeleting ? "Eliminando..." : "Eliminar"}</button>
+      </div>
+    </article>
+  );
+}
+
+function RefereeSelect({ defaultValue = "", label, match, matches = [], name, referees, required = false }) {
   return (
     <label>{label}
-      <select name={name} defaultValue={defaultValue}>
+      <select name={name} defaultValue={defaultValue} required={required}>
         <option value="">Sin asignar</option>
-        {referees.map((referee) => (
-          <option key={referee.userId} value={referee.userId}>{referee.name}</option>
-        ))}
+        {referees.map((referee) => {
+          const hasConflict = hasRefereeTimeConflict(matches, match, referee.userId) && referee.userId !== defaultValue;
+          const assignmentCount = countRefereeAssignmentsInRound(matches, match, referee.userId);
+          return (
+            <option disabled={hasConflict} key={referee.userId} value={referee.userId}>
+              {referee.name} · {hasConflict ? "Conflicto de horario" : assignmentCount ? `${assignmentCount} asignado(s) jornada` : "Disponible"}
+            </option>
+          );
+        })}
       </select>
     </label>
   );
 }
 
-function RefereeSheetReviewPanel({ busyAction, league, onReview, sheets }) {
+function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, onPublishReport, onReview, sheets }) {
   const [reviewNotes, setReviewNotes] = useState({});
 
   function updateReviewNote(sheetId, value) {
@@ -1581,14 +1975,65 @@ function RefereeSheetReviewPanel({ busyAction, league, onReview, sheets }) {
     <section className="referee-review-panel">
       <div className="referee-review-head">
         <div>
-          <span className="eyebrow">Revision de actas</span>
-          <h3>Actas arbitrales pendientes</h3>
+          <span className="eyebrow">Seguimiento de actas</span>
+          <h3>Actas por atender</h3>
         </div>
-        <strong>{sheets.length} pendiente(s)</strong>
+        <strong>{sheets.length + finalizedReports.length} pendiente(s)</strong>
       </div>
-      {!sheets.length ? (
-        <p className="empty">No hay actas arbitrales pendientes de revision.</p>
-      ) : (
+      {finalizedReports.length > 0 && (
+        <div className="referee-review-list">
+          {finalizedReports.map((report) => {
+            const match = report.match || league.matches.find((item) => item.id === report.matchId);
+            const homeTeam = getTeam(league, match?.homeTeamId);
+            const awayTeam = getTeam(league, match?.awayTeamId);
+            const payload = report.payload || {};
+            const events = payload.events || [];
+            const isPublishing = busyAction === `publish-report-${report.id}`;
+            const signatureCount = (report.signatures || []).length;
+            return (
+              <article className="referee-review-card referee-review-card--ready" key={report.id}>
+                <div>
+                  <strong>{match?.homeTeamName || homeTeam?.name || "LOCAL"} vs {match?.awayTeamName || awayTeam?.name || "VISITANTE"}</strong>
+                  <small>
+                    {match ? `Jornada ${match.round || "-"} | ${formatDate(match.date)} | ${match.venue || "CANCHA POR DEFINIR"}` : "Partido no encontrado"}
+                  </small>
+                  <small>{match?.competitionName || "Categoria"} | {report.captureMode === "live" ? `${signatureCount}/2 firmas digitales` : "Acta manual sin firmas digitales"}</small>
+                </div>
+                <div className="referee-review-summary">
+                  <span><strong>{report.homeGoals ?? payload.homeGoals ?? 0}-{report.awayGoals ?? payload.awayGoals ?? 0}</strong> marcador</span>
+                  <span>{events.filter((event) => event.type === "goal" || event.type === "own_goal").length} gol(es)</span>
+                  <span>{events.filter((event) => event.type === "yellow").length} amarilla(s)</span>
+                  <span>{events.filter((event) => event.type === "red").length} roja(s)</span>
+                </div>
+                {payload.observations && <p>{payload.observations}</p>}
+                <details className="referee-review-events">
+                  <summary>Ver eventos capturados ({events.length})</summary>
+                  <div>
+                    {events.map((event, index) => {
+                      const player = getPlayer(league, event.playerId);
+                      const team = getTeam(league, event.teamId);
+                      return (
+                        <span key={`${report.id}-${index}`}>
+                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {event.minute !== "" && event.minute !== undefined ? `| Min ${event.minute}` : ""}
+                        </span>
+                      );
+                    })}
+                    {!events.length && <span>Sin eventos capturados.</span>}
+                  </div>
+                </details>
+                <div className="inline-actions">
+                  <button className="primary" type="button" disabled={isPublishing} onClick={() => onPublishReport(report)}>
+                    {isPublishing ? "Publicando..." : "Publicar oficial"}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+      {!sheets.length && !finalizedReports.length ? (
+        <p className="empty">No hay actas pendientes por atender.</p>
+      ) : sheets.length > 0 ? (
         <div className="referee-review-list">
           {sheets.map((sheet) => {
             const match = league.matches.find((item) => item.id === sheet.matchId);
@@ -1650,7 +2095,7 @@ function RefereeSheetReviewPanel({ busyAction, league, onReview, sheets }) {
             );
           })}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -2083,13 +2528,13 @@ function TournamentList({ title, competitions, league, onUpdateCompetition }) {
           <label>Fin<input name="endsAt" defaultValue={competition.endsAt || ""} type="date" /></label>
           <label>Estado
             <select name="status" defaultValue={competition.status}>
-              <option value="active">Activo</option>
-              <option value="archived">Archivado</option>
+              <option value="active">Publicado en portada</option>
+              <option value="archived">Historico archivado</option>
             </select>
           </label>
           <label className="checkbox-field">
             <input name="makeCurrent" type="checkbox" defaultChecked={league.currentCompetitionId === competition.id} />
-            Actual
+            Principal si esta publicado
           </label>
           <button className="primary" type="submit">Guardar</button>
         </form>
@@ -3034,6 +3479,10 @@ function ManagementBoard({
                     )}
                     <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
                     <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
+                    {canEditMatchResults && <input name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} aria-label={`Tiempo extra local ${match.id}`} type="number" min="0" placeholder="TE local" />}
+                    {canEditMatchResults && <input name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} aria-label={`Tiempo extra visitante ${match.id}`} type="number" min="0" placeholder="TE visit." />}
+                    {canEditMatchResults && <input name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} aria-label={`Penales local ${match.id}`} type="number" min="0" placeholder="Pen local" />}
+                    {canEditMatchResults && <input name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} aria-label={`Penales visitante ${match.id}`} type="number" min="0" placeholder="Pen visit." />}
                     <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : match.status === "walkover" ? "Default" : "Programado"}</span>
                     <button className="primary" type="submit" disabled={!canEditMatchResults && match.status !== "scheduled"}>Guardar</button>
                     <button className="danger" type="button" disabled={!canEditMatchResults && match.status !== "scheduled"} onClick={() => confirmDelete("este partido de liguilla", () => onDeleteMatch(match.id), "Partido de liguilla eliminado correctamente.")}>Eliminar</button>
@@ -3100,6 +3549,10 @@ function ManagementBoard({
                           )}
                           <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
                           <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
+                          {canEditMatchResults && <input name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} aria-label={`Tiempo extra local ${match.id}`} type="number" min="0" placeholder="TE local" />}
+                          {canEditMatchResults && <input name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} aria-label={`Tiempo extra visitante ${match.id}`} type="number" min="0" placeholder="TE visit." />}
+                          {canEditMatchResults && <input name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} aria-label={`Penales local ${match.id}`} type="number" min="0" placeholder="Pen local" />}
+                          {canEditMatchResults && <input name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} aria-label={`Penales visitante ${match.id}`} type="number" min="0" placeholder="Pen visit." />}
                           <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : match.status === "walkover" ? "Default" : "Programado"}</span>
                           <button className="primary" type="submit" disabled={!canEditMatchResults && match.status !== "scheduled"}>Guardar</button>
                           <button className="danger" type="button" disabled={!canEditMatchResults && match.status !== "scheduled"} onClick={() => confirmDelete("este partido", () => onDeleteMatch(match.id), "Partido eliminado correctamente.")}>Eliminar</button>
@@ -3165,6 +3618,12 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   ), [matchStatusFilter, roundMatches]);
   const [homeGoals, setHomeGoals] = useState(0);
   const [awayGoals, setAwayGoals] = useState(0);
+  const [extraTimeEnabled, setExtraTimeEnabled] = useState(false);
+  const [penaltiesEnabled, setPenaltiesEnabled] = useState(false);
+  const [extraTimeHomeGoals, setExtraTimeHomeGoals] = useState("");
+  const [extraTimeAwayGoals, setExtraTimeAwayGoals] = useState("");
+  const [penaltyHomeGoals, setPenaltyHomeGoals] = useState("");
+  const [penaltyAwayGoals, setPenaltyAwayGoals] = useState("");
   const [observations, setObservations] = useState("");
   const [sheetMode, setSheetMode] = useState("played");
   const [defaultWinner, setDefaultWinner] = useState("home");
@@ -3204,6 +3663,12 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     if (!selectedMatch) {
       setHomeGoals(0);
       setAwayGoals(0);
+      setExtraTimeEnabled(false);
+      setPenaltiesEnabled(false);
+      setExtraTimeHomeGoals("");
+      setExtraTimeAwayGoals("");
+      setPenaltyHomeGoals("");
+      setPenaltyAwayGoals("");
       setObservations("");
       setSheetMode("played");
       setDefaultWinner("home");
@@ -3215,6 +3680,12 @@ function MatchSheet({ league, onSaveMatchSheet }) {
 
     setHomeGoals(selectedMatch.homeGoals ?? 0);
     setAwayGoals(selectedMatch.awayGoals ?? 0);
+    setExtraTimeEnabled(selectedMatch.extraTimeHomeGoals !== null && selectedMatch.extraTimeHomeGoals !== undefined && selectedMatch.extraTimeAwayGoals !== null && selectedMatch.extraTimeAwayGoals !== undefined);
+    setPenaltiesEnabled(selectedMatch.penaltyHomeGoals !== null && selectedMatch.penaltyHomeGoals !== undefined && selectedMatch.penaltyAwayGoals !== null && selectedMatch.penaltyAwayGoals !== undefined);
+    setExtraTimeHomeGoals(selectedMatch.extraTimeHomeGoals ?? "");
+    setExtraTimeAwayGoals(selectedMatch.extraTimeAwayGoals ?? "");
+    setPenaltyHomeGoals(selectedMatch.penaltyHomeGoals ?? "");
+    setPenaltyAwayGoals(selectedMatch.penaltyAwayGoals ?? "");
     setObservations(selectedMatch.observations || "");
     const isWalkover = selectedMatch.status === "walkover";
     const winner = Number(selectedMatch.homeGoals || 0) > Number(selectedMatch.awayGoals || 0) ? "home" : "away";
@@ -3230,8 +3701,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       lockedTeamId: event.teamId || getPlayer(league, event.playerId)?.teamId || selectedMatch.homeTeamId,
       playerId: event.playerId,
       minute: event.minute || "",
+      minuteLabel: event.minuteLabel || "",
       suspensionMatches: event.suspensionMatches || 1,
       suspensionIndefinite: Boolean(event.suspensionIndefinite),
+      disciplinaryPending: Boolean(event.disciplinaryPending),
       reason: event.reason || "",
       playerQuery: ""
     })));
@@ -3406,6 +3879,22 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     if (!Number.isInteger(expectedHomeGoals) || !Number.isInteger(expectedAwayGoals)) return "El marcador debe capturarse con numeros enteros.";
     if (expectedHomeGoals < 0 || expectedAwayGoals < 0) return "El marcador no puede tener goles negativos.";
     if (expectedHomeGoals > 50 || expectedAwayGoals > 50) return "Revisa el marcador; parece demasiado alto.";
+    if (!isDefaultSheet) {
+      const validateTiebreaker = (enabled, homeValue, awayValue, label) => {
+        if (!enabled) return "";
+        const homeScore = Number(homeValue);
+        const awayScore = Number(awayValue);
+        if (homeValue === "" || awayValue === "") return `Captura ambos marcadores de ${label}.`;
+        if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore) || homeScore < 0 || awayScore < 0 || homeScore > 99 || awayScore > 99) {
+          return `${label} debe tener numeros enteros entre 0 y 99.`;
+        }
+        return "";
+      };
+      const extraError = validateTiebreaker(extraTimeEnabled, extraTimeHomeGoals, extraTimeAwayGoals, "tiempo extra");
+      if (extraError) return extraError;
+      const penaltiesError = validateTiebreaker(penaltiesEnabled, penaltyHomeGoals, penaltyAwayGoals, "penales");
+      if (penaltiesError) return penaltiesError;
+    }
     if (isDefaultSheet) {
       const maxGoals = Math.max(expectedHomeGoals, expectedAwayGoals);
       const minGoals = Math.min(expectedHomeGoals, expectedAwayGoals);
@@ -3447,7 +3936,13 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     });
     if (eventWithWrongTeam) return "Hay eventos con jugador o equipo que no corresponde al partido.";
 
-    const invalidMinute = cleanEvents.find((item) => item.minute !== "" && (Number(item.minute) < 0 || Number(item.minute) > 130));
+    const invalidMinute = cleanEvents.find((item) => {
+      if (item.minute === "") return false;
+      const value = String(item.minute || "").trim();
+      const added = value.match(/^(\d{1,3})\s*\+\s*(\d{1,2})$/);
+      const minute = added ? Number(added[1]) + Number(added[2]) : Number(value);
+      return !Number.isFinite(minute) || minute < 0 || minute > 130;
+    });
     if (invalidMinute) return "Los minutos deben estar entre 0 y 130.";
 
     const redWithoutReason = cleanEvents.find((item) => item.type === "red" && !String(item.reason || "").trim());
@@ -3503,7 +3998,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
           </select>
         </label>
         <label>Minuto
-          <input value={eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} type="number" min="0" max="130" placeholder="Min" aria-label="Minuto" />
+          <input value={eventItem.minuteLabel || eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} type="text" placeholder="Min" aria-label="Minuto" />
         </label>
         {eventItem.type === "red" ? (
           <>
@@ -3574,9 +4069,13 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             matchId: selectedMatch.id,
             homeGoals,
             awayGoals,
+            extraTimeHomeGoals: !isDefaultSheet && extraTimeEnabled ? extraTimeHomeGoals : "",
+            extraTimeAwayGoals: !isDefaultSheet && extraTimeEnabled ? extraTimeAwayGoals : "",
+            penaltyHomeGoals: !isDefaultSheet && penaltiesEnabled ? penaltyHomeGoals : "",
+            penaltyAwayGoals: !isDefaultSheet && penaltiesEnabled ? penaltyAwayGoals : "",
             observations,
             status: isDefaultSheet ? "walkover" : "finished",
-            resolutionType: isDefaultSheet ? "no_show" : "normal",
+            resolutionType: isDefaultSheet ? "no_show" : penaltiesEnabled ? "penalties" : extraTimeEnabled ? "extra_time" : "normal",
             resolutionNote: isDefaultSheet
               ? `Default administrativo ${Math.max(expectedHomeGoals, expectedAwayGoals)}-0. Eventos capturados solo para estadisticas individuales.`
               : "",
@@ -3687,6 +4186,45 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             : "Usa partido jugado cuando el marcador requiere goles, tarjetas y eventos normales."}
         </p>
       </div>
+
+      {sheetMode === "played" && (
+        <details className="sheet-advanced-panel">
+          <summary>
+            <strong>Opciones de liguilla</strong>
+            <span>Tiempo extra y penales solo cuando el partido lo requiera</span>
+          </summary>
+          <div className="sheet-advanced-grid">
+            <label className="event-toggle-field">
+              <input checked={extraTimeEnabled} onChange={(event) => setExtraTimeEnabled(event.target.checked)} type="checkbox" />
+              Registrar tiempo extra
+            </label>
+            {extraTimeEnabled && (
+              <>
+                <label>T.E. local
+                  <input min="0" type="number" value={extraTimeHomeGoals} onChange={(event) => setExtraTimeHomeGoals(event.target.value)} placeholder="0" />
+                </label>
+                <label>T.E. visitante
+                  <input min="0" type="number" value={extraTimeAwayGoals} onChange={(event) => setExtraTimeAwayGoals(event.target.value)} placeholder="0" />
+                </label>
+              </>
+            )}
+            <label className="event-toggle-field">
+              <input checked={penaltiesEnabled} onChange={(event) => setPenaltiesEnabled(event.target.checked)} type="checkbox" />
+              Registrar penales
+            </label>
+            {penaltiesEnabled && (
+              <>
+                <label>Penales local
+                  <input min="0" type="number" value={penaltyHomeGoals} onChange={(event) => setPenaltyHomeGoals(event.target.value)} placeholder="0" />
+                </label>
+                <label>Penales visitante
+                  <input min="0" type="number" value={penaltyAwayGoals} onChange={(event) => setPenaltyAwayGoals(event.target.value)} placeholder="0" />
+                </label>
+              </>
+            )}
+          </div>
+        </details>
+      )}
 
       <label className="sheet-observations">
         Observaciones del acta
@@ -4095,11 +4633,40 @@ function getRefereeStatusLabel(status) {
   return getDelegateStatusLabel(status);
 }
 
-function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction }) {
+function getPendingDisciplinaryReviews(league) {
+  return (league.matches || []).flatMap((match) => (
+    (match.events || [])
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.type === "red" && (event.disciplinaryPending || event.suspensionIndefinite))
+      .map(({ event, index }) => {
+        const player = getPlayer(league, event.playerId);
+        const team = player ? getTeam(league, player.teamId) : null;
+        const hasResolution = (league.sanctions || []).some((sanction) => (
+          sanction.playerId === event.playerId &&
+          normalizeAdminSearchTerm(sanction.notes || "").includes(normalizeAdminSearchTerm(match.id))
+        ));
+        return {
+          id: `${match.id}-${event.playerId}-${index}`,
+          match,
+          event,
+          eventIndex: index,
+          player,
+          team,
+          resolved: hasResolution
+        };
+      })
+  )).filter((item) => item.player && !item.resolved);
+}
+
+function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, onResolveMatchDiscipline }) {
   const activeLeague = scopeLeagueToCompetition(league, getDefaultCompetitionId(league));
   const sanctions = activeLeague.sanctions || [];
+  const activeSanctions = sanctions.filter((sanction) => sanction.status !== "cleared" && sanction.status !== "revoked");
+  const clearedSanctions = sanctions.filter((sanction) => sanction.status === "cleared");
+  const pendingReviews = getPendingDisciplinaryReviews(activeLeague);
   const [sanctionNotice, setSanctionNotice] = useState("");
   const [sanctionIndefinite, setSanctionIndefinite] = useState(false);
+  const [pendingResolutionType, setPendingResolutionType] = useState({});
 
   function submitSanction(event) {
     event.preventDefault();
@@ -4108,6 +4675,33 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction })
     setSanctionNotice("Sancion agregada correctamente.");
     event.currentTarget.reset();
     setSanctionIndefinite(false);
+  }
+
+  async function submitPendingSanction(event, item) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const resolutionType = pendingResolutionType[item.id] || "matches";
+    if (!onResolveMatchDiscipline) {
+      setSanctionNotice("No hay accion configurada para resolver expulsiones desde el acta.");
+      return;
+    }
+    if (!window.confirm(`¿Confirmas dictamen disciplinario para ${item.player?.name || "este jugador"}?`)) return;
+    const resolved = await onResolveMatchDiscipline({
+      competitionId: item.match.competitionId || getDefaultCompetitionId(league),
+      matchId: item.match.id,
+      eventIndex: item.eventIndex,
+      playerId: item.player.id,
+      resolutionType,
+      type: "Expulsion",
+      date: item.match.date || new Date().toISOString().slice(0, 10),
+      matches: resolutionType === "matches" ? form.elements.matches.value : 0,
+      reason: item.event.reason || "Tarjeta roja",
+      notes: form.elements.notes.value || ""
+    });
+    if (!resolved) return;
+    setSanctionNotice(resolutionType === "release"
+      ? "Jugador liberado por comision disciplinaria."
+      : "Dictamen disciplinario agregado correctamente.");
   }
 
   return (
@@ -4171,7 +4765,49 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction })
       </form>
 
       <div className="sanction-list">
-        {sanctions.map((sanction) => {
+        <h3>Rojas pendientes de comision</h3>
+        {pendingReviews.map((item) => {
+          const resolutionType = pendingResolutionType[item.id] || "matches";
+          return (
+            <article className="sanction-card pending-review" key={item.id}>
+              <div>
+                <strong>{item.player?.name || "Jugador"}</strong>
+                <span>{item.team?.name || "Sin equipo"} | Jornada {item.match.round || "-"} | {formatDate(item.match.date)}</span>
+              </div>
+              <div>
+                <small>Motivo arbitral</small>
+                <span>{item.event.reason || "Tarjeta roja"}</span>
+              </div>
+              <form className="pending-sanction-form" onSubmit={(event) => submitPendingSanction(event, item)}>
+                <label>Dictamen
+                  <select
+                    value={resolutionType}
+                    onChange={(event) => setPendingResolutionType((current) => ({ ...current, [item.id]: event.target.value }))}
+                  >
+                    <option value="matches">Sancionar por partidos</option>
+                    <option value="indefinite">Mantener indefinido</option>
+                    <option value="release">Liberar jugador</option>
+                  </select>
+                </label>
+                <label>Partidos
+                  <input disabled={resolutionType !== "matches"} min="1" max="99" name="matches" required={resolutionType === "matches"} type="number" defaultValue="1" />
+                </label>
+                <label className="wide-field">Notas de comision
+                  <input name="notes" placeholder="Ej. Se reduce a 2 partidos despues de revision" />
+                </label>
+                <button className="primary" type="submit">
+                  {resolutionType === "release" ? "Liberar" : "Guardar dictamen"}
+                </button>
+              </form>
+            </article>
+          );
+        })}
+        {!pendingReviews.length && <p className="empty">No hay expulsiones pendientes o indefinidas por dictaminar.</p>}
+      </div>
+
+      <div className="sanction-list">
+        <h3>Sanciones activas</h3>
+        {activeSanctions.map((sanction) => {
           const player = getPlayer(activeLeague, sanction.playerId);
           const team = player ? getTeam(activeLeague, player.teamId) : null;
           const competition = getCompetition(league, sanction.competitionId);
@@ -4205,8 +4841,32 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction })
             </article>
           );
         })}
-        {!sanctions.length && <p className="empty">Aun no hay sanciones extraordinarias.</p>}
+        {!activeSanctions.length && <p className="empty">Aun no hay sanciones extraordinarias activas.</p>}
       </div>
+
+      {!!clearedSanctions.length && (
+        <div className="sanction-list">
+          <h3>Liberados por comision</h3>
+          {clearedSanctions.map((sanction) => {
+            const player = getPlayer(activeLeague, sanction.playerId);
+            const team = player ? getTeam(activeLeague, player.teamId) : null;
+            const competition = getCompetition(league, sanction.competitionId);
+            return (
+              <article className="sanction-card" key={sanction.id}>
+                <div>
+                  <strong>{player?.name || "Jugador eliminado"}</strong>
+                  <span>{team?.name || "Sin equipo"} | {competition?.name || "Torneo"} | Resolucion sin castigo</span>
+                </div>
+                <div>
+                  <small>Motivo</small>
+                  <span>{sanction.reason}</span>
+                </div>
+                <time dateTime={sanction.date}>{sanction.date ? formatDate(sanction.date) : "Sin fecha"}</time>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
@@ -4385,130 +5045,849 @@ function SuperAdmin({
   userListRefreshKey
 }) {
   const [membershipNotice, setMembershipNotice] = useState("");
+  const [activeModule, setActiveModule] = useState("dashboard");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [createLeagueOpen, setCreateLeagueOpen] = useState(false);
+  const [leagueQuery, setLeagueQuery] = useState("");
+  const [leagueStatusFilter, setLeagueStatusFilter] = useState("all");
+  const leagues = store?.leagues || [];
+  const stats = useMemo(() => getSuperAdminStats(leagues), [leagues]);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const activeModuleInfo = SUPER_ADMIN_MODULES.find((module) => module.id === activeModule) || SUPER_ADMIN_MODULES[0];
 
-  return (
-    <>
-      <section className="panel">
-        <SectionHeading eyebrow="Nosotros" title="Control de ligas" />
-        {membershipNotice && <p className="auth-ok">{membershipNotice}</p>}
-        <form
-          className="league-create-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!window.confirm("¿Confirmas crear esta liga?")) return;
-            onAddLeague(getFormPayload(event.currentTarget));
-            setMembershipNotice("Liga creada correctamente.");
-            event.currentTarget.reset();
-          }}
-        >
-          <label>Liga<input name="name" required placeholder="Nombre de la nueva liga" /></label>
-          <label>Municipio<input name="city" required placeholder="Municipio o zona" /></label>
-          <label>Admin asignado<input name="adminName" placeholder="Nombre del administrador" /></label>
-          <label>Correo admin<input name="adminEmail" type="email" placeholder="correo del admin para enviar invitacion" /></label>
-          <button className="primary" type="submit">Agregar liga</button>
-          <button
-            type="button"
-            onClick={() => {
-              if (!window.confirm("¿Restaurar los datos demo? Esta accion reemplaza la informacion de demostracion.")) return;
-              onResetDemo();
-              setMembershipNotice("Demo restaurada correctamente.");
-            }}
-          >
-            Restaurar demo
-          </button>
-        </form>
-      </section>
+  function switchModule(moduleId) {
+    setActiveModule(moduleId);
+    setDrawerOpen(false);
+  }
 
-      <section className="panel">
-        <SectionHeading eyebrow="Plataforma" title="Control de ligas" />
-        <p className="helper-text">
-          Aqui se controla el estado de cada liga, URL publica, contacto administrativo y notas internas. Todo queda sin limites comerciales de equipos, torneos o jugadores.
-        </p>
-        <div className="membership-list">
-          {store.leagues.map((league) => (
-            <form
-              className="membership-card"
-              key={league.id}
-              onSubmit={(event) => {
-                event.preventDefault();
-                const payload = getFormPayload(event.currentTarget);
-                if (payload.status !== league.status) {
-                  const action = payload.status === "suspended" ? "suspender" : "reactivar";
-                  const confirmed = window.confirm(`¿Seguro que quieres ${action} ${league.name}?`);
-                  if (!confirmed) return;
-                }
-                onUpdateLeagueMembership(league.id, payload);
-                setMembershipNotice(`Datos de ${league.name} guardados correctamente.`);
-              }}
-            >
-              <div className="membership-title">
-                <strong>{league.name}</strong>
-                <span>{league.city}</span>
-              </div>
-              <label className="wide-field">URL publica
-                <input readOnly type="url" value={`${origin}/liga/${league.id}`} onFocus={(event) => event.currentTarget.select()} />
-              </label>
-              <input type="hidden" name="plan" value={league.plan || ""} />
-              <label>Estado
-                <select name="status" defaultValue={league.status}>
-                  <option value="active">Activa</option>
-                  <option value="suspended">Suspendida</option>
-                </select>
-              </label>
-              <input type="hidden" name="renewalDate" value={league.renewalDate || ""} />
-              <label>Admin asignado<input name="ownerEmail" type="email" defaultValue={league.ownerEmail || ""} /></label>
-              <label className="wide-field">Notas
-                <textarea name="membershipNotes" defaultValue={league.membershipNotes || ""} placeholder="Contacto, acuerdos internos, observaciones de operacion, etc." />
-              </label>
-              <div className="membership-actions">
-                <span className={`status ${league.status}`}>{league.status === "active" ? "Activa" : "Suspendida"}</span>
-                <button className="primary" type="submit">Guardar cambios</button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextAction = league.status === "active" ? "suspender" : "reactivar";
-                    const confirmed = window.confirm(`¿Seguro que quieres ${nextAction} ${league.name}?`);
-                    if (!confirmed) return;
-                    onToggleLeague(league.id);
-                    setMembershipNotice(`${league.name} ${league.status === "active" ? "suspendida" : "reactivada"} correctamente.`);
-                  }}
-                >
-                  {league.status === "active" ? "Suspender" : "Reactivar"}
-                </button>
-                <button
-                  className="danger"
-                  type="button"
-                  onClick={async () => {
-                    const confirmation = window.prompt(
-                      `Eliminar ${league.name} borrara torneos, equipos, jugadores, partidos, sanciones, identidad, avisos y usuarios administradores de esa liga.\n\nEscribe ELIMINAR para confirmar.`
-                    );
-                    if (confirmation !== "ELIMINAR") {
-                      window.alert("Eliminacion cancelada.");
-                      return;
-                    }
-                    await onDeleteLeague(league.id);
-                  }}
-                >
-                  Eliminar
-                </button>
-              </div>
-            </form>
-          ))}
-        </div>
-      </section>
+  function submitLeagueCreate(event) {
+    event.preventDefault();
+    if (!window.confirm("¿Confirmas crear esta liga?")) return;
+    onAddLeague(getFormPayload(event.currentTarget));
+    setMembershipNotice("Liga creada correctamente.");
+    event.currentTarget.reset();
+    setCreateLeagueOpen(false);
+  }
 
+  const moduleContent = {
+    dashboard: (
+      <SuperAdminDashboard
+        leagues={leagues}
+        stats={stats}
+        onOpenCreateLeague={() => setCreateLeagueOpen(true)}
+        onOpenLeagues={() => setActiveModule("leagues")}
+        onOpenUsers={() => setActiveModule("users")}
+      />
+    ),
+    platform: <SuperAdminPlatformPanel stats={stats} />,
+    leagues: (
+      <SuperAdminLeagueList
+        leagueQuery={leagueQuery}
+        leagueStatusFilter={leagueStatusFilter}
+        leagues={leagues}
+        membershipNotice={membershipNotice}
+        onCreateLeague={() => setCreateLeagueOpen(true)}
+        onDeleteLeague={onDeleteLeague}
+        onSetLeagueQuery={setLeagueQuery}
+        onSetLeagueStatusFilter={setLeagueStatusFilter}
+        onSetNotice={setMembershipNotice}
+        onToggleLeague={onToggleLeague}
+        onUpdateLeagueMembership={onUpdateLeagueMembership}
+        origin={origin}
+      />
+    ),
+    users: <UserManagement authToken={authToken} currentUser={currentUser} leagues={leagues} refreshKey={userListRefreshKey} />,
+    tournaments: <SuperAdminTournamentsPanel leagues={leagues} />,
+    advertising: (
       <SponsorManagement
         authToken={authToken}
-        leagues={store.leagues}
+        leagues={leagues}
         onAddSponsor={onAddSponsor}
         onDeleteSponsor={onDeleteSponsor}
         onUpdateSponsor={onUpdateSponsor}
       />
+    ),
+    audit: <AuditPanel authToken={authToken} leagues={leagues} />,
+    backups: <SuperAdminBackupsPanel authToken={authToken} stats={stats} />,
+    settings: (
+      <SuperAdminSettingsPanel
+        onResetDemo={() => {
+          if (!window.confirm("¿Restaurar los datos demo? Esta accion reemplaza la informacion de demostracion.")) return;
+          onResetDemo();
+          setMembershipNotice("Demo restaurada correctamente.");
+        }}
+      />
+    )
+  };
 
-      <UserManagement authToken={authToken} currentUser={currentUser} leagues={store.leagues} refreshKey={userListRefreshKey} />
-      <AuditPanel authToken={authToken} leagues={store.leagues} />
-    </>
+  return (
+    <div className="super-admin-v2">
+      {drawerOpen && (
+        <button className="super-admin-drawer-backdrop" type="button" aria-label="Cerrar menu" onClick={() => setDrawerOpen(false)} />
+      )}
+      <aside className={`super-admin-sidebar ${drawerOpen ? "open" : ""}`}>
+        <SuperAdminNav
+          activeModule={activeModule}
+          currentUser={currentUser}
+          onSelect={switchModule}
+        />
+      </aside>
+
+      <main className="super-admin-main">
+        <header className="super-admin-topbar">
+          <button className="super-admin-menu-button" type="button" aria-label="Abrir menu" onClick={() => setDrawerOpen(true)}>☰</button>
+          <div className="super-admin-title-block">
+            <span>Panel Super Admin</span>
+            <h1>{activeModuleInfo.label}</h1>
+            <small>Control general de LIGATEC</small>
+          </div>
+          <div className="super-admin-platform-pill">
+            <span />
+            Plataforma estable
+          </div>
+        </header>
+
+        {moduleContent[activeModule] || moduleContent.dashboard}
+      </main>
+
+      <nav className="super-admin-bottom-nav" aria-label="Navegacion rapida super admin">
+        {SUPER_ADMIN_BOTTOM_MODULES.map((moduleId) => {
+          const module = SUPER_ADMIN_MODULES.find((item) => item.id === moduleId);
+          if (!module) return null;
+          return (
+            <button
+              className={activeModule === module.id ? "active" : ""}
+              key={module.id}
+              type="button"
+              onClick={() => switchModule(module.id)}
+            >
+              <span>{module.short}</span>
+              {module.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {createLeagueOpen && (
+        <SuperAdminCreateLeagueSheet
+          onClose={() => setCreateLeagueOpen(false)}
+          onSubmit={submitLeagueCreate}
+        />
+      )}
+    </div>
+  );
+}
+
+const SUPER_ADMIN_MODULES = [
+  { id: "dashboard", label: "Dashboard", short: "IN" },
+  { id: "platform", label: "Plataforma", short: "PL" },
+  { id: "leagues", label: "Ligas", short: "LG" },
+  { id: "users", label: "Usuarios", short: "US" },
+  { id: "tournaments", label: "Torneos", short: "TR" },
+  { id: "advertising", label: "Publicidad", short: "AD" },
+  { id: "audit", label: "Auditoria", short: "AU" },
+  { id: "backups", label: "Respaldos", short: "BK" },
+  { id: "settings", label: "Configuracion", short: "CF" }
+];
+
+const SUPER_ADMIN_BOTTOM_MODULES = ["dashboard", "leagues", "users", "platform", "settings"];
+
+function SuperAdminNav({ activeModule, currentUser, onSelect }) {
+  return (
+    <div className="super-admin-nav-shell">
+      <div className="super-admin-brand">
+        <img alt="LIGATEC" src={ligatecLogo} />
+        <div>
+          <strong>LIGATEC</strong>
+          <span>Super Admin</span>
+        </div>
+      </div>
+      <div className="super-admin-profile">
+        <span>{getInitials(currentUser?.name || currentUser?.email || "SA")}</span>
+        <div>
+          <strong>{currentUser?.name || "Super admin"}</strong>
+          <small>{currentUser?.email || "Control plataforma"}</small>
+        </div>
+      </div>
+      <nav className="super-admin-nav" aria-label="Modulos super admin">
+        {SUPER_ADMIN_MODULES.map((module) => (
+          <button
+            className={activeModule === module.id ? "active" : ""}
+            key={module.id}
+            type="button"
+            onClick={() => onSelect(module.id)}
+          >
+            <span>{module.short}</span>
+            {module.label}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+function getInitials(value) {
+  return String(value || "")
+    .split(/\s+|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "SA";
+}
+
+function getSuperAdminStats(leagues) {
+  const visibleLeagues = leagues.filter((league) => league.status !== "deleted");
+  const today = new Date().toISOString().slice(0, 10);
+  const municipalities = new Set(visibleLeagues.map((league) => league.city).filter(Boolean));
+  let teams = 0;
+  let players = 0;
+  let tournaments = 0;
+  let activeTournaments = 0;
+  let referees = 0;
+  let delegates = 0;
+  let matchesToday = 0;
+  let scheduledToday = 0;
+  let finalizedToday = 0;
+  let activeSponsors = 0;
+
+  visibleLeagues.forEach((league) => {
+    teams += (league.teams || []).length;
+    players += (league.players || []).length;
+    tournaments += (league.competitions || []).length;
+    activeTournaments += (league.competitions || []).filter((competition) => competition.status !== "archived").length;
+    referees += (league.referees || []).length;
+    delegates += (league.teamDelegates || league.delegates || []).length;
+    activeSponsors += (league.sponsors || []).filter((sponsor) => sponsor.status !== "inactive").length;
+    (league.matches || []).forEach((match) => {
+      const matchDate = String(match.date || match.scheduledDate || match.matchDate || "").slice(0, 10);
+      if (matchDate !== today) return;
+      matchesToday += 1;
+      if (match.status === "finalizado" || match.status === "finalized") finalizedToday += 1;
+      else scheduledToday += 1;
+    });
+  });
+
+  return {
+    activeLeagues: visibleLeagues.filter((league) => league.status === "active").length,
+    suspendedLeagues: visibleLeagues.filter((league) => league.status === "suspended").length,
+    municipalities: municipalities.size,
+    totalLeagues: visibleLeagues.length,
+    teams,
+    players,
+    tournaments,
+    activeTournaments,
+    referees,
+    delegates,
+    matchesToday,
+    scheduledToday,
+    finalizedToday,
+    activeSponsors
+  };
+}
+
+function getLeagueSummary(league) {
+  const activeTournaments = (league.competitions || []).filter((competition) => competition.status !== "archived").length;
+  return {
+    teams: (league.teams || []).length,
+    players: (league.players || []).length,
+    tournaments: activeTournaments || (league.competitions || []).length,
+    matches: (league.matches || []).length,
+    adminName: league.adminName || league.ownerName || league.ownerEmail || "Sin admin asignado"
+  };
+}
+
+function SuperAdminDashboard({ leagues, stats, onOpenCreateLeague, onOpenLeagues, onOpenUsers }) {
+  const latestLeagues = leagues.filter((league) => league.status !== "deleted").slice(0, 4);
+
+  return (
+    <section className="super-dashboard">
+      <div className="super-hero-panel">
+        <div>
+          <span>Estado de la plataforma</span>
+          <h2>Todos los modulos operando con datos locales del store actual.</h2>
+          <p>No se agregan consultas extra a la API en este dashboard. Las acciones sensibles siguen protegidas en sus modulos.</p>
+        </div>
+        <button className="primary" type="button" onClick={onOpenCreateLeague}>+ Nueva liga</button>
+      </div>
+
+      <div className="super-metric-grid">
+        <SuperMetricCard label="Ligas activas" value={stats.activeLeagues} />
+        <SuperMetricCard label="Municipios" value={stats.municipalities} />
+        <SuperMetricCard label="Jugadores" value={stats.players} />
+        <SuperMetricCard label="Equipos" value={stats.teams} />
+        <SuperMetricCard label="Arbitros" value={stats.referees} />
+        <SuperMetricCard label="Torneos activos" value={stats.activeTournaments} />
+        <SuperMetricCard label="Partidos hoy" value={stats.matchesToday} detail={`${stats.scheduledToday} programados | ${stats.finalizedToday} finalizados`} />
+        <SuperMetricCard label="Publicidad activa" value={stats.activeSponsors} />
+      </div>
+
+      <div className="super-dashboard-grid">
+        <article className="super-panel-card">
+          <div className="super-card-head">
+            <div>
+              <span>Gestion</span>
+              <h3>Ligas recientes</h3>
+            </div>
+            <button type="button" onClick={onOpenLeagues}>Ver ligas</button>
+          </div>
+          <div className="super-mini-list">
+            {latestLeagues.map((league) => {
+              const summary = getLeagueSummary(league);
+              return (
+                <button key={league.id} type="button" onClick={onOpenLeagues}>
+                  <span className={`super-status-dot ${league.status}`} />
+                  <strong>{league.name}</strong>
+                  <small>{league.city || "Sin municipio"} | {summary.teams} equipos</small>
+                </button>
+              );
+            })}
+            {!latestLeagues.length && <p className="empty">Aun no hay ligas registradas.</p>}
+          </div>
+        </article>
+
+        <article className="super-panel-card">
+          <div className="super-card-head">
+            <div>
+              <span>Accesos</span>
+              <h3>Usuarios y permisos</h3>
+            </div>
+            <button type="button" onClick={onOpenUsers}>Administrar</button>
+          </div>
+          <p className="helper-text">Los usuarios se mantienen en su modulo para evitar mezclar permisos con creacion de ligas. Admin limitado, capturistas y super admin se controlan ahi.</p>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function SuperMetricCard({ label, value, detail }) {
+  return (
+    <article className="super-metric-card">
+      <small>{label}</small>
+      <strong>{value}</strong>
+      {detail && <span>{detail}</span>}
+    </article>
+  );
+}
+
+function SuperAdminPlatformPanel({ stats }) {
+  const services = [
+    { name: "API", detail: "Rutas protegidas por token" },
+    { name: "Base de datos", detail: "Persistencia centralizada" },
+    { name: "Almacenamiento", detail: "Imagenes y recursos publicos" },
+    { name: "Usuarios", detail: "Roles y permisos por modulo" }
+  ];
+
+  return (
+    <section className="panel super-module-panel">
+      <SectionHeading eyebrow="Plataforma" title="Estado general del sistema" />
+      <p className="helper-text">Vista operativa sin exponer llaves, tokens, rutas internas ni secretos. En una siguiente fase podemos conectar health checks reales si el backend los ofrece.</p>
+      <div className="super-service-list">
+        {services.map((service) => (
+          <article key={service.name}>
+            <div>
+              <strong>{service.name}</strong>
+              <span>{service.detail}</span>
+            </div>
+            <b>Operativo</b>
+          </article>
+        ))}
+      </div>
+      <div className="super-metric-grid compact">
+        <SuperMetricCard label="Ligas totales" value={stats.totalLeagues} />
+        <SuperMetricCard label="Suspendidas" value={stats.suspendedLeagues} />
+        <SuperMetricCard label="Torneos" value={stats.tournaments} />
+        <SuperMetricCard label="Delegados" value={stats.delegates} />
+      </div>
+    </section>
+  );
+}
+
+function SuperAdminLeagueList({
+  leagueQuery,
+  leagueStatusFilter,
+  leagues,
+  membershipNotice,
+  onCreateLeague,
+  onDeleteLeague,
+  onSetLeagueQuery,
+  onSetLeagueStatusFilter,
+  onSetNotice,
+  onToggleLeague,
+  onUpdateLeagueMembership,
+  origin
+}) {
+  const normalizedQuery = leagueQuery.trim().toLowerCase();
+  const filteredLeagues = leagues.filter((league) => {
+    if (league.status === "deleted") return false;
+    if (leagueStatusFilter !== "all" && league.status !== leagueStatusFilter) return false;
+    if (!normalizedQuery) return true;
+    return `${league.name} ${league.city} ${league.ownerEmail || ""}`.toLowerCase().includes(normalizedQuery);
+  });
+
+  return (
+    <section className="panel super-module-panel">
+      <div className="panel-title-row">
+        <SectionHeading eyebrow="Ligas" title="Gestiona todas las ligas" />
+        <button className="primary" type="button" onClick={onCreateLeague}>+ Nueva liga</button>
+      </div>
+      <p className="helper-text">Controla estado, URL publica, admin asignado y notas internas. Las acciones destructivas mantienen confirmacion reforzada.</p>
+      {membershipNotice && <p className="auth-ok">{membershipNotice}</p>}
+      <div className="super-list-toolbar">
+        <label>
+          Buscar liga
+          <input value={leagueQuery} onChange={(event) => onSetLeagueQuery(event.target.value)} placeholder="Nombre, municipio o admin" />
+        </label>
+        <label>
+          Estado
+          <select value={leagueStatusFilter} onChange={(event) => onSetLeagueStatusFilter(event.target.value)}>
+            <option value="all">Todas</option>
+            <option value="active">Activas</option>
+            <option value="suspended">Suspendidas</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="membership-list super-league-list">
+        {filteredLeagues.map((league) => {
+          const summary = getLeagueSummary(league);
+          return (
+            <details className={`super-league-card-shell ${league.status}`} key={league.id}>
+              <summary>
+                <span className="super-league-mark">{getInitials(league.name)}</span>
+                <span className="super-league-summary-copy">
+                  <b>{league.name}</b>
+                  <small>{league.city || "Sin municipio"} | Admin: {summary.adminName}</small>
+                </span>
+                <span className="super-league-summary-stats">
+                  <em><strong>{summary.teams}</strong> Equipos</em>
+                  <em><strong>{summary.players}</strong> Jugadores</em>
+                  <em><strong>{summary.tournaments}</strong> Torneos</em>
+                </span>
+                <span className={`status ${league.status}`}>{league.status === "active" ? "Activa" : "Suspendida"}</span>
+                <span className="super-detail-chevron">Editar</span>
+              </summary>
+              <form
+                className="membership-card super-league-card"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const payload = getFormPayload(event.currentTarget);
+                  if (payload.status !== league.status) {
+                    const action = payload.status === "suspended" ? "suspender" : "reactivar";
+                    const confirmed = window.confirm(`¿Seguro que quieres ${action} ${league.name}?`);
+                    if (!confirmed) return;
+                  }
+                  onUpdateLeagueMembership(league.id, payload);
+                  onSetNotice(`Datos de ${league.name} guardados correctamente.`);
+                }}
+              >
+                <div className="membership-title super-league-title">
+                  <span>Configuracion operativa</span>
+                  <strong>{league.name}</strong>
+                  <span>Los cambios se aplican al acceso publico y administrativo de esta liga.</span>
+                </div>
+                <label className="wide-field">URL publica
+                  <input readOnly type="url" value={`${origin}/liga/${league.id}`} onFocus={(event) => event.currentTarget.select()} />
+                </label>
+                <input type="hidden" name="plan" value={league.plan || ""} />
+                <label>Estado
+                  <select name="status" defaultValue={league.status}>
+                    <option value="active">Activa</option>
+                    <option value="suspended">Suspendida</option>
+                  </select>
+                </label>
+                <input type="hidden" name="renewalDate" value={league.renewalDate || ""} />
+                <label>Admin asignado<input name="ownerEmail" type="email" defaultValue={league.ownerEmail || ""} /></label>
+                <label className="wide-field">Notas
+                  <textarea name="membershipNotes" defaultValue={league.membershipNotes || ""} placeholder="Contacto, acuerdos internos, observaciones de operacion, etc." />
+                </label>
+                <div className="membership-actions">
+                  <button className="primary" type="submit">Guardar cambios</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextAction = league.status === "active" ? "suspender" : "reactivar";
+                      const confirmed = window.confirm(`¿Seguro que quieres ${nextAction} ${league.name}?`);
+                      if (!confirmed) return;
+                      onToggleLeague(league.id);
+                      onSetNotice(`${league.name} ${league.status === "active" ? "suspendida" : "reactivada"} correctamente.`);
+                    }}
+                  >
+                    {league.status === "active" ? "Suspender" : "Reactivar"}
+                  </button>
+                  <button
+                    className="danger"
+                    type="button"
+                    onClick={async () => {
+                      const confirmation = window.prompt(
+                        `Eliminar ${league.name} borrara torneos, equipos, jugadores, partidos, sanciones, identidad, avisos y usuarios administradores de esa liga.\n\nEscribe ELIMINAR para confirmar.`
+                      );
+                      if (confirmation !== "ELIMINAR") {
+                        window.alert("Eliminacion cancelada.");
+                        return;
+                      }
+                      await onDeleteLeague(league.id);
+                    }}
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </form>
+            </details>
+          );
+        })}
+        {!filteredLeagues.length && <p className="empty">No hay ligas con esos filtros.</p>}
+      </div>
+    </section>
+  );
+}
+
+function SuperAdminCreateLeagueSheet({ onClose, onSubmit }) {
+  return (
+    <div className="super-admin-modal" role="dialog" aria-modal="true" aria-label="Nueva liga">
+      <button className="super-admin-modal-backdrop" type="button" aria-label="Cerrar" onClick={onClose} />
+      <section className="super-admin-sheet">
+        <div className="super-card-head">
+          <div>
+            <span>Nueva liga</span>
+            <h3>Crear liga en LIGATEC</h3>
+          </div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </div>
+        <form className="league-create-form" onSubmit={onSubmit}>
+          <label>Liga<input name="name" required placeholder="Nombre de la nueva liga" /></label>
+          <label>Municipio<input name="city" required placeholder="Municipio o zona" /></label>
+          <label>Admin asignado<input name="adminName" placeholder="Nombre del administrador" /></label>
+          <label>Correo admin<input name="adminEmail" type="email" placeholder="correo del admin para enviar invitacion" /></label>
+          <button className="primary" type="submit">Crear liga</button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminUserCreateSheet({ leagues, onClose, onSubmit }) {
+  return (
+    <div className="super-admin-modal" role="dialog" aria-modal="true" aria-label="Nuevo usuario administrador">
+      <button className="super-admin-modal-backdrop" type="button" aria-label="Cerrar" onClick={onClose} />
+      <section className="super-admin-sheet super-user-sheet">
+        <div className="super-card-head">
+          <div>
+            <span>Nuevo acceso</span>
+            <h3>Crear usuario administrador</h3>
+          </div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </div>
+        <form className="user-create-form" onSubmit={onSubmit}>
+          <label>
+            Nombre
+            <input name="name" required placeholder="Nombre del usuario" />
+          </label>
+          <label>
+            Correo
+            <input name="email" required type="email" placeholder="correo@liga.com" />
+          </label>
+          <label>
+            Telefono
+            <input name="phone" placeholder="354..." />
+          </label>
+          <label>
+            Rol
+            <select name="role" defaultValue="league_admin">
+              <option value="league_admin">Admin de liga</option>
+              <option value="admin_limited">Admin limitado</option>
+              <option value="super_admin">Super admin</option>
+            </select>
+          </label>
+          <label>
+            Liga asignada
+            <select name="leagueId" defaultValue="">
+              <option value="">Sin liga</option>
+              {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
+            </select>
+          </label>
+          <fieldset className="permission-checklist">
+            <legend>Permisos para admin limitado</legend>
+            {ADMIN_PERMISSION_OPTIONS.map((permission) => (
+              <label key={permission.id}>
+                <input name="permissions" type="checkbox" value={permission.id} />
+                {permission.label}
+              </label>
+            ))}
+          </fieldset>
+          <p className="helper-text wide-field">Para un capturista de resultados, usa rol Admin limitado y marca solo Capturar actas/resultados.</p>
+          <button className="primary" type="submit">Crear invitacion</button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminTournamentsPanel({ leagues }) {
+  const tournaments = leagues
+    .filter((league) => league.status !== "deleted")
+    .flatMap((league) => (league.competitions || []).map((competition) => ({ ...competition, leagueName: league.name, leagueCity: league.city })));
+  const [query, setQuery] = useState("");
+  const [leagueFilter, setLeagueFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const tournamentSummary = useMemo(() => ({
+    total: tournaments.length,
+    active: tournaments.filter((competition) => competition.status !== "archived").length,
+    archived: tournaments.filter((competition) => competition.status === "archived").length,
+    leagues: new Set(tournaments.map((competition) => competition.leagueName)).size
+  }), [tournaments]);
+  const filteredTournaments = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return tournaments.filter((competition) => {
+      if (leagueFilter !== "all" && competition.leagueName !== leagueFilter) return false;
+      if (statusFilter === "active" && competition.status === "archived") return false;
+      if (statusFilter === "archived" && competition.status !== "archived") return false;
+      if (!normalizedQuery) return true;
+      return `${competition.name} ${competition.season || ""} ${competition.leagueName} ${competition.leagueCity || ""}`.toLowerCase().includes(normalizedQuery);
+    });
+  }, [leagueFilter, query, statusFilter, tournaments]);
+  const leagueOptions = useMemo(() => (
+    [...new Set(tournaments.map((competition) => competition.leagueName).filter(Boolean))].sort()
+  ), [tournaments]);
+
+  return (
+    <section className="panel super-module-panel">
+      <SectionHeading eyebrow="Torneos" title="Historico y torneos activos" />
+      <p className="helper-text">Vista global de temporadas y categorias. La gestion fina de torneos activos/historicos sigue en cada panel de liga para respetar permisos y evitar cambios masivos accidentales.</p>
+      <div className="super-metric-grid compact super-tournament-metrics">
+        <SuperMetricCard label="Torneos totales" value={tournamentSummary.total} />
+        <SuperMetricCard label="Publicados" value={tournamentSummary.active} />
+        <SuperMetricCard label="Historicos" value={tournamentSummary.archived} />
+        <SuperMetricCard label="Ligas con torneos" value={tournamentSummary.leagues} />
+      </div>
+      <div className="super-list-toolbar super-tournament-toolbar">
+        <label>
+          Buscar torneo
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Torneo, temporada, liga o municipio" />
+        </label>
+        <label>
+          Liga
+          <select value={leagueFilter} onChange={(event) => setLeagueFilter(event.target.value)}>
+            <option value="all">Todas</option>
+            {leagueOptions.map((leagueName) => <option key={leagueName} value={leagueName}>{leagueName}</option>)}
+          </select>
+        </label>
+        <label>
+          Estado
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">Todos</option>
+            <option value="active">Publicados</option>
+            <option value="archived">Historicos</option>
+          </select>
+        </label>
+      </div>
+      <div className="super-tournament-list">
+        {filteredTournaments.map((competition) => (
+          <article className={competition.status === "archived" ? "archived" : "active"} key={`${competition.leagueName}-${competition.id}`}>
+            <span className="super-tournament-mark">{getInitials(competition.name)}</span>
+            <div>
+              <strong>{competition.name}</strong>
+              <span>{competition.leagueName} | {competition.season || "Temporada sin definir"}</span>
+              <small>{competition.leagueCity || "Sin municipio"}</small>
+            </div>
+            <b>{competition.status === "archived" ? "Historico" : "Publicado"}</b>
+          </article>
+        ))}
+        {!tournaments.length && <p className="empty">Aun no hay torneos registrados.</p>}
+        {tournaments.length > 0 && !filteredTournaments.length && <p className="empty">No hay torneos con esos filtros.</p>}
+      </div>
+    </section>
+  );
+}
+
+function formatBytes(sizeBytes) {
+  const size = Number(sizeBytes || 0);
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function formatBackupDate(value) {
+  if (!value) return "Sin fecha";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+  return date.toLocaleString("es-MX", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+}
+
+function getBackupStatusLabel(status) {
+  if (status === "completed") return "Completado";
+  if (status === "failed") return "Fallido";
+  return "En proceso";
+}
+
+function getBackupKindLabel(kind) {
+  if (kind === "logical_store_json") return "Respaldo logico";
+  if (kind === "sqlite_file") return "Copia SQLite";
+  return "Respaldo";
+}
+
+function SuperAdminBackupsPanel({ authToken, stats }) {
+  const [backups, setBackups] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [busyAction, setBusyAction] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  async function loadBackups() {
+    if (!authToken) return;
+    setLoading(true);
+    setError("");
+    try {
+      setBackups(await fetchBackups(authToken, 20));
+    } catch (err) {
+      setError(err.message || "No se pudieron cargar los respaldos.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadBackups();
+  }, [authToken]);
+
+  async function handleCreateBackup() {
+    const confirmed = window.confirm("Crear un respaldo manual ahora puede tardar unos segundos. ¿Deseas continuar?");
+    if (!confirmed) return;
+    setBusyAction("create");
+    setError("");
+    setNotice("");
+    try {
+      const backup = await createBackup(authToken);
+      setNotice(`Respaldo creado: ${backup.fileName || backup.id}`);
+      await loadBackups();
+    } catch (err) {
+      setError(err.message || "No se pudo crear el respaldo.");
+      await loadBackups();
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleDownloadBackup(backup) {
+    setBusyAction(backup.id);
+    setError("");
+    setNotice("");
+    try {
+      await downloadBackup(authToken, backup);
+      setNotice("Descarga iniciada.");
+    } catch (err) {
+      setError(err.message || "No se pudo descargar el respaldo.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleVerifyBackup(backup) {
+    setBusyAction(`verify:${backup.id}`);
+    setError("");
+    setNotice("");
+    try {
+      const result = await verifyBackup(authToken, backup);
+      if (result.ok) {
+        setNotice(`Respaldo verificado correctamente: ${backup.fileName || backup.id}`);
+      } else {
+        setError(result.reason || "El respaldo no paso la verificacion.");
+      }
+    } catch (err) {
+      setError(err.message || "No se pudo verificar el respaldo.");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  const latestBackup = backups.find((backup) => backup.status === "completed");
+
+  return (
+    <section className="panel super-module-panel">
+      <SectionHeading eyebrow="Respaldos" title="Proteccion de informacion" />
+      <div className="super-protection-card">
+        <strong>Respaldos manuales auditados</strong>
+        <span>Solo Super Admin puede generar o descargar respaldos. El sistema registra usuario, fecha, tamano, checksum y resultado sin exponer rutas internas del servidor.</span>
+        <button type="button" onClick={handleCreateBackup} disabled={busyAction === "create"}>
+          {busyAction === "create" ? "Creando respaldo..." : "Crear respaldo ahora"}
+        </button>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      {notice && <p className="form-success">{notice}</p>}
+      <div className="super-metric-grid compact">
+        <SuperMetricCard label="Ligas protegidas" value={stats.totalLeagues} />
+        <SuperMetricCard label="Equipos en store" value={stats.teams} />
+        <SuperMetricCard label="Jugadores en store" value={stats.players} />
+        <SuperMetricCard label="Ultimo respaldo" value={latestBackup ? formatBytes(latestBackup.sizeBytes) : "Pendiente"} />
+      </div>
+      <div className="super-backup-list">
+        <div className="super-backup-list-head">
+          <div>
+            <strong>Historial de respaldos</strong>
+            <span>{loading ? "Cargando historial..." : `${backups.length} registro(s) recientes`}</span>
+          </div>
+          <button type="button" onClick={loadBackups} disabled={loading || Boolean(busyAction)}>Actualizar</button>
+        </div>
+        {!loading && !backups.length && <p className="empty">Aun no hay respaldos creados desde el panel.</p>}
+        {backups.map((backup) => (
+          <article className={`super-backup-card ${backup.status}`} key={backup.id}>
+            <div className="super-backup-main">
+              <span className="super-backup-icon">{backup.kind === "logical_store_json" ? "JSON" : "DB"}</span>
+              <div>
+                <strong>{backup.fileName || backup.id}</strong>
+                <span>{getBackupKindLabel(backup.kind)} | {backup.provider}</span>
+                <small>Creado: {formatBackupDate(backup.createdAt)}</small>
+              </div>
+            </div>
+            <div className="super-backup-meta">
+              <span className={`super-status-pill ${backup.status}`}>{getBackupStatusLabel(backup.status)}</span>
+              <b>{formatBytes(backup.sizeBytes)}</b>
+              {backup.checksumSha256 && <small>SHA256: {backup.checksumSha256.slice(0, 12)}...</small>}
+              {backup.storageBucket && <small>Storage externo configurado</small>}
+              {backup.errorMessage && <small className="danger-text">{backup.errorMessage}</small>}
+            </div>
+            <div className="super-backup-actions">
+              <button
+                type="button"
+                onClick={() => handleVerifyBackup(backup)}
+                disabled={!backup.downloadAvailable || busyAction === `verify:${backup.id}`}
+              >
+                {busyAction === `verify:${backup.id}` ? "Verificando..." : "Verificar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDownloadBackup(backup)}
+                disabled={!backup.downloadAvailable || busyAction === backup.id}
+              >
+                {busyAction === backup.id ? "Descargando..." : "Descargar"}
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SuperAdminSettingsPanel({ onResetDemo }) {
+  return (
+    <section className="panel super-module-panel">
+      <SectionHeading eyebrow="Configuracion" title="Ajustes generales" />
+      <p className="helper-text">Acciones globales con impacto en toda la plataforma. Mantengo las operaciones peligrosas separadas y con confirmacion.</p>
+      <div className="super-settings-list">
+        <article>
+          <div>
+            <strong>Datos demo</strong>
+            <span>Restaurar datos de demostracion. No usar durante operacion real salvo que estes en entorno local o de pruebas.</span>
+          </div>
+          <button className="danger" type="button" onClick={onResetDemo}>Restaurar demo</button>
+        </article>
+      </div>
+    </section>
   );
 }
 
@@ -4594,7 +5973,22 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [showCreateSponsor, setShowCreateSponsor] = useState(false);
+  const [leagueFilter, setLeagueFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const activeLeagues = leagues.filter((league) => league.status !== "deleted");
+  const sponsorSummary = useMemo(() => {
+    const sponsors = activeLeagues.flatMap((league) => league.sponsors || []);
+    return {
+      total: sponsors.length,
+      active: sponsors.filter((sponsor) => sponsor.status !== "inactive").length,
+      inactive: sponsors.filter((sponsor) => sponsor.status === "inactive").length,
+      leagues: activeLeagues.filter((league) => (league.sponsors || []).length).length
+    };
+  }, [activeLeagues]);
+  const displayedLeagues = useMemo(() => activeLeagues.filter((league) => (
+    leagueFilter === "all" || league.id === leagueFilter
+  )), [activeLeagues, leagueFilter]);
 
   async function submitNewSponsor(event) {
     event.preventDefault();
@@ -4610,6 +6004,7 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
       if (!window.confirm("¿Confirmas agregar esta publicidad a la liga seleccionada?")) return;
       onAddSponsor(payload.leagueId, payload);
       event.currentTarget.reset();
+      setShowCreateSponsor(false);
       setNotice("Publicidad agregada correctamente.");
     } catch (sponsorError) {
       setError(sponsorError.message || "No se pudo guardar la publicidad.");
@@ -4635,37 +6030,54 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
   }
 
   return (
-    <section className="panel">
-      <SectionHeading eyebrow="Super admin" title="Publicidad por liga" />
+    <section className="panel super-module-panel super-sponsor-module">
+      <div className="panel-title-row">
+        <SectionHeading eyebrow="Super admin" title="Publicidad por liga" />
+        <button className="primary" type="button" onClick={() => setShowCreateSponsor(true)}>+ Agregar publicidad</button>
+      </div>
       <p className="helper-text">Cada liga tiene sus propios banners. Solo el super admin puede crear, editar o eliminar publicidad.</p>
       {notice && <p className="auth-ok">{notice}</p>}
       {error && <p className="auth-error">{error}</p>}
       {uploading && <p className="auth-ok">Subiendo imagen...</p>}
 
-      <form className="sponsor-form" onSubmit={submitNewSponsor}>
-        <label>Liga
-          <select name="leagueId" required>
+      <div className="super-metric-grid compact super-sponsor-metrics">
+        <SuperMetricCard label="Banners" value={sponsorSummary.total} />
+        <SuperMetricCard label="Activos" value={sponsorSummary.active} />
+        <SuperMetricCard label="Inactivos" value={sponsorSummary.inactive} />
+        <SuperMetricCard label="Ligas con publicidad" value={sponsorSummary.leagues} />
+      </div>
+
+      <div className="super-list-toolbar super-sponsor-toolbar">
+        <label>
+          Liga
+          <select value={leagueFilter} onChange={(event) => setLeagueFilter(event.target.value)}>
+            <option value="all">Todas las ligas</option>
             {activeLeagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
           </select>
         </label>
-        <label>Patrocinador<input name="name" required placeholder="Nombre comercial" /></label>
-        <label>Imagen banner<input name="imageFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} required /></label>
-        <label>Enlace<input name="linkUrl" type="url" placeholder="https://..." /></label>
-        <label>Orden<input name="sortOrder" type="number" min="0" defaultValue="0" /></label>
-        <label>Estado
-          <select name="status" defaultValue="active">
-            <option value="active">Activo</option>
-            <option value="inactive">Inactivo</option>
+        <label>
+          Estado
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">Todos</option>
+            <option value="active">Activos</option>
+            <option value="inactive">Inactivos</option>
           </select>
         </label>
-        <input type="hidden" name="placement" value="home_banner" />
-        <label className="wide-field">Notas<textarea name="notes" placeholder="Vigencia, contacto o indicaciones internas." /></label>
-        <button className="primary" type="submit">Agregar publicidad</button>
-      </form>
+      </div>
+
+      {showCreateSponsor && (
+        <SuperAdminSponsorCreateSheet
+          activeLeagues={activeLeagues}
+          onClose={() => setShowCreateSponsor(false)}
+          onSubmit={submitNewSponsor}
+        />
+      )}
 
       <div className="sponsor-admin-list">
-        {activeLeagues.map((league) => {
-          const sponsors = [...(league.sponsors || [])].sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.name.localeCompare(b.name));
+        {displayedLeagues.map((league) => {
+          const sponsors = [...(league.sponsors || [])]
+            .filter((sponsor) => statusFilter === "all" || (sponsor.status || "active") === statusFilter)
+            .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.name.localeCompare(b.name));
           return (
             <section className="sponsor-league-block" key={league.id}>
               <div className="sponsor-league-head">
@@ -4713,6 +6125,43 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
         })}
       </div>
     </section>
+  );
+}
+
+function SuperAdminSponsorCreateSheet({ activeLeagues, onClose, onSubmit }) {
+  return (
+    <div className="super-admin-modal" role="dialog" aria-modal="true" aria-label="Nueva publicidad">
+      <button className="super-admin-modal-backdrop" type="button" aria-label="Cerrar" onClick={onClose} />
+      <section className="super-admin-sheet super-sponsor-sheet">
+        <div className="super-card-head">
+          <div>
+            <span>Publicidad</span>
+            <h3>Agregar banner por liga</h3>
+          </div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </div>
+        <form className="sponsor-form" onSubmit={onSubmit}>
+          <label>Liga
+            <select name="leagueId" required>
+              {activeLeagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
+            </select>
+          </label>
+          <label>Patrocinador<input name="name" required placeholder="Nombre comercial" /></label>
+          <label>Imagen banner<input name="imageFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} required /></label>
+          <label>Enlace<input name="linkUrl" type="url" placeholder="https://..." /></label>
+          <label>Orden<input name="sortOrder" type="number" min="0" defaultValue="0" /></label>
+          <label>Estado
+            <select name="status" defaultValue="active">
+              <option value="active">Activo</option>
+              <option value="inactive">Inactivo</option>
+            </select>
+          </label>
+          <input type="hidden" name="placement" value="home_banner" />
+          <label className="wide-field">Notas<textarea name="notes" placeholder="Vigencia, contacto o indicaciones internas." /></label>
+          <button className="primary" type="submit">Agregar publicidad</button>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -4771,10 +6220,12 @@ function normalizeUserPayload(payload) {
 const ADMIN_PERMISSION_OPTIONS = [
   { id: "matches", label: "Programar partidos" },
   { id: "referees", label: "Arbitros" },
-  { id: "match_sheets", label: "Actas arbitrales" },
+  { id: "match_sheets", label: "Capturar actas/resultados" },
+  { id: "discipline", label: "Comision disciplinaria" },
   { id: "delegates", label: "Delegados" },
   { id: "settings", label: "Reglas de liga" }
 ];
+const ADMIN_ACCESS_ROLES = new Set(["super_admin", "league_admin", "admin_limited"]);
 
 function getUserRoleLabel(role) {
   if (role === "super_admin") return "Super admin";
@@ -4790,13 +6241,72 @@ function getPermissionLabel(permissionId) {
   return ADMIN_PERMISSION_OPTIONS.find((permission) => permission.id === permissionId)?.label || permissionId;
 }
 
+function getAdminAccesses(user) {
+  return (user.accesses || []).filter((access) => ADMIN_ACCESS_ROLES.has(access.role));
+}
+
+function getPrimaryAdminAccess(user) {
+  const adminAccesses = getAdminAccesses(user);
+  return adminAccesses.find((access) => (
+    access.role === user.role &&
+    (access.leagueId || "") === (user.leagueId || "")
+  )) || adminAccesses[0] || null;
+}
+
+function getUserStatusLabel(status) {
+  if (status === "active") return "Activo";
+  if (status === "pending_activation") return "Pendiente";
+  if (status === "disabled") return "Deshabilitado";
+  if (status === "suspended") return "Suspendido";
+  return status || "Sin estado";
+}
+
+function getAdminAccessLabel(access) {
+  const permissions = access.permissions?.length ? ` | ${access.permissions.map(getPermissionLabel).join(", ")}` : "";
+  return `${getUserRoleLabel(access.role)} | ${access.leagueName || "Todas las ligas"} | ${getUserStatusLabel(access.status)}${permissions}`;
+}
+
+function matchesUserSearch(user, query) {
+  if (!query) return true;
+  const adminAccesses = getAdminAccesses(user);
+  const searchable = [
+    user.name,
+    user.email,
+    user.phone,
+    user.status,
+    getUserRoleLabel(user.role),
+    ...adminAccesses.map((access) => getAdminAccessLabel(access))
+  ].join(" ").toLowerCase();
+  return searchable.includes(query);
+}
+
 function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const adminUsers = users.filter((user) => !["team_delegate", "referee"].includes(user.role));
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [userQuery, setUserQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const adminUsers = users.filter((user) => ADMIN_ACCESS_ROLES.has(user.role) || getAdminAccesses(user).length > 0);
   const delegateUserCount = users.filter((user) => user.role === "team_delegate").length;
   const refereeUserCount = users.filter((user) => user.role === "referee").length;
+  const userSummary = useMemo(() => ({
+    admins: adminUsers.filter((user) => user.role === "league_admin" || getAdminAccesses(user).some((access) => access.role === "league_admin")).length,
+    limited: adminUsers.filter((user) => user.role === "admin_limited" || getAdminAccesses(user).some((access) => access.role === "admin_limited")).length,
+    superAdmins: adminUsers.filter((user) => user.role === "super_admin" || getAdminAccesses(user).some((access) => access.role === "super_admin")).length,
+    pending: adminUsers.filter((user) => user.status === "pending_activation").length,
+    disabled: adminUsers.filter((user) => ["disabled", "suspended"].includes(user.status)).length
+  }), [adminUsers]);
+  const filteredAdminUsers = useMemo(() => {
+    const query = userQuery.trim().toLowerCase();
+    return adminUsers.filter((user) => {
+      const adminAccesses = getAdminAccesses(user);
+      if (roleFilter !== "all" && user.role !== roleFilter && !adminAccesses.some((access) => access.role === roleFilter)) return false;
+      if (statusFilter !== "all" && user.status !== statusFilter) return false;
+      return matchesUserSearch(user, query);
+    });
+  }, [adminUsers, roleFilter, statusFilter, userQuery]);
 
   async function loadUsers() {
     if (!authToken) return;
@@ -4826,6 +6336,7 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
     if (!window.confirm(`¿Confirmas crear o agregar acceso para ${payload.email}?`)) return false;
     const response = await createUser(authToken, normalizeUserPayload(payload));
     await loadUsers();
+    setShowCreateUser(false);
     setNotice(response.invitation?.whatsappMessage
       ? `Invitacion creada. Copia y envia este mensaje:\n\n${response.invitation.whatsappMessage}`
       : "Acceso agregado correctamente. El usuario ya puede entrar con su contraseña actual.");
@@ -4884,58 +6395,11 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
   }
 
   return (
-    <section className="panel">
-      <SectionHeading eyebrow="Accesos" title="Usuarios administradores" />
-      <form
-        className="user-create-form"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          try {
-            const created = await handleCreate(getFormPayload(event.currentTarget));
-            if (created) event.currentTarget.reset();
-          } catch (requestError) {
-            setError(requestError.message);
-          }
-        }}
-      >
-        <label>
-          Nombre
-          <input name="name" required placeholder="Nombre del usuario" />
-        </label>
-        <label>
-          Correo
-          <input name="email" required type="email" placeholder="correo@liga.com" />
-        </label>
-        <label>
-          Telefono
-          <input name="phone" placeholder="354..." />
-        </label>
-        <label>
-          Rol
-          <select name="role" defaultValue="league_admin">
-            <option value="league_admin">Admin de liga</option>
-            <option value="admin_limited">Admin limitado</option>
-            <option value="super_admin">Super admin</option>
-          </select>
-        </label>
-        <label>
-          Liga asignada
-          <select name="leagueId" defaultValue="">
-            <option value="">Sin liga</option>
-            {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
-          </select>
-        </label>
-        <fieldset className="permission-checklist">
-          <legend>Permisos para admin limitado</legend>
-          {ADMIN_PERMISSION_OPTIONS.map((permission) => (
-            <label key={permission.id}>
-              <input name="permissions" type="checkbox" value={permission.id} />
-              {permission.label}
-            </label>
-          ))}
-        </fieldset>
-        <button className="primary" type="submit">Crear invitacion</button>
-      </form>
+    <section className="panel super-module-panel super-users-module">
+      <div className="panel-title-row">
+        <SectionHeading eyebrow="Accesos" title="Usuarios administradores" />
+        <button className="primary" type="button" onClick={() => setShowCreateUser(true)}>+ Nuevo usuario</button>
+      </div>
 
       {error && <p className="auth-error">{error}</p>}
       {notice && <p className="auth-ok">{notice}</p>}
@@ -4948,103 +6412,170 @@ function UserManagement({ authToken, currentUser, leagues, refreshKey = 0 }) {
         </p>
       )}
 
+      <div className="super-metric-grid compact super-user-metrics">
+        <SuperMetricCard label="Super admin" value={userSummary.superAdmins} />
+        <SuperMetricCard label="Admins de liga" value={userSummary.admins} />
+        <SuperMetricCard label="Admins limitados" value={userSummary.limited} />
+        <SuperMetricCard label="Pendientes" value={userSummary.pending} />
+        <SuperMetricCard label="Bloqueados/inactivos" value={userSummary.disabled} />
+      </div>
+
+      <div className="super-list-toolbar super-user-toolbar">
+        <label>
+          Buscar usuario
+          <input value={userQuery} onChange={(event) => setUserQuery(event.target.value)} placeholder="Nombre, correo, liga o permiso" />
+        </label>
+        <label>
+          Rol
+          <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+            <option value="all">Todos</option>
+            <option value="super_admin">Super admin</option>
+            <option value="league_admin">Admin de liga</option>
+            <option value="admin_limited">Admin limitado</option>
+          </select>
+        </label>
+        <label>
+          Estado
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">Todos</option>
+            <option value="active">Activos</option>
+            <option value="pending_activation">Pendientes</option>
+            <option value="disabled">Deshabilitados</option>
+            <option value="suspended">Suspendidos</option>
+          </select>
+        </label>
+      </div>
+
+      {showCreateUser && (
+        <SuperAdminUserCreateSheet
+          leagues={leagues}
+          onClose={() => setShowCreateUser(false)}
+          onSubmit={async (event) => {
+            event.preventDefault();
+            try {
+              const created = await handleCreate(getFormPayload(event.currentTarget));
+              if (created) event.currentTarget.reset();
+            } catch (requestError) {
+              setError(requestError.message);
+            }
+          }}
+        />
+      )}
+
       <div className="user-list">
-        {adminUsers.map((user) => {
+        {filteredAdminUsers.map((user) => {
           const isSelf = user.id === currentUser?.id;
-          const adminAccesses = (user.accesses || []).filter((access) => ["super_admin", "league_admin", "admin_limited"].includes(access.role));
-          const primaryAccess = adminAccesses.find((access) => access.role === user.role && (access.leagueId || "") === (user.leagueId || "")) || adminAccesses[0] || null;
+          const adminAccesses = getAdminAccesses(user);
+          const primaryAccess = getPrimaryAdminAccess(user);
           const selectedPermissions = primaryAccess?.permissions || [];
+          const adminRole = primaryAccess?.role || user.role;
+          const adminLeagueId = primaryAccess?.leagueId || user.leagueId || "";
           return (
-            <form
-              className="user-card"
-              key={user.id}
-              onSubmit={async (event) => {
-                event.preventDefault();
-                try {
-                  await handleUpdate(user.id, getFormPayload(event.currentTarget));
-                } catch (requestError) {
-                  setError(requestError.message);
-                }
-              }}
-            >
-              <label>
-                Nombre
-                <input name="name" defaultValue={user.name} required />
-              </label>
-              <label>
-                Correo
-                <input name="email" defaultValue={user.email} type="email" required />
-              </label>
-              <label>
-                Rol
-                <select name="role" defaultValue={user.role} disabled={isSelf}>
-                  <option value="league_admin">Admin de liga</option>
-                  <option value="admin_limited">Admin limitado</option>
-                  <option value="super_admin">Super admin</option>
-                </select>
-              </label>
-              {isSelf && <input type="hidden" name="role" value={user.role} />}
-              <label>
-                Liga asignada
-                <select name="leagueId" defaultValue={user.leagueId || ""}>
-                  <option value="">Sin liga</option>
-                  {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
-                </select>
-              </label>
-              <label>
-                Estado
-                <select name="status" defaultValue={user.status} disabled={isSelf}>
-                  <option value="pending_activation">Pendiente de activacion</option>
-                  <option value="active">Activo</option>
-                  <option value="disabled">Deshabilitado</option>
-                  <option value="suspended">Suspendido</option>
-                </select>
-              </label>
-              {isSelf && <input type="hidden" name="status" value={user.status} />}
-              <fieldset className="permission-checklist user-permission-checklist">
-                <legend>Permisos admin limitado</legend>
-                {ADMIN_PERMISSION_OPTIONS.map((permission) => (
-                  <label key={permission.id}>
-                    <input
-                      name="permissions"
-                      type="checkbox"
-                      value={permission.id}
-                      defaultChecked={selectedPermissions.includes(permission.id)}
-                    />
-                    {permission.label}
-                  </label>
-                ))}
-              </fieldset>
-              {adminAccesses.length > 0 && (
-                <div className="user-access-summary">
-                  <strong>Accesos activos</strong>
-                  {adminAccesses.map((access) => (
-                    <span key={access.id || `${access.role}-${access.leagueId}`}>
-                      {getUserRoleLabel(access.role)} | {access.leagueName || "Todas las ligas"} | {access.status}
-                      {access.permissions?.length ? ` | ${access.permissions.map(getPermissionLabel).join(", ")}` : ""}
-                    </span>
+            <details className={`super-user-card ${user.status}`} key={user.id}>
+              <summary>
+                <span className="super-user-avatar">{getInitials(user.name || user.email)}</span>
+                <span className="super-user-summary-copy">
+                  <b>{user.name || "Usuario sin nombre"}</b>
+                  <small>{user.email}</small>
+                </span>
+                <span className="super-user-access-pills">
+                  {(adminAccesses.length ? adminAccesses : [{ role: user.role, leagueName: "Todas las ligas", status: user.status }]).slice(0, 2).map((access) => (
+                    <em key={access.id || `${access.role}-${access.leagueName || access.leagueId || "global"}`}>{getUserRoleLabel(access.role)}</em>
                   ))}
-                </div>
-              )}
-              <button className="primary" type="submit">Guardar usuario</button>
-              <button type="button" disabled={isSelf} onClick={() => handleResendInvitation(user)}>
-                Reenviar invitacion
-              </button>
-              <button className="danger" type="button" disabled={isSelf} onClick={() => handleDisable(user.id)}>
-                Deshabilitar
-              </button>
-              <button className="danger ghost-danger" type="button" disabled={isSelf} onClick={() => handleDelete(user)}>
-                Eliminar
-              </button>
-              {isSelf && <small className="self-user-note">Tu cuenta no se puede deshabilitar ni eliminar desde tu propia sesion.</small>}
-              {user.lockedUntil && (
-                <small className="self-user-note">
-                  Bloqueado hasta {formatDate(user.lockedUntil)}. El usuario puede recuperar acceso con invitacion o recuperacion de contraseña.
-                </small>
-              )}
-            </form>
+                </span>
+                <span className={`status ${user.status}`}>{getUserStatusLabel(user.status)}</span>
+                <span className="super-detail-chevron">Editar</span>
+              </summary>
+              <form
+                className="user-card super-user-edit-form"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  try {
+                    await handleUpdate(user.id, getFormPayload(event.currentTarget));
+                  } catch (requestError) {
+                    setError(requestError.message);
+                  }
+                }}
+              >
+                <label>
+                  Nombre
+                  <input name="name" defaultValue={user.name} required />
+                </label>
+                <label>
+                  Correo
+                  <input name="email" defaultValue={user.email} type="email" required />
+                </label>
+                <label>
+                  Rol
+                  <select name="role" defaultValue={adminRole} disabled={isSelf}>
+                    <option value="league_admin">Admin de liga</option>
+                    <option value="admin_limited">Admin limitado</option>
+                    <option value="super_admin">Super admin</option>
+                  </select>
+                </label>
+                {isSelf && <input type="hidden" name="role" value={adminRole} />}
+                <label>
+                  Liga asignada
+                  <select name="leagueId" defaultValue={adminLeagueId}>
+                    <option value="">Sin liga</option>
+                    {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Estado
+                  <select name="status" defaultValue={user.status} disabled={isSelf}>
+                    <option value="pending_activation">Pendiente de activacion</option>
+                    <option value="active">Activo</option>
+                    <option value="disabled">Deshabilitado</option>
+                    <option value="suspended">Suspendido</option>
+                  </select>
+                </label>
+                {isSelf && <input type="hidden" name="status" value={user.status} />}
+                <fieldset className="permission-checklist user-permission-checklist">
+                  <legend>Permisos admin limitado</legend>
+                  {ADMIN_PERMISSION_OPTIONS.map((permission) => (
+                    <label key={permission.id}>
+                      <input
+                        name="permissions"
+                        type="checkbox"
+                        value={permission.id}
+                        defaultChecked={selectedPermissions.includes(permission.id)}
+                      />
+                      {permission.label}
+                    </label>
+                  ))}
+                </fieldset>
+                {adminAccesses.length > 0 && (
+                  <div className="user-access-summary">
+                    <strong>Accesos activos</strong>
+                    {adminAccesses.map((access) => (
+                      <span key={access.id || `${access.role}-${access.leagueId}`}>
+                        {getAdminAccessLabel(access)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <button className="primary" type="submit">Guardar usuario</button>
+                <button type="button" disabled={isSelf} onClick={() => handleResendInvitation(user)}>
+                  Reenviar invitacion
+                </button>
+                <button className="danger" type="button" disabled={isSelf} onClick={() => handleDisable(user.id)}>
+                  Deshabilitar
+                </button>
+                <button className="danger ghost-danger" type="button" disabled={isSelf} onClick={() => handleDelete(user)}>
+                  Eliminar
+                </button>
+                {isSelf && <small className="self-user-note">Tu cuenta no se puede deshabilitar ni eliminar desde tu propia sesion.</small>}
+                {user.lockedUntil && (
+                  <small className="self-user-note">
+                    Bloqueado hasta {formatDate(user.lockedUntil)}. El usuario puede recuperar acceso con invitacion o recuperacion de contraseña.
+                  </small>
+                )}
+              </form>
+            </details>
           );
         })}
+        {!filteredAdminUsers.length && <p className="empty">No hay usuarios con esos filtros.</p>}
       </div>
     </section>
   );
@@ -5070,7 +6601,12 @@ const AUDIT_LABELS = {
   match_create: "Partido creado",
   match_sheet_save: "Acta guardada",
   match_update: "Partido actualizado",
-  match_delete: "Partido eliminado"
+  match_delete: "Partido eliminado",
+  backup_create: "Respaldo creado",
+  backup_create_failed: "Fallo en respaldo",
+  backup_download: "Respaldo descargado",
+  backup_verify: "Respaldo verificado",
+  backup_verify_failed: "Fallo al verificar respaldo"
 };
 
 const AUDIT_CRITICAL_ACTIONS = new Set([
@@ -5080,6 +6616,8 @@ const AUDIT_CRITICAL_ACTIONS = new Set([
   "user_delete",
   "user_disable",
   "password_reset_complete",
+  "backup_create_failed",
+  "backup_verify_failed",
   "team_withdraw",
   "match_walkover"
 ]);
@@ -5092,6 +6630,9 @@ const AUDIT_WARNING_ACTIONS = new Set([
   "match_sheet_save",
   "match_update",
   "match_delete",
+  "backup_create",
+  "backup_download",
+  "backup_verify",
   "league_save",
   "store_save"
 ]);
@@ -5172,11 +6713,12 @@ function AuditPanel({ authToken, leagues }) {
   }, [authToken]);
 
   return (
-    <section className="panel">
+    <section className="panel super-module-panel super-audit-module">
       <div className="panel-title-row">
         <SectionHeading eyebrow="Auditoria" title="Historial de actividad" />
         <button type="button" onClick={loadLogs}>Actualizar</button>
       </div>
+      <p className="helper-text">Monitorea acciones criticas, accesos fallidos y cambios administrativos. La auditoria ayuda a detectar errores operativos o movimientos no autorizados.</p>
 
       {error && <p className="auth-error">{error}</p>}
 
@@ -5231,6 +6773,7 @@ function AuditPanel({ authToken, leagues }) {
       <div className="audit-list">
         {filteredLogs.map((log) => (
           <article className={`audit-row ${auditSeverity(log.action)}`} key={log.id}>
+            <span className="audit-severity-mark" aria-hidden="true" />
             <div>
               <small>{auditSeverityLabel(auditSeverity(log.action))}</small>
               <strong>{AUDIT_LABELS[log.action] || log.action}</strong>

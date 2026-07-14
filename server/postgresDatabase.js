@@ -92,7 +92,32 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS extra_time_home_goals INTEGER");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS extra_time_away_goals INTEGER");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS penalty_home_goals INTEGER");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS penalty_away_goals INTEGER");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS workflow_status TEXT NOT NULL DEFAULT 'scheduled'");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS capture_mode TEXT NOT NULL DEFAULT 'admin'");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS current_report_id TEXT");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS local_uuid TEXT");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS secondary_player_id TEXT REFERENCES players(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS assist_player_id TEXT REFERENCES players(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS event_team_side TEXT");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS subtype TEXT");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS period TEXT");
   await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS suspension_indefinite BOOLEAN NOT NULL DEFAULT false");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS minute_label TEXT");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS second INTEGER");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS disciplinary_pending BOOLEAN NOT NULL DEFAULT false");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS is_official BOOLEAN NOT NULL DEFAULT true");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS sync_status TEXT NOT NULL DEFAULT 'synced'");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE IF EXISTS match_events ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1");
   await pool.query("ALTER TABLE IF EXISTS player_sanctions ADD COLUMN IF NOT EXISTS indefinite BOOLEAN NOT NULL DEFAULT false");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS discipline_scope TEXT NOT NULL DEFAULT 'competition'");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS playoff_qualifiers INTEGER NOT NULL DEFAULT 8");
@@ -265,6 +290,159 @@ async function runPostgresMigrations(pool) {
     )
   `);
   await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS captain_pin TEXT");
+  await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS goalkeeper_player_id TEXT REFERENCES players(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS starters_json JSONB NOT NULL DEFAULT '[]'::jsonb");
+  await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS substitutes_json JSONB NOT NULL DEFAULT '[]'::jsonb");
+  await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS lineup_json JSONB NOT NULL DEFAULT '{}'::jsonb");
+  await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_team_pins (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      roster_id TEXT REFERENCES match_rosters(id) ON DELETE SET NULL,
+      pin_hash TEXT NOT NULL,
+      pin_salt TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until TIMESTAMPTZ,
+      generated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      revealed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      revealed_at TIMESTAMPTZ,
+      invalidated_at TIMESTAMPTZ,
+      used_at TIMESTAMPTZ,
+      signed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(match_id, team_id)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_sessions (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      capture_mode TEXT NOT NULL DEFAULT 'live',
+      status TEXT NOT NULL DEFAULT 'draft',
+      period TEXT,
+      started_at TIMESTAMPTZ,
+      paused_at TIMESTAMPTZ,
+      saved_at TIMESTAMPTZ,
+      resumed_at TIMESTAMPTZ,
+      finished_at TIMESTAMPTZ,
+      suspended_at TIMESTAMPTZ,
+      suspension_reason TEXT,
+      clock_state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_session_operations (
+      operation_id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES match_sessions(id) ON DELETE SET NULL,
+      referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      operation_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'synced',
+      payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_reports (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES match_sessions(id) ON DELETE SET NULL,
+      generated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      capture_mode TEXT NOT NULL DEFAULT 'admin',
+      status TEXT NOT NULL DEFAULT 'draft',
+      version INTEGER NOT NULL DEFAULT 1,
+      payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      home_goals INTEGER,
+      away_goals INTEGER,
+      generated_at TIMESTAMPTZ,
+      finalized_at TIMESTAMPTZ,
+      published_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_report_signatures (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL REFERENCES match_reports(id) ON DELETE CASCADE,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      signed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      method TEXT NOT NULL DEFAULT 'pin',
+      status TEXT NOT NULL DEFAULT 'signed',
+      signed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ip_address TEXT,
+      user_agent TEXT,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      UNIQUE(report_id, team_id)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_report_disputes (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL REFERENCES match_reports(id) ON DELETE CASCADE,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+      requested_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      resolved_at TIMESTAMPTZ,
+      resolved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      resolution_note TEXT
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_sync_queue (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES match_sessions(id) ON DELETE CASCADE,
+      client_event_id TEXT,
+      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      synced_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS backup_records (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      file_name TEXT,
+      file_path TEXT,
+      size_bytes BIGINT NOT NULL DEFAULT 0,
+      checksum_sha256 TEXT,
+      storage_bucket TEXT,
+      storage_path TEXT,
+      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL,
+      completed_at TIMESTAMPTZ,
+      error_message TEXT
+    )
+  `);
   await pool.query("CREATE INDEX IF NOT EXISTS idx_match_rosters_match ON match_rosters(match_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users(lower(email))");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_user_accesses_user ON user_accesses(user_id)");
@@ -283,6 +461,14 @@ async function runPostgresMigrations(pool) {
   await pool.query("CREATE INDEX IF NOT EXISTS idx_players_league_team ON players(league_id, team_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_matches_league_competition_round ON matches(league_id, competition_id, round)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_match_events_match ON match_events(match_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_team_pins_match ON match_team_pins(match_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_sessions_match ON match_sessions(match_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_session_operations_match ON match_session_operations(match_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_reports_match ON match_reports(match_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_reports_status ON match_reports(status)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_report_signatures_report ON match_report_signatures(report_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_sync_queue_match_status ON match_sync_queue(match_id, status)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_backup_records_created ON backup_records(created_at DESC)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_player_sanctions_league ON player_sanctions(league_id, competition_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_player_injuries_league ON player_injuries(league_id, competition_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_matches_referee_central ON matches(central_referee_user_id)");
@@ -523,13 +709,29 @@ export async function getPostgresStore() {
     for (const event of eventRows) {
       const events = eventsByMatchId.get(event.match_id) || [];
       events.push({
+        localUuid: event.local_uuid || "",
         type: event.type,
         playerId: event.player_id,
+        secondaryPlayerId: event.secondary_player_id || "",
+        assistPlayerId: event.assist_player_id || "",
         teamId: event.team_id,
+        eventTeamSide: event.event_team_side || "",
+        subtype: event.subtype || "",
+        period: event.period || "",
         minute: event.minute,
+        minuteLabel: event.minute_label || "",
+        second: event.second,
         suspensionMatches: event.suspension_matches,
         suspensionIndefinite: toBoolean(event.suspension_indefinite),
-        reason: event.reason
+        disciplinaryPending: toBoolean(event.disciplinary_pending),
+        reason: event.reason,
+        metadata: event.metadata_json || {},
+        isOfficial: event.is_official !== false,
+        syncStatus: event.sync_status || "synced",
+        createdByUserId: event.created_by_user_id || "",
+        createdAt: toDateTimeValue(event.created_at),
+        updatedAt: toDateTimeValue(event.updated_at),
+        version: event.version || 1
       });
       eventsByMatchId.set(event.match_id, events);
     }
@@ -542,6 +744,10 @@ export async function getPostgresStore() {
         playoffLeg: row.playoff_leg,
         aggregateHome: row.aggregate_home,
         aggregateAway: row.aggregate_away,
+        extraTimeHomeGoals: row.extra_time_home_goals,
+        extraTimeAwayGoals: row.extra_time_away_goals,
+        penaltyHomeGoals: row.penalty_home_goals,
+        penaltyAwayGoals: row.penalty_away_goals,
         round: row.round,
         date: rowDate(row, "date"),
         time: row.time,
@@ -549,6 +755,11 @@ export async function getPostgresStore() {
         homeTeamId: row.home_team_id,
         awayTeamId: row.away_team_id,
         status: row.status,
+        workflowStatus: row.workflow_status || row.status || "scheduled",
+        captureMode: row.capture_mode || "admin",
+        currentReportId: row.current_report_id || "",
+        publishedAt: toDateTimeValue(row.published_at),
+        finalizedAt: toDateTimeValue(row.finalized_at),
         homeGoals: row.home_goals,
         awayGoals: row.away_goals,
         observations: row.observations,
@@ -566,12 +777,17 @@ export async function getPostgresStore() {
       teamId: row.team_id,
       submittedByUserId: row.submitted_by_user_id || "",
       captainPlayerId: row.captain_player_id || "",
+      goalkeeperPlayerId: row.goalkeeper_player_id || "",
       captainPin: row.captain_pin || "",
       players: row.players_json || [],
+      starters: row.starters_json || [],
+      substitutes: row.substitutes_json || [],
+      lineup: row.lineup_json || {},
       status: row.status,
       notes: row.notes || "",
       submittedAt: rowDate(row, "submitted_at"),
-      updatedAt: rowDate(row, "updated_at")
+      updatedAt: rowDate(row, "updated_at"),
+      version: row.version || 1
     }));
 
     return {
@@ -687,6 +903,12 @@ export async function importPostgresStore(store) {
       SELECT id, user_id, assignment_id, token_hash, expires_at, used_at, revoked_at, created_at
       FROM team_delegate_activation_tokens
     `)).rows;
+    const preservedMatchTeamPins = (await query(client, "SELECT * FROM match_team_pins")).rows;
+    const preservedMatchSessions = (await query(client, "SELECT * FROM match_sessions")).rows;
+    const preservedMatchReports = (await query(client, "SELECT * FROM match_reports")).rows;
+    const preservedMatchReportSignatures = (await query(client, "SELECT * FROM match_report_signatures")).rows;
+    const preservedMatchReportDisputes = (await query(client, "SELECT * FROM match_report_disputes")).rows;
+    const preservedMatchSyncQueue = (await query(client, "SELECT * FROM match_sync_queue")).rows;
     const nextLeagueIds = new Set(normalized.leagues.map((league) => league.id));
     const nextTeamIds = new Set(normalized.leagues.flatMap((league) => (league.teams || []).map((team) => team.id)));
     const removedLeagueIds = new Set(
@@ -872,7 +1094,7 @@ export async function importPostgresStore(store) {
         [adjustment.id, league.id, adjustment.playerId, Number(adjustment.value || 0), adjustment.date || "", adjustment.reason || "", adjustment.notes || "", adjustment.status || "active"]
       )), { dateColumns: ["date"] });
 
-      await insertRows(client, "matches", ["id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg", "aggregate_home", "aggregate_away", "round", "date", "time", "venue", "home_team_id", "away_team_id", "status", "home_goals", "away_goals", "observations", "resolution_type", "resolution_note", "central_referee_user_id", "assistant_referee1_user_id", "assistant_referee2_user_id", "fourth_referee_user_id"], league.matches.map((match) => [
+      await insertRows(client, "matches", ["id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg", "aggregate_home", "aggregate_away", "extra_time_home_goals", "extra_time_away_goals", "penalty_home_goals", "penalty_away_goals", "round", "date", "time", "venue", "home_team_id", "away_team_id", "status", "workflow_status", "capture_mode", "current_report_id", "published_at", "finalized_at", "home_goals", "away_goals", "observations", "resolution_type", "resolution_note", "central_referee_user_id", "assistant_referee1_user_id", "assistant_referee2_user_id", "fourth_referee_user_id"], league.matches.map((match) => [
           match.id,
           league.id,
           match.competitionId || league.currentCompetitionId,
@@ -881,6 +1103,10 @@ export async function importPostgresStore(store) {
           match.playoffLeg || "",
           match.aggregateHome ?? null,
           match.aggregateAway ?? null,
+          match.extraTimeHomeGoals ?? null,
+          match.extraTimeAwayGoals ?? null,
+          match.penaltyHomeGoals ?? null,
+          match.penaltyAwayGoals ?? null,
           match.round,
           match.date || "",
           match.time || "",
@@ -888,6 +1114,11 @@ export async function importPostgresStore(store) {
           match.homeTeamId,
           match.awayTeamId,
           match.status,
+          match.workflowStatus || match.status || "scheduled",
+          match.captureMode || "admin",
+          match.currentReportId || "",
+          match.publishedAt || null,
+          match.finalizedAt || null,
           match.homeGoals,
           match.awayGoals,
           match.observations || "",
@@ -899,27 +1130,213 @@ export async function importPostgresStore(store) {
           match.fourthRefereeUserId || null
         ]), { dateColumns: ["date"] });
 
-      await insertRows(client, "match_events", ["match_id", "type", "player_id", "team_id", "minute", "suspension_matches", "suspension_indefinite", "reason"], league.matches.flatMap((match) => (
-        (match.events || []).map((event) => [match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, toBoolean(event.suspensionIndefinite), event.reason])
+      await insertRows(client, "match_events", ["match_id", "local_uuid", "type", "player_id", "secondary_player_id", "assist_player_id", "team_id", "event_team_side", "subtype", "period", "minute", "minute_label", "second", "suspension_matches", "suspension_indefinite", "disciplinary_pending", "reason", "metadata_json", "is_official", "sync_status", "created_by_user_id", "created_at", "updated_at", "version"], league.matches.flatMap((match) => (
+        (match.events || []).map((event) => [
+          match.id,
+          event.localUuid || "",
+          event.type,
+          event.playerId || null,
+          event.secondaryPlayerId || null,
+          event.assistPlayerId || null,
+          event.teamId || null,
+          event.eventTeamSide || "",
+          event.subtype || "",
+          event.period || "",
+          event.minute,
+          event.minuteLabel || "",
+          event.second || null,
+          event.suspensionMatches,
+          toBoolean(event.suspensionIndefinite),
+          toBoolean(event.disciplinaryPending),
+          event.reason,
+          JSON.stringify(event.metadata || {}),
+          event.isOfficial !== false,
+          event.syncStatus || "synced",
+          event.createdByUserId || null,
+          event.createdAt || null,
+          event.updatedAt || null,
+          event.version || 1
+        ])
       )));
 
-      await insertRows(client, "match_rosters", ["id", "league_id", "match_id", "team_id", "submitted_by_user_id", "captain_player_id", "captain_pin", "players_json", "status", "notes", "submitted_at", "updated_at"], (league.matchRosters || []).map((roster) => [
+      await insertRows(client, "match_rosters", ["id", "league_id", "match_id", "team_id", "submitted_by_user_id", "captain_player_id", "goalkeeper_player_id", "captain_pin", "players_json", "starters_json", "substitutes_json", "lineup_json", "status", "notes", "submitted_at", "updated_at", "version"], (league.matchRosters || []).map((roster) => [
         roster.id,
         league.id,
         roster.matchId,
         roster.teamId,
         roster.submittedByUserId || null,
         roster.captainPlayerId || null,
+        roster.goalkeeperPlayerId || null,
         roster.captainPin || "",
         JSON.stringify(roster.players || []),
+        JSON.stringify(roster.starters || []),
+        JSON.stringify(roster.substitutes || []),
+        JSON.stringify(roster.lineup || {}),
         roster.status || "submitted",
         roster.notes || "",
         roster.submittedAt || new Date().toISOString(),
-        roster.updatedAt || roster.submittedAt || new Date().toISOString()
+        roster.updatedAt || roster.submittedAt || new Date().toISOString(),
+        roster.version || 1
       ]));
     }
 
     const userIds = new Set((await query(client, "SELECT id FROM users")).rows.map((user) => user.id));
+    const matchIds = new Set((await query(client, "SELECT id FROM matches")).rows.map((match) => match.id));
+    const teamIds = new Set((await query(client, "SELECT id FROM teams")).rows.map((team) => team.id));
+    const playerIds = new Set((await query(client, "SELECT id FROM players")).rows.map((player) => player.id));
+    const rosterIds = new Set((await query(client, "SELECT id FROM match_rosters")).rows.map((roster) => roster.id));
+    const restoredSessionIds = new Set();
+    const restoredReportIds = new Set();
+
+    await insertRows(client, "match_team_pins", [
+      "id", "league_id", "match_id", "team_id", "roster_id", "pin_hash", "pin_salt", "status",
+      "attempts", "locked_until", "generated_by_user_id", "generated_at", "revealed_by_user_id",
+      "revealed_at", "invalidated_at", "used_at", "signed_at", "created_at", "updated_at"
+    ], preservedMatchTeamPins
+      .filter((pin) => nextLeagueIds.has(pin.league_id) && matchIds.has(pin.match_id) && teamIds.has(pin.team_id))
+      .map((pin) => [
+        pin.id,
+        pin.league_id,
+        pin.match_id,
+        pin.team_id,
+        pin.roster_id && rosterIds.has(pin.roster_id) ? pin.roster_id : null,
+        pin.pin_hash,
+        pin.pin_salt || null,
+        pin.status || "active",
+        Number(pin.attempts || 0),
+        pin.locked_until || null,
+        pin.generated_by_user_id && userIds.has(pin.generated_by_user_id) ? pin.generated_by_user_id : null,
+        pin.generated_at || new Date().toISOString(),
+        pin.revealed_by_user_id && userIds.has(pin.revealed_by_user_id) ? pin.revealed_by_user_id : null,
+        pin.revealed_at || null,
+        pin.invalidated_at || null,
+        pin.used_at || null,
+        pin.signed_at || null,
+        pin.created_at || new Date().toISOString(),
+        pin.updated_at || new Date().toISOString()
+      ]));
+
+    await insertRows(client, "match_sessions", [
+      "id", "league_id", "match_id", "referee_user_id", "capture_mode", "status", "period",
+      "started_at", "paused_at", "saved_at", "resumed_at", "finished_at", "suspended_at",
+      "suspension_reason", "clock_state_json", "metadata_json", "created_at", "updated_at"
+    ], preservedMatchSessions
+      .filter((session) => nextLeagueIds.has(session.league_id) && matchIds.has(session.match_id))
+      .map((session) => {
+        restoredSessionIds.add(session.id);
+        return [
+          session.id,
+          session.league_id,
+          session.match_id,
+          session.referee_user_id && userIds.has(session.referee_user_id) ? session.referee_user_id : null,
+          session.capture_mode || "live",
+          session.status || "draft",
+          session.period || "",
+          session.started_at || null,
+          session.paused_at || null,
+          session.saved_at || null,
+          session.resumed_at || null,
+          session.finished_at || null,
+          session.suspended_at || null,
+          session.suspension_reason || "",
+          toJsonValue(session.clock_state_json, {}),
+          toJsonValue(session.metadata_json, {}),
+          session.created_at || new Date().toISOString(),
+          session.updated_at || new Date().toISOString()
+        ];
+      }));
+
+    await insertRows(client, "match_reports", [
+      "id", "league_id", "match_id", "session_id", "generated_by_user_id", "capture_mode", "status",
+      "version", "payload_json", "home_goals", "away_goals", "generated_at", "finalized_at",
+      "published_at", "created_at", "updated_at"
+    ], preservedMatchReports
+      .filter((report) => nextLeagueIds.has(report.league_id) && matchIds.has(report.match_id))
+      .map((report) => {
+        restoredReportIds.add(report.id);
+        return [
+          report.id,
+          report.league_id,
+          report.match_id,
+          report.session_id && restoredSessionIds.has(report.session_id) ? report.session_id : null,
+          report.generated_by_user_id && userIds.has(report.generated_by_user_id) ? report.generated_by_user_id : null,
+          report.capture_mode || "admin",
+          report.status || "draft",
+          Number(report.version || 1),
+          toJsonValue(report.payload_json, {}),
+          report.home_goals ?? null,
+          report.away_goals ?? null,
+          report.generated_at || null,
+          report.finalized_at || null,
+          report.published_at || null,
+          report.created_at || new Date().toISOString(),
+          report.updated_at || new Date().toISOString()
+        ];
+      }));
+
+    await insertRows(client, "match_report_signatures", [
+      "id", "report_id", "league_id", "match_id", "team_id", "captain_player_id",
+      "signed_by_user_id", "method", "status", "signed_at", "ip_address", "user_agent", "metadata_json"
+    ], preservedMatchReportSignatures
+      .filter((signature) => restoredReportIds.has(signature.report_id))
+      .filter((signature) => nextLeagueIds.has(signature.league_id) && matchIds.has(signature.match_id) && teamIds.has(signature.team_id))
+      .map((signature) => [
+        signature.id,
+        signature.report_id,
+        signature.league_id,
+        signature.match_id,
+        signature.team_id,
+        signature.captain_player_id && playerIds.has(signature.captain_player_id) ? signature.captain_player_id : null,
+        signature.signed_by_user_id && userIds.has(signature.signed_by_user_id) ? signature.signed_by_user_id : null,
+        signature.method || "pin",
+        signature.status || "signed",
+        signature.signed_at || new Date().toISOString(),
+        signature.ip_address || "",
+        signature.user_agent || "",
+        toJsonValue(signature.metadata_json, {})
+      ]));
+
+    await insertRows(client, "match_report_disputes", [
+      "id", "report_id", "league_id", "match_id", "team_id", "requested_by_user_id",
+      "reason", "status", "created_at", "resolved_at", "resolved_by_user_id", "resolution_note"
+    ], preservedMatchReportDisputes
+      .filter((dispute) => restoredReportIds.has(dispute.report_id))
+      .filter((dispute) => nextLeagueIds.has(dispute.league_id) && matchIds.has(dispute.match_id))
+      .map((dispute) => [
+        dispute.id,
+        dispute.report_id,
+        dispute.league_id,
+        dispute.match_id,
+        dispute.team_id && teamIds.has(dispute.team_id) ? dispute.team_id : null,
+        dispute.requested_by_user_id && userIds.has(dispute.requested_by_user_id) ? dispute.requested_by_user_id : null,
+        dispute.reason || "",
+        dispute.status || "open",
+        dispute.created_at || new Date().toISOString(),
+        dispute.resolved_at || null,
+        dispute.resolved_by_user_id && userIds.has(dispute.resolved_by_user_id) ? dispute.resolved_by_user_id : null,
+        dispute.resolution_note || ""
+      ]));
+
+    await insertRows(client, "match_sync_queue", [
+      "id", "league_id", "match_id", "session_id", "client_event_id", "created_by_user_id",
+      "payload_json", "status", "attempts", "last_error", "created_at", "synced_at"
+    ], preservedMatchSyncQueue
+      .filter((queued) => nextLeagueIds.has(queued.league_id) && matchIds.has(queued.match_id))
+      .map((queued) => [
+        queued.id,
+        queued.league_id,
+        queued.match_id,
+        queued.session_id && restoredSessionIds.has(queued.session_id) ? queued.session_id : null,
+        queued.client_event_id || "",
+        queued.created_by_user_id && userIds.has(queued.created_by_user_id) ? queued.created_by_user_id : null,
+        toJsonValue(queued.payload_json, {}),
+        queued.status || "pending",
+        Number(queued.attempts || 0),
+        queued.last_error || "",
+        queued.created_at || new Date().toISOString(),
+        queued.synced_at || null
+      ]));
+
     const restoredAccessIds = new Set();
     const restoredAssignmentIds = new Set();
 

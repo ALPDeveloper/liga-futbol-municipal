@@ -63,6 +63,8 @@ npm run backup:db
 
 Los respaldos se guardan en `backups/` salvo que `BACKUP_DIR` indique otra ruta. Si `DATABASE_PROVIDER=postgres`, el comando genera un respaldo logico JSON desde Postgres.
 
+Para produccion, configura tambien `BACKUP_STORAGE_BUCKET` con un bucket privado de Supabase Storage. El panel Super Admin puede crear, verificar y descargar respaldos auditados; si el bucket esta configurado, el respaldo tambien se guarda como copia externa privada.
+
 Para exportar todo el estado actual a JSON antes de migrar o subir piloto:
 
 ```bash
@@ -122,13 +124,30 @@ Las variables principales viven en `.env`:
 - `SHOW_RECOVERY_CODE_IN_RESPONSE`: en desarrollo puede ser `true`; en produccion debe ser `false`.
 - `DB_PATH`: ruta de la base SQLite.
 - `BACKUP_DIR`: carpeta de respaldos.
+- `BACKUP_STORAGE_BUCKET`: bucket privado para guardar copias externas de respaldos.
 - `DATABASE_PROVIDER`: `sqlite` para desarrollo local o `postgres` para Supabase/Postgres.
 - `DATABASE_URL`: cadena de conexion Postgres/Supabase para el adaptador de produccion.
 - `DATABASE_SSL`: `true` para Supabase; `false` solo para Postgres local sin SSL.
 - `CORS_ORIGIN`: dominio permitido para consumir la API en produccion.
 - `VITE_API_BASE_URL`: URL de API para el frontend; en produccion puede ser `/api` si web y API comparten dominio.
 
-En produccion la API no arranca si falta `AUTH_SECRET`, si el secreto es muy corto, si `CORS_ORIGIN` queda abierto, si `SHOW_RECOVERY_CODE_IN_RESPONSE=true`, o si `DATABASE_PROVIDER=postgres` no tiene `DATABASE_URL`.
+En produccion la API no arranca si falta `AUTH_SECRET`, si el secreto es muy corto, si `CORS_ORIGIN` queda abierto o usa `http`, si `SHOW_RECOVERY_CODE_IN_RESPONSE=true`, si `DATABASE_PROVIDER=postgres` no tiene `DATABASE_URL`, o si falta `BACKUP_STORAGE_BUCKET`.
+
+Variables minimas recomendadas para Render en produccion:
+
+```bash
+NODE_ENV=production
+DATABASE_PROVIDER=postgres
+CORS_ORIGIN=https://ligatec.mx
+VITE_API_BASE_URL=/api
+IMAGE_STORAGE_PROVIDER=supabase
+SUPABASE_STORAGE_BUCKET=ligatec-images
+BACKUP_STORAGE_BUCKET=ligatec-backups
+SEED_DEMO_DATA=false
+SEED_DEMO_USERS=false
+SHOW_RECOVERY_CODE_IN_RESPONSE=false
+SERVE_STATIC=true
+```
 
 ## Accesos
 

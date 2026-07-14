@@ -1,12 +1,70 @@
 import { useEffect, useMemo, useState } from "react";
+import ligatecLogo from "../../assets/ligatec-logo.png";
 import { getFormPayload } from "./forms.js";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { uploadImage } from "../lib/uploadApi.js";
-import { createTeamPortalPlayer, fetchTeamPortal, submitTeamMatchRoster, updateTeamPortalLogo, updateTeamPortalPlayer } from "../lib/teamDelegateApi.js";
+import {
+  createTeamPortalPlayer,
+  fetchTeamPortal,
+  regenerateTeamMatchPin,
+  revealTeamMatchPin,
+  submitTeamMatchRoster,
+  updateTeamPortalLogo,
+  updateTeamPortalPlayer
+} from "../lib/teamDelegateApi.js";
 import { getPlayerPhotoInitials } from "../lib/playerPhotoProcessing.js";
 
 const PLAYER_POSITION_OPTIONS = ["Arquero", "Defensor", "Mediocampista", "Delantero"];
+
+function getTeamInitials(name) {
+  const words = String(name || "EQ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "EQ";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+}
+
+function formatMatchDate(match) {
+  const date = match?.date || "Fecha por definir";
+  const time = match?.time || "Hora por definir";
+  return `${date} | ${time}`;
+}
+
+function TeamBadge({ logoUrl, name, tone = "home" }) {
+  return (
+    <span className={`portal-team-badge ${tone}`}>
+      {logoUrl ? <img alt="" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
+    </span>
+  );
+}
+
+function PortalNavIcon({ type }) {
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true"
+  };
+  if (type === "teams") {
+    return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-8 0v2" /><circle cx="12" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
+  }
+  if (type === "matches") {
+    return <svg {...common}><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" /><path d="m9 16 2 2 4-4" /></svg>;
+  }
+  if (type === "history") {
+    return <svg {...common}><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /><path d="M12 7v5l3 2" /></svg>;
+  }
+  if (type === "more") {
+    return <svg {...common}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>;
+  }
+  return <svg {...common}><path d="M3 11 12 3l9 8" /><path d="M5 10v10h14V10" /><path d="M9 20v-6h6v6" /></svg>;
+}
 
 function getTeamPortalCacheKey(userId) {
   return `ligatec-team-portal-cache-${userId || "anonymous"}`;
@@ -45,7 +103,7 @@ function getPlayerPositionOptionValue(position) {
   return "Delantero";
 }
 
-export function TeamPortal({ authToken, currentUser }) {
+export function TeamPortal({ authToken, currentUser, onLogout }) {
   const [context, setContext] = useState(null);
   const [players, setPlayers] = useState([]);
   const [eligiblePlayers, setEligiblePlayers] = useState([]);
@@ -61,6 +119,8 @@ export function TeamPortal({ authToken, currentUser }) {
   const [editingPlayerId, setEditingPlayerId] = useState("");
   const [busyPlayerId, setBusyPlayerId] = useState("");
   const [busyMatchId, setBusyMatchId] = useState("");
+  const [busyPinMatchId, setBusyPinMatchId] = useState("");
+  const [visiblePinsByMatchId, setVisiblePinsByMatchId] = useState({});
   const [teamLogoResetKey, setTeamLogoResetKey] = useState(0);
   const filteredPlayers = useMemo(() => {
     const query = normalizeSearch(playerQuery);
@@ -192,14 +252,14 @@ export function TeamPortal({ authToken, currentUser }) {
   function updateRosterDraft(matchId, updater) {
     setRosterDrafts((current) => ({
       ...current,
-      [matchId]: updater(current[matchId] || { playerIds: [], captainPlayerId: "", notes: "" })
+      [matchId]: updater(current[matchId] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", notes: "" })
     }));
   }
 
   async function submitMatchRoster(event, match) {
     event.preventDefault();
     if (busyMatchId) return;
-    const draft = rosterDrafts[match.id] || { playerIds: [], captainPlayerId: "", notes: "" };
+    const draft = rosterDrafts[match.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", notes: "" };
     if (!draft.playerIds.length) {
       setError("Selecciona al menos un jugador para enviar la convocatoria.");
       return;
@@ -208,7 +268,18 @@ export function TeamPortal({ authToken, currentUser }) {
       setError("Selecciona un capitan dentro de la convocatoria.");
       return;
     }
-    const confirmed = window.confirm(`¿Enviar convocatoria de ${context.teamName} vs ${match.opponentName}?\n\nJugadores: ${draft.playerIds.length}\nCapitan: ${getEligiblePlayerName(eligiblePlayers, draft.captainPlayerId)}\n\nEl arbitro vera esta lista para capturar el acta.`);
+    if (!draft.goalkeeperPlayerId || !draft.playerIds.includes(draft.goalkeeperPlayerId)) {
+      setError("Selecciona un portero dentro de la convocatoria.");
+      return;
+    }
+    const starterSet = new Set(draft.starters || []);
+    const substituteSet = new Set(draft.substitutes || []);
+    const missingRolePlayerId = draft.playerIds.find((playerId) => !starterSet.has(playerId) && !substituteSet.has(playerId));
+    if (missingRolePlayerId) {
+      setError(`${getEligiblePlayerName(eligiblePlayers, missingRolePlayerId)} debe estar como titular o suplente.`);
+      return;
+    }
+    const confirmed = window.confirm(`¿Enviar convocatoria de ${context.teamName} vs ${match.opponentName}?\n\nJugadores: ${draft.playerIds.length}\nTitulares: ${(draft.starters || []).length}\nSuplentes: ${(draft.substitutes || []).length}\nCapitan: ${getEligiblePlayerName(eligiblePlayers, draft.captainPlayerId)}\nPortero: ${getEligiblePlayerName(eligiblePlayers, draft.goalkeeperPlayerId)}\n\nEl arbitro vera esta lista para capturar el acta.`);
     if (!confirmed) return;
 
     setBusyMatchId(match.id);
@@ -224,6 +295,61 @@ export function TeamPortal({ authToken, currentUser }) {
       setError(saveError.message || "No se pudo enviar la convocatoria.");
     } finally {
       setBusyMatchId("");
+    }
+  }
+
+  async function requestPinPassword(actionLabel) {
+    const password = window.prompt(`Confirma tu contrasena para ${actionLabel}.`);
+    return password ? password.trim() : "";
+  }
+
+  async function revealMatchPin(match) {
+    if (busyPinMatchId) return;
+    const password = await requestPinPassword("mostrar el PIN");
+    if (!password) return;
+
+    setBusyPinMatchId(match.id);
+    setNotice("Validando acceso al PIN...");
+    setError("");
+    try {
+      const response = await revealTeamMatchPin(authToken, match.id, { password });
+      if (response.payload) {
+        applyPortalPayload(response.payload);
+        writeTeamPortalCache(currentUser?.id, response.payload);
+      }
+      setVisiblePinsByMatchId((current) => ({ ...current, [match.id]: response.pin || "" }));
+      setNotice("PIN mostrado. Compartelo solo al validar el acta.");
+    } catch (pinError) {
+      setNotice("");
+      setError(pinError.message || "No se pudo mostrar el PIN.");
+    } finally {
+      setBusyPinMatchId("");
+    }
+  }
+
+  async function regenerateMatchPin(match) {
+    if (busyPinMatchId) return;
+    const confirmed = window.confirm("Esto invalidara el PIN anterior para este partido. ¿Deseas generar uno nuevo?");
+    if (!confirmed) return;
+    const password = await requestPinPassword("regenerar el PIN");
+    if (!password) return;
+
+    setBusyPinMatchId(match.id);
+    setNotice("Generando nuevo PIN...");
+    setError("");
+    try {
+      const response = await regenerateTeamMatchPin(authToken, match.id, { password });
+      if (response.payload) {
+        applyPortalPayload(response.payload);
+        writeTeamPortalCache(currentUser?.id, response.payload);
+      }
+      setVisiblePinsByMatchId((current) => ({ ...current, [match.id]: response.pin || "" }));
+      setNotice("PIN regenerado correctamente.");
+    } catch (pinError) {
+      setNotice("");
+      setError(pinError.message || "No se pudo regenerar el PIN.");
+    } finally {
+      setBusyPinMatchId("");
     }
   }
 
@@ -249,10 +375,86 @@ export function TeamPortal({ authToken, currentUser }) {
     );
   }
 
+  const nextMatch = matches[0] || null;
+  const submittedRosters = matches.filter((match) => match.roster).length;
+  const openRosterMatches = matches.filter((match) => !match.roster).length;
+  const rosterLimit = context?.rosterLimit || 20;
+  const rosterProgress = Math.min(100, Math.round((players.length / Math.max(1, rosterLimit)) * 100));
+
   return (
-    <main className="page team-portal-page">
-      <section className="panel team-portal-hero">
-        <SectionHeading eyebrow={context.leagueName} title={context.teamName} />
+    <main className="page team-portal-page portal-mobile-shell" id="delegate-home">
+      <section className="team-portal-app-hero">
+        <div className="portal-topline">
+          <span className="portal-brand">
+            <img alt="LIGATEC" src={ligatecLogo} />
+          </span>
+          <div className="portal-topline-actions">
+            <button className="portal-mini-link" type="button" onClick={onLogout}>Salir</button>
+            <button className="portal-icon-button" type="button" aria-label="Menu">
+              <PortalNavIcon type="more" />
+            </button>
+          </div>
+        </div>
+        <div className="portal-user-summary">
+          <span className="portal-avatar">{getTeamInitials(currentUser?.name || context.teamName)}</span>
+          <div>
+            <strong>{currentUser?.name || "Delegado"}</strong>
+            <small>{context.competitionName || "Categoria asignada"}</small>
+          </div>
+        </div>
+
+        {nextMatch ? (
+          <article className="portal-next-match-card">
+            <div className="portal-card-head">
+              <strong>Proximo partido</strong>
+              <span className={nextMatch.roster ? "portal-status-pill sent" : "portal-status-pill"}>{nextMatch.roster ? "Convocatoria enviada" : "Convocatoria abierta"}</span>
+            </div>
+            <span className="portal-match-date">{formatMatchDate(nextMatch)}</span>
+            <div className="portal-match-teams">
+              <div>
+                <TeamBadge logoUrl={context.teamLogoUrl} name={context.teamName} />
+                <strong>{context.teamName}</strong>
+                <small>Local</small>
+              </div>
+              <b>VS</b>
+              <div>
+                <TeamBadge name={nextMatch.opponentName} tone="away" />
+                <strong>{nextMatch.opponentName}</strong>
+                <small>Visitante</small>
+              </div>
+            </div>
+            <div className="portal-match-meta">
+              <span>Central</span>
+              <span>{context.competitionName || "Categoria"}</span>
+              <span>{nextMatch.venue || "Cancha por definir"}</span>
+            </div>
+            <a className="portal-primary-action" href="#delegate-matches">{nextMatch.roster ? "Editar convocatoria" : "Enviar plantilla"}</a>
+            <small className="portal-card-note">Convocatoria abierta hasta antes del partido.</small>
+          </article>
+        ) : (
+          <article className="portal-next-match-card">
+            <div className="portal-card-head">
+              <strong>Proximo partido</strong>
+              <span className="portal-status-pill neutral">Sin programar</span>
+            </div>
+            <p className="helper-text">Cuando la liga publique una jornada para tu equipo, aparecera aqui.</p>
+          </article>
+        )}
+
+        <div className="portal-quick-actions">
+          <a href="#delegate-roster"><PortalNavIcon type="teams" /><span>Mi equipo</span></a>
+          <a href="#delegate-players"><PortalNavIcon type="matches" /><span>Plantilla</span></a>
+          <a href="#delegate-matches"><PortalNavIcon type="history" /><span>Partidos</span></a>
+          <a href="#delegate-tools"><PortalNavIcon type="more" /><span>Jugadores</span></a>
+        </div>
+
+        <div className="portal-summary-card">
+          <strong>Resumen</strong>
+          <span><b>{players.length}</b> jugadores activos</span>
+          <span><b>{submittedRosters}</b> plantillas enviadas</span>
+          <span><b>{openRosterMatches}</b> partidos por jugar</span>
+        </div>
+
         <div className={`team-roster-status ${context.canManageRoster ? "open" : "closed"}`}>
           <strong>{context.canManageRoster ? "Registro abierto" : "Registro cerrado"}</strong>
           <span>
@@ -261,15 +463,12 @@ export function TeamPortal({ authToken, currentUser }) {
               : "Tu liga debe habilitar el registro para que puedas agregar jugadores."}
           </span>
         </div>
-        <p className="helper-text">
-          Sesion de {currentUser?.name || "delegado"} | Categoria: {context.competitionName || "Sin categoria asignada"}
-        </p>
         {notice && <p className="auth-ok">{notice}</p>}
         {error && <p className="auth-error">{error}</p>}
       </section>
 
       {context.canManageRoster && (
-        <section className="panel">
+        <section className="panel portal-app-card" id="delegate-players">
           <SectionHeading eyebrow="Captura" title="Registrar jugador" />
           <form className="team-player-form" onSubmit={submitPlayer}>
             <label>Nombre completo
@@ -291,12 +490,12 @@ export function TeamPortal({ authToken, currentUser }) {
         </section>
       )}
 
-      <section className="panel">
+      <section className="panel portal-app-card" id="delegate-matches">
         <SectionHeading eyebrow="Partidos" title="Convocatoria por partido" />
         <p className="helper-text">Selecciona los jugadores que se presentaran al partido y marca al capitan. El arbitro usara esta lista para capturar el acta.</p>
         <div className="team-match-roster-list">
           {matches.map((match) => {
-            const draft = rosterDrafts[match.id] || { playerIds: [], captainPlayerId: "", notes: "" };
+            const draft = rosterDrafts[match.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", notes: "" };
             const selectedCount = draft.playerIds.length;
             const availablePlayers = eligiblePlayers.filter((player) => {
               const blockedBySuspension = Boolean(player.suspension);
@@ -316,8 +515,16 @@ export function TeamPortal({ authToken, currentUser }) {
                   {match.roster?.captainPin && (
                     <div className="team-match-pin-box">
                       <span>PIN de autorizacion del capitan</span>
-                      <strong>{match.roster.captainPin}</strong>
-                      <small>Comparte este PIN con el arbitro solo al validar el acta del partido.</small>
+                      <strong>{visiblePinsByMatchId[match.id] || "------"}</strong>
+                      <small>Oculto por seguridad. Solo el delegado puede mostrarlo o regenerarlo con su contrasena.</small>
+                      <div className="inline-actions">
+                        <button type="button" onClick={() => revealMatchPin(match)} disabled={busyPinMatchId === match.id}>
+                          {busyPinMatchId === match.id ? "Validando..." : "Mostrar PIN"}
+                        </button>
+                        <button type="button" onClick={() => regenerateMatchPin(match)} disabled={busyPinMatchId === match.id}>
+                          Regenerar
+                        </button>
+                      </div>
                     </div>
                   )}
                   <label>Capitan
@@ -331,13 +538,31 @@ export function TeamPortal({ authToken, currentUser }) {
                       ))}
                     </select>
                   </label>
+                  <label>Portero
+                    <select
+                      value={draft.goalkeeperPlayerId || ""}
+                      onChange={(event) => updateRosterDraft(match.id, (current) => ({ ...current, goalkeeperPlayerId: event.target.value }))}
+                    >
+                      <option value="">Selecciona portero</option>
+                      {availablePlayers.filter((player) => draft.playerIds.includes(player.id)).map((player) => (
+                        <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
+                      ))}
+                    </select>
+                  </label>
                   <div className="team-match-player-grid">
                     {eligiblePlayers.map((player) => {
                       const blockedBySuspension = Boolean(player.suspension);
                       const blockedByPlayoff = match.isPlayoff && player.playoffEligibility?.applies && !player.playoffEligibility?.eligible;
                       const disabled = blockedBySuspension || blockedByPlayoff;
                       const checked = draft.playerIds.includes(player.id) && !disabled;
-                      const suspensionLabel = player.suspension?.indefinite
+                      const rosterRole = draft.starters?.includes(player.id)
+                        ? "starter"
+                        : draft.substitutes?.includes(player.id)
+                          ? "substitute"
+                          : "starter";
+                      const suspensionLabel = player.suspension?.pendingReview
+                        ? `Expulsado sujeto a comision: ${player.suspension.reason || "Revision disciplinaria"}`
+                        : player.suspension?.indefinite
                         ? `Inhabilitado indefinido: ${player.suspension.reason || player.suspension.type || "Sancion activa"}`
                         : `Suspendido${player.suspension?.remainingMatches ? ` (${player.suspension.remainingMatches} juego(s))` : ""}${player.suspension?.returnRound ? ` | Regresa J${player.suspension.returnRound}` : ""}`;
                       return (
@@ -354,7 +579,12 @@ export function TeamPortal({ authToken, currentUser }) {
                               return {
                                 ...current,
                                 playerIds,
-                                captainPlayerId: playerIds.includes(current.captainPlayerId) ? current.captainPlayerId : ""
+                                starters: event.target.checked
+                                  ? [...new Set([...(current.starters || []), player.id])]
+                                  : (current.starters || []).filter((playerId) => playerId !== player.id),
+                                substitutes: (current.substitutes || []).filter((playerId) => playerId !== player.id),
+                                captainPlayerId: playerIds.includes(current.captainPlayerId) ? current.captainPlayerId : "",
+                                goalkeeperPlayerId: playerIds.includes(current.goalkeeperPlayerId) ? current.goalkeeperPlayerId : ""
                               };
                             })}
                           />
@@ -368,6 +598,28 @@ export function TeamPortal({ authToken, currentUser }) {
                                   : player.position || "Jugador"}
                             </small>
                           </span>
+                          {checked && (
+                            <select
+                              aria-label={`Rol de ${player.name}`}
+                              value={rosterRole}
+                              onChange={(event) => updateRosterDraft(match.id, (current) => {
+                                const starters = new Set(current.starters || []);
+                                const substitutes = new Set(current.substitutes || []);
+                                starters.delete(player.id);
+                                substitutes.delete(player.id);
+                                if (event.target.value === "substitute") substitutes.add(player.id);
+                                else starters.add(player.id);
+                                return {
+                                  ...current,
+                                  starters: [...starters].filter((playerId) => current.playerIds.includes(playerId)),
+                                  substitutes: [...substitutes].filter((playerId) => current.playerIds.includes(playerId))
+                                };
+                              })}
+                            >
+                              <option value="starter">Titular</option>
+                              <option value="substitute">Suplente</option>
+                            </select>
+                          )}
                         </label>
                       );
                     })}
@@ -392,7 +644,7 @@ export function TeamPortal({ authToken, currentUser }) {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel portal-app-card" id="delegate-tools">
         <SectionHeading eyebrow="Equipo" title="Escudo del equipo" />
         <form className="team-logo-form" onSubmit={submitTeamLogo}>
           <PlayerPhotoUploader
@@ -409,12 +661,17 @@ export function TeamPortal({ authToken, currentUser }) {
         </form>
       </section>
 
-      <section className="panel">
+      <section className="panel portal-app-card" id="delegate-roster">
         <div className="team-portal-roster-head">
           <SectionHeading eyebrow="Plantilla" title={`${players.length} jugador(es) registrados`} />
           <button type="button" onClick={() => setRosterExpanded((value) => !value)}>
             {rosterExpanded ? "Comprimir plantilla" : "Ver plantilla"}
           </button>
+        </div>
+        <div className="portal-roster-progress">
+          <span>Plantilla completa</span>
+          <strong>{players.length}/{rosterLimit}</strong>
+          <b><i style={{ width: `${rosterProgress}%` }} /></b>
         </div>
 
         <div className="team-portal-filters">
@@ -505,6 +762,13 @@ export function TeamPortal({ authToken, currentUser }) {
           </div>
         )}
       </section>
+      <nav className="portal-bottom-nav" aria-label="Navegacion delegado">
+        <a href="#delegate-home" className="active"><PortalNavIcon type="home" /><span>Inicio</span></a>
+        <a href="#delegate-roster"><PortalNavIcon type="teams" /><span>Equipo</span></a>
+        <a href="#delegate-matches"><PortalNavIcon type="matches" /><span>Partidos</span></a>
+        <a href="#delegate-players"><PortalNavIcon type="history" /><span>Plantilla</span></a>
+        <a href="#delegate-tools"><PortalNavIcon type="more" /><span>Mas</span></a>
+      </nav>
     </main>
   );
 }
@@ -541,12 +805,25 @@ function buildRosterDrafts(matches, eligiblePlayers) {
       .map((entry) => typeof entry === "string" ? entry : entry.playerId)
       .filter((playerId) => availablePlayerIds.includes(playerId));
     const playerIds = rosterPlayerIds.length ? rosterPlayerIds : availablePlayerIds;
+    const starters = (match.roster?.starters?.length ? match.roster.starters : playerIds)
+      .filter((playerId) => playerIds.includes(playerId));
+    const substitutes = (match.roster?.substitutes || [])
+      .filter((playerId) => playerIds.includes(playerId) && !starters.includes(playerId));
     const captainPlayerId = playerIds.includes(match.roster?.captainPlayerId)
       ? match.roster.captainPlayerId
       : playerIds[0] || "";
+    const goalkeeperPlayerId = playerIds.includes(match.roster?.goalkeeperPlayerId)
+      ? match.roster.goalkeeperPlayerId
+      : playerIds.find((playerId) => {
+        const player = eligiblePlayers.find((item) => item.id === playerId);
+        return getPlayerPositionOptionValue(player?.position) === "Arquero";
+      }) || playerIds[0] || "";
     drafts[match.id] = {
       playerIds,
+      starters,
+      substitutes,
       captainPlayerId,
+      goalkeeperPlayerId,
       notes: match.roster?.notes || ""
     };
   }

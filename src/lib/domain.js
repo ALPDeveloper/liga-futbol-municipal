@@ -1,4 +1,10 @@
 import { DEFAULT_IDENTITY, seedData } from "../data/seedData.js";
+import {
+  MATCH_CAPTURE_MODES,
+  MATCH_WORKFLOW_STATUSES,
+  normalizeCaptureMode,
+  normalizeWorkflowStatus
+} from "./matchWorkflow.js";
 
 export const YELLOW_SUSPENSION_LIMIT = 3;
 export const MAX_IMAGE_DATA_URL_LENGTH = 1_800_000;
@@ -101,9 +107,10 @@ export function normalizeStore(data) {
         startsAt: competition.startsAt || "",
         endsAt: competition.endsAt || ""
       }));
-      const currentCompetitionId = competitions.some((competition) => competition.id === league.currentCompetitionId)
-        ? league.currentCompetitionId
-        : competitions.find((competition) => competition.status === "active")?.id || competitions[0]?.id || fallbackCompetition.id;
+      const currentCompetition = competitions.find((competition) => competition.id === league.currentCompetitionId);
+      const currentCompetitionId = currentCompetition?.status !== "archived"
+        ? currentCompetition.id
+        : competitions.find((competition) => competition.status !== "archived")?.id || competitions[0]?.id || fallbackCompetition.id;
       const normalizedTeams = (league.teams || []).map((team) => ({
         ...team,
         competitionId: team.competitionId || currentCompetitionId,
@@ -270,20 +277,45 @@ export function normalizeStore(data) {
         matches: (league.matches || []).map((match) => ({
           ...match,
           competitionId: match.competitionId || currentCompetitionId,
+          workflowStatus: normalizeWorkflowStatus(match.workflowStatus || match.workflow_status || match.status || MATCH_WORKFLOW_STATUSES.SCHEDULED),
+          captureMode: normalizeCaptureMode(match.captureMode || match.capture_mode || MATCH_CAPTURE_MODES.ADMIN),
+          currentReportId: match.currentReportId || match.current_report_id || "",
+          publishedAt: match.publishedAt || match.published_at || "",
+          finalizedAt: match.finalizedAt || match.finalized_at || "",
           stage: match.stage || "regular",
           playoffRound: upperText(match.playoffRound),
           playoffLeg: upperText(match.playoffLeg),
           venue: upperText(match.venue),
           aggregateHome: match.aggregateHome ?? null,
           aggregateAway: match.aggregateAway ?? null,
+          extraTimeHomeGoals: match.extraTimeHomeGoals ?? null,
+          extraTimeAwayGoals: match.extraTimeAwayGoals ?? null,
+          penaltyHomeGoals: match.penaltyHomeGoals ?? null,
+          penaltyAwayGoals: match.penaltyAwayGoals ?? null,
           observations: upperText(match.observations || ""),
           resolutionType: match.resolutionType || "normal",
           resolutionNote: match.resolutionNote ? upperText(match.resolutionNote) : null,
           events: (match.events || []).map((event) => ({
             ...event,
+            localUuid: event.localUuid || event.local_uuid || "",
+            minuteLabel: event.minuteLabel || "",
+            period: event.period || "",
+            second: Number(event.second || 0) || null,
+            eventTeamSide: event.eventTeamSide || event.event_team_side || "",
+            secondaryPlayerId: event.secondaryPlayerId || event.secondary_player_id || "",
+            assistPlayerId: event.assistPlayerId || event.assist_player_id || "",
+            subtype: event.subtype || "",
             suspensionMatches: Number(event.suspensionMatches || 0),
             suspensionIndefinite: Boolean(event.suspensionIndefinite),
-            reason: upperText(event.reason)
+            disciplinaryPending: Boolean(event.disciplinaryPending),
+            reason: upperText(event.reason),
+            metadata: event.metadata || {},
+            isOfficial: event.isOfficial !== false,
+            syncStatus: event.syncStatus || "synced",
+            createdByUserId: event.createdByUserId || "",
+            createdAt: event.createdAt || "",
+            updatedAt: event.updatedAt || "",
+            version: Number(event.version || 1)
           }))
         })),
         matchRosters: (league.matchRosters || []).map((roster) => ({
@@ -293,15 +325,37 @@ export function normalizeStore(data) {
           teamId: roster.teamId || "",
           submittedByUserId: roster.submittedByUserId || "",
           captainPlayerId: roster.captainPlayerId || "",
+          goalkeeperPlayerId: roster.goalkeeperPlayerId || "",
           captainPin: String(roster.captainPin || ""),
+          starters: (roster.starters || []).filter(Boolean),
+          substitutes: (roster.substitutes || []).filter(Boolean),
+          lineup: roster.lineup || {},
           players: (roster.players || [])
             .map((entry) => (typeof entry === "string" ? { playerId: entry } : { playerId: entry.playerId || "" }))
             .filter((entry) => entry.playerId),
           status: roster.status || "submitted",
           notes: upperText(roster.notes || ""),
           submittedAt: roster.submittedAt || "",
-          updatedAt: roster.updatedAt || roster.submittedAt || ""
-        })).filter((roster) => roster.matchId && roster.teamId)
+          updatedAt: roster.updatedAt || roster.submittedAt || "",
+          version: Number(roster.version || 1)
+        })).filter((roster) => roster.matchId && roster.teamId),
+        matchReports: (league.matchReports || []).map((report) => ({
+          ...report,
+          id: report.id || makeId("match-report"),
+          matchId: report.matchId || "",
+          sessionId: report.sessionId || "",
+          captureMode: normalizeCaptureMode(report.captureMode || report.capture_mode || MATCH_CAPTURE_MODES.ADMIN),
+          status: report.status || "draft",
+          version: Number(report.version || 1),
+          payload: report.payload || {},
+          homeGoals: report.homeGoals ?? null,
+          awayGoals: report.awayGoals ?? null,
+          generatedAt: report.generatedAt || "",
+          finalizedAt: report.finalizedAt || "",
+          publishedAt: report.publishedAt || "",
+          createdAt: report.createdAt || "",
+          updatedAt: report.updatedAt || ""
+        })).filter((report) => report.matchId)
       };
     })
   };
@@ -424,7 +478,9 @@ export function makeId(prefix) {
 }
 
 export function getDefaultCompetitionId(league) {
-  return league.currentCompetitionId || league.competitions?.find((competition) => competition.status === "active")?.id || league.competitions?.[0]?.id || "";
+  const currentCompetition = league.competitions?.find((competition) => competition.id === league.currentCompetitionId);
+  if (currentCompetition && currentCompetition.status !== "archived") return currentCompetition.id;
+  return league.competitions?.find((competition) => competition.status !== "archived")?.id || league.competitions?.[0]?.id || "";
 }
 
 export function getCompetition(league, competitionId) {
@@ -962,12 +1018,55 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
   };
 }
 
+function buildPendingDisciplinaryNotice(league, { playerId, reason, type, origin }) {
+  const player = getPlayer(league, playerId);
+  if (!player) return null;
+
+  const team = getTeam(league, player.teamId);
+  const eligibleTeamIds = getEligibleTeamIdsForPlayer(league, playerId);
+  const nextMatch = sortMatches(league.matches.filter((match) => (
+    match.status === "scheduled" && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
+  )))[0] || null;
+
+  return {
+    id: `pending-${type}-${origin?.matchId || player.id}-${player.id}`,
+    player,
+    team,
+    type,
+    reason,
+    totalMatches: null,
+    servedMatches: 0,
+    remainingMatches: null,
+    status: "active",
+    nextMatch,
+    returnMatch: null,
+    returnRound: "Revision",
+    indefinite: false,
+    pendingReview: true
+  };
+}
+
 export function calculateSuspensionNotices(league) {
   const notices = [];
 
   for (const match of finishedMatches(league)) {
     for (const event of match.events || []) {
       if (event.type !== "red") continue;
+      if (event.disciplinaryPending) {
+        const hasCommissionResolution = (league.sanctions || []).some((sanction) => (
+          sanction.status !== "revoked" &&
+          sanction.playerId === event.playerId &&
+          upperText(sanction.notes || "").includes(upperText(match.id))
+        ));
+        if (hasCommissionResolution) continue;
+        notices.push(buildPendingDisciplinaryNotice(league, {
+          playerId: event.playerId,
+          reason: event.reason || "Tarjeta roja",
+          type: "Expulsion",
+          origin: { date: match.date, round: match.round, matchId: match.id }
+        }));
+        continue;
+      }
       notices.push(buildSuspensionNotice(league, {
         playerId: event.playerId,
         totalMatches: event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1,

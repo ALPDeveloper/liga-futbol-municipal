@@ -103,6 +103,10 @@ CREATE TABLE IF NOT EXISTS matches (
   playoff_leg TEXT,
   aggregate_home INTEGER,
   aggregate_away INTEGER,
+  extra_time_home_goals INTEGER,
+  extra_time_away_goals INTEGER,
+  penalty_home_goals INTEGER,
+  penalty_away_goals INTEGER,
   round INTEGER NOT NULL,
   date TEXT NOT NULL,
   time TEXT NOT NULL,
@@ -110,6 +114,11 @@ CREATE TABLE IF NOT EXISTS matches (
   home_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   away_team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   status TEXT NOT NULL DEFAULT 'scheduled',
+  workflow_status TEXT NOT NULL DEFAULT 'scheduled',
+  capture_mode TEXT NOT NULL DEFAULT 'admin',
+  current_report_id TEXT,
+  published_at TEXT,
+  finalized_at TEXT,
   home_goals INTEGER,
   away_goals INTEGER,
   observations TEXT,
@@ -124,13 +133,29 @@ CREATE TABLE IF NOT EXISTS matches (
 CREATE TABLE IF NOT EXISTS match_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  local_uuid TEXT,
   type TEXT NOT NULL,
   player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  secondary_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  assist_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
   team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+  event_team_side TEXT,
+  subtype TEXT,
+  period TEXT,
   minute INTEGER,
+  minute_label TEXT,
+  second INTEGER,
   suspension_matches INTEGER,
   suspension_indefinite INTEGER NOT NULL DEFAULT 0,
-  reason TEXT
+  disciplinary_pending INTEGER NOT NULL DEFAULT 0,
+  reason TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  is_official INTEGER NOT NULL DEFAULT 1,
+  sync_status TEXT NOT NULL DEFAULT 'synced',
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT,
+  updated_at TEXT,
+  version INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS player_sanctions (
@@ -301,13 +326,141 @@ CREATE TABLE IF NOT EXISTS match_rosters (
   team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  goalkeeper_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
   captain_pin TEXT,
   players_json TEXT NOT NULL,
+  starters_json TEXT NOT NULL DEFAULT '[]',
+  substitutes_json TEXT NOT NULL DEFAULT '[]',
+  lineup_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'submitted',
   notes TEXT,
   submitted_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
   UNIQUE(match_id, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS match_team_pins (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  roster_id TEXT REFERENCES match_rosters(id) ON DELETE SET NULL,
+  pin_hash TEXT NOT NULL,
+  pin_salt TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until TEXT,
+  generated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  generated_at TEXT NOT NULL,
+  revealed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  revealed_at TEXT,
+  invalidated_at TEXT,
+  used_at TEXT,
+  signed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(match_id, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS match_sessions (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  capture_mode TEXT NOT NULL DEFAULT 'live',
+  status TEXT NOT NULL DEFAULT 'draft',
+  period TEXT,
+  started_at TEXT,
+  paused_at TEXT,
+  saved_at TEXT,
+  resumed_at TEXT,
+  finished_at TEXT,
+  suspended_at TEXT,
+  suspension_reason TEXT,
+  clock_state_json TEXT NOT NULL DEFAULT '{}',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS match_session_operations (
+  operation_id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  session_id TEXT REFERENCES match_sessions(id) ON DELETE SET NULL,
+  referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  operation_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'synced',
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  synced_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS match_reports (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  session_id TEXT REFERENCES match_sessions(id) ON DELETE SET NULL,
+  generated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  capture_mode TEXT NOT NULL DEFAULT 'admin',
+  status TEXT NOT NULL DEFAULT 'draft',
+  version INTEGER NOT NULL DEFAULT 1,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  home_goals INTEGER,
+  away_goals INTEGER,
+  generated_at TEXT,
+  finalized_at TEXT,
+  published_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS match_report_signatures (
+  id TEXT PRIMARY KEY,
+  report_id TEXT NOT NULL REFERENCES match_reports(id) ON DELETE CASCADE,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  signed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  method TEXT NOT NULL DEFAULT 'pin',
+  status TEXT NOT NULL DEFAULT 'signed',
+  signed_at TEXT NOT NULL,
+  ip_address TEXT,
+  user_agent TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  UNIQUE(report_id, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS match_report_disputes (
+  id TEXT PRIMARY KEY,
+  report_id TEXT NOT NULL REFERENCES match_reports(id) ON DELETE CASCADE,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+  requested_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  resolution_note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS match_sync_queue (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  session_id TEXT REFERENCES match_sessions(id) ON DELETE CASCADE,
+  client_event_id TEXT,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  synced_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS team_user_assignments (
@@ -361,6 +514,25 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   detail TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS backup_records (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  file_name TEXT,
+  file_path TEXT,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  checksum_sha256 TEXT,
+  storage_bucket TEXT,
+  storage_path TEXT,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL,
+  completed_at TEXT,
+  error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_backup_records_created ON backup_records(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS password_reset_requests (
   id TEXT PRIMARY KEY,

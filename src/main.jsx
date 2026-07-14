@@ -86,6 +86,7 @@ function buildAccessOptions(user, store) {
   const rawAccesses = Array.isArray(user.accesses)
     ? user.accesses.filter((access) => access.status === "active")
     : [];
+  const portalOnlyRoles = new Set(["team_delegate", "referee"]);
   if (!rawAccesses.length && user.role === "super_admin" && store.leagues.length > 1) {
     return store.leagues.map((league) => ({
       id: `super_admin-${league.id}`,
@@ -112,7 +113,10 @@ function buildAccessOptions(user, store) {
     (access.leagueId || "") === (primaryAccess.leagueId || "") &&
     (access.teamId || "") === (primaryAccess.teamId || "")
   ));
-  const accessList = rawAccesses.length && !hasPrimaryAccess
+  const shouldIncludePrimaryAccess = rawAccesses.length &&
+    !hasPrimaryAccess &&
+    !portalOnlyRoles.has(user.role);
+  const accessList = shouldIncludePrimaryAccess
     ? [...sourceAccesses, primaryAccess]
     : sourceAccesses;
 
@@ -261,24 +265,41 @@ function InlineFallback({ label = "Cargando" }) {
 
 function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePath, store, onSelectAccess }) {
   const accessOptions = buildAccessOptions(currentUser, store);
+  const activeLeague = getCurrentLeague(store);
 
   return (
-    <main className="page access-page">
+    <main className="page access-page auth-experience-page">
+      <div className="access-hero-head">
+        <div className="access-brand-lockup">
+          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
+          <span>
+            <strong className="brand-wordmark">LIGA<span>TEC</span></strong>
+            <small>PLATAFORMA DEPORTIVA</small>
+          </span>
+        </div>
+        {activeLeague && (
+          <div className="access-active-league">
+            <span>Liga activa</span>
+            <strong>{activeLeague.name}</strong>
+          </div>
+        )}
+        <button className="access-back-link" type="button" onClick={() => onNavigate(publicLeaguePath)}>
+          <span aria-hidden="true">←</span>
+          Volver a la liga publica
+        </button>
+      </div>
       <section className="access-card">
         <div className="access-card-head">
-          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
-          <div>
-            <span className="eyebrow">Acceso privado</span>
-            <h1>Acceso LIGATEC</h1>
-            <p>Un solo inicio de sesion para administradores, arbitros y delegados.</p>
-          </div>
+          <span className="auth-pill"><span className="access-lock-icon" />Acceso privado</span>
+          <h1>Bienvenido</h1>
+          <p>Inicia sesion para continuar en <strong>LIGATEC</strong>.</p>
         </div>
 
         <div className="access-lock-banner" aria-hidden="true">
-          <span className="access-lock-icon" />
+          <span className="access-user-icon" />
           <div>
-            <strong>Plataforma deportiva</strong>
-            <small>Tu rol se detecta automaticamente despues de iniciar sesion.</small>
+            <strong>Tu rol se detectara automaticamente</strong>
+            <small>despues de iniciar sesion.</small>
           </div>
         </div>
 
@@ -297,11 +318,15 @@ function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePa
             </button>
           </div>
         )}
-
-        <button className="link-button" type="button" onClick={() => onNavigate(publicLeaguePath)}>
-          Volver a la liga publica
-        </button>
       </section>
+      <footer className="access-footer">
+        <span className="access-footer-ball" aria-hidden="true" />
+        <strong>La evolucion digital del futbol amateur.</strong>
+        <span className="access-footer-dev">
+          <small>Desarrollado por</small>
+          <img alt="ALP DEV" src={alpLogo} />
+        </span>
+      </footer>
     </main>
   );
 }
@@ -311,9 +336,9 @@ function AccessSelectionPage({ currentUser, onNavigate, onSelectAccess, store })
 
   if (!currentUser) {
     return (
-      <main className="page access-page">
+      <main className="page access-page auth-experience-page">
         <section className="access-card">
-          <span className="eyebrow">Acceso requerido</span>
+          <span className="auth-pill"><span className="access-lock-icon" />Acceso requerido</span>
           <h1>Inicia sesion para elegir tu acceso</h1>
           <p>Primero entra con tu correo y contrasena. Despues LIGATEC mostrara los roles disponibles.</p>
           <button className="primary" type="button" onClick={() => onNavigate("/acceso")}>Ir a Acceso LIGATEC</button>
@@ -323,15 +348,21 @@ function AccessSelectionPage({ currentUser, onNavigate, onSelectAccess, store })
   }
 
   return (
-    <main className="page access-page">
+    <main className="page access-page auth-experience-page">
+      <div className="access-hero-head">
+        <div className="access-brand-lockup">
+          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
+          <span>
+            <strong className="brand-wordmark">LIGA<span>TEC</span></strong>
+            <small>PLATAFORMA DEPORTIVA</small>
+          </span>
+        </div>
+      </div>
       <section className="access-card access-selection-card">
         <div className="access-card-head">
-          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
-          <div>
-            <span className="eyebrow">Sesion activa</span>
-            <h1>Selecciona como deseas ingresar</h1>
-            <p>Elige el rol, liga o equipo con el que vas a trabajar en esta sesion.</p>
-          </div>
+          <span className="auth-pill"><span className="access-user-icon" />Sesion activa</span>
+          <h1>Selecciona tu acceso</h1>
+          <p>Elige el rol, liga o equipo con el que vas a trabajar en esta sesion.</p>
         </div>
 
         {accessOptions.length ? (
@@ -350,7 +381,10 @@ function AccessSelectionPage({ currentUser, onNavigate, onSelectAccess, store })
           <p className="auth-error inline-feedback">Tu usuario no tiene accesos activos. Solicita revision al administrador de la liga.</p>
         )}
 
-        <button className="link-button" type="button" onClick={() => onNavigate("/acceso")}>Volver al acceso</button>
+        <button className="access-back-link in-card" type="button" onClick={() => onNavigate("/acceso")}>
+          <span aria-hidden="true">←</span>
+          Volver al acceso
+        </button>
       </section>
     </main>
   );
@@ -743,6 +777,7 @@ function App() {
   const [selectedAccess, setSelectedAccess] = useState(initialSelectedAccess);
   const [accessReturnPath, setAccessReturnPath] = useState(loadAccessReturnPath);
   const [userListRefreshKey, setUserListRefreshKey] = useState(0);
+  const [publicEntryMode, setPublicEntryMode] = useState(false);
   const pendingPersistRef = useRef(null);
   const persistRunningRef = useRef(false);
   const isAdminRoute = isAdminPath(routePath);
@@ -780,12 +815,24 @@ function App() {
   const isDelegateActivationRoute = routePath.startsWith("/activar-delegado/");
   const isRefereeActivationRoute = routePath.startsWith("/activar-arbitro/");
   const isAdminActivationRoute = routePath.startsWith("/activar-admin/");
+  const isPortalExperienceRoute = isTeamRoute || isRefereeRoute;
+  const isAuthExperienceRoute = isAccessRoute ||
+    isAccessSelectionRoute ||
+    isDelegateActivationRoute ||
+    isRefereeActivationRoute ||
+    isAdminActivationRoute ||
+    isPortalExperienceRoute;
   const showPublicHomeLink = !isPrivateRoute && !isLandingRoute && !isLeagueDirectoryRoute && !isLegalRoute && !isDelegateActivationRoute && !isRefereeActivationRoute && !isAdminActivationRoute;
   const showPublicLegalLink = !isLandingRoute;
   const contextualPublicReturnPath = isLeagueDirectoryRoute ? "/ligas" : (publicLeagueId || legalLeagueId ? publicLeaguePath : "/");
   const legalPublicReturnPath = legalLeagueId ? publicLeaguePath : "/";
   const privatePublicReturnPath = isAccessRoute || isAccessSelectionRoute ? accessReturnPath : publicLeaguePath;
   const legalNavPath = isLandingRoute || isLeagueDirectoryRoute ? "/legal" : legalLeaguePath;
+
+  useEffect(() => {
+    if (!publicLeagueId) setPublicEntryMode(false);
+  }, [publicLeagueId]);
+  const hidePublicChromeForEntry = publicEntryMode && !isPrivateRoute && Boolean(publicLeagueId);
 
   function navigateTo(path) {
     window.history.pushState({}, "", path);
@@ -1043,8 +1090,8 @@ function App() {
   }
 
   return (
-    <div className={isPrivateRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} style={themeStyle}>
-      <header className={`topbar ${isPrivateRoute ? "admin-topbar" : "public-topbar"}`}>
+    <div className={`${isPrivateRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} ${isAuthExperienceRoute ? "auth-route-shell" : ""} ${hidePublicChromeForEntry ? "public-entry-shell" : ""}`} style={themeStyle}>
+      {!isAuthExperienceRoute && !hidePublicChromeForEntry && <header className={`topbar ${isPrivateRoute ? "admin-topbar" : "public-topbar"}`}>
         <a className="brand" href={isAdminRoute ? "/panel/admin" : "/"} aria-label="Ir al inicio" onClick={(event) => {
           event.preventDefault();
           navigateTo(isAdminRoute ? "/panel/admin" : isTeamRoute ? "/panel/delegado" : isRefereeRoute ? "/panel/arbitro" : "/");
@@ -1124,7 +1171,7 @@ function App() {
             </>
           )}
         </div>
-      </header>
+      </header>}
 
       {isAccessRoute ? (
         <AccessPage
@@ -1226,15 +1273,15 @@ function App() {
         </Suspense>
       ) : isTeamRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando portal de equipo" />}>
-          <LazyTeamPortal authToken={auth.token} currentUser={currentUser} />
+          <LazyTeamPortal authToken={auth.token} currentUser={currentUser} onLogout={logout} />
         </Suspense>
       ) : isRefereeRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando panel de arbitro" />}>
-          <LazyRefereePortal authToken={auth.token} currentUser={currentUser} />
+          <LazyRefereePortal authToken={auth.token} currentUser={currentUser} onLogout={logout} />
         </Suspense>
       ) : (
         <Suspense fallback={<RouteFallback label="Cargando liga" />}>
-          <LazyPublicView heroImage={heroImage} legalPath={legalLeaguePath} league={league} onNavigate={navigateTo} />
+          <LazyPublicView heroImage={heroImage} legalPath={legalLeaguePath} league={league} onEntryModeChange={setPublicEntryMode} onNavigate={navigateTo} />
         </Suspense>
       )}
     </div>

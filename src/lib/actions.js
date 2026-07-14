@@ -209,6 +209,74 @@ export function deletePlayerSanction(store, leagueId, sanctionId) {
   }));
 }
 
+export function resolveMatchEventDiscipline(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => {
+    const matchId = String(payload.matchId || "").trim();
+    const eventIndex = Number(payload.eventIndex);
+    const resolutionType = ["matches", "indefinite", "release"].includes(payload.resolutionType)
+      ? payload.resolutionType
+      : "matches";
+    const sanctionMatches = resolutionType === "matches" ? Number(payload.matches || 0) : 0;
+    if (!matchId || !Number.isInteger(eventIndex) || eventIndex < 0) return league;
+    if (resolutionType === "matches" && (!Number.isInteger(sanctionMatches) || sanctionMatches < 1 || sanctionMatches > 99)) {
+      throw new Error("La sancion debe ser de 1 a 99 partidos.");
+    }
+
+    const targetMatch = (league.matches || []).find((match) => match.id === matchId);
+    const targetEvent = targetMatch?.events?.[eventIndex];
+    if (!targetMatch || !targetEvent || targetEvent.type !== "red" || !targetEvent.playerId) return league;
+
+    const reason = upperText(payload.reason || targetEvent.reason || "Tarjeta roja");
+    const date = payload.date || targetMatch.date || new Date().toISOString().slice(0, 10);
+    const resolutionNote = upperText([
+      `RESOLUCION COMISION ACTA ${targetMatch.id}`,
+      `EVENTO ${eventIndex}`,
+      `JORNADA ${targetMatch.round || "-"}`,
+      payload.notes || ""
+    ].filter(Boolean).join(" "));
+    const nextSanction = {
+      id: makeId("sanction"),
+      competitionId: targetMatch.competitionId || payload.competitionId || getDefaultCompetitionId(league),
+      playerId: targetEvent.playerId,
+      type: upperText(payload.type || "Expulsion"),
+      matches: resolutionType === "matches" ? sanctionMatches : 0,
+      indefinite: resolutionType === "indefinite",
+      reason: resolutionType === "release" ? upperText(payload.reason || "Sin suspension adicional por comision") : reason,
+      date,
+      status: resolutionType === "release" ? "cleared" : "active",
+      notes: resolutionNote
+    };
+
+    return {
+      ...league,
+      matches: (league.matches || []).map((match) => {
+        if (match.id !== targetMatch.id) return match;
+        return {
+          ...match,
+          events: (match.events || []).map((event, index) => (
+            index === eventIndex
+              ? {
+                ...event,
+                suspensionMatches: 0,
+                suspensionIndefinite: false,
+                disciplinaryPending: true,
+                reason
+              }
+              : event
+          ))
+        };
+      }),
+      sanctions: [
+        ...(league.sanctions || []).filter((sanction) => !(
+          sanction.playerId === targetEvent.playerId &&
+          upperText(sanction.notes || "").includes(upperText(targetMatch.id))
+        )),
+        nextSanction
+      ]
+    };
+  });
+}
+
 export function addDisciplineLink(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => {
     const playerIds = [...new Set([payload.playerId, payload.linkedPlayerId].filter(Boolean))];
@@ -982,6 +1050,10 @@ export function updateMatch(store, leagueId, matchId, payload) {
             playoffLeg: upperText(payload.playoffLeg || ""),
             aggregateHome: payload.aggregateHome === "" || payload.aggregateHome === undefined ? null : Number(payload.aggregateHome),
             aggregateAway: payload.aggregateAway === "" || payload.aggregateAway === undefined ? null : Number(payload.aggregateAway),
+            extraTimeHomeGoals: payload.extraTimeHomeGoals === undefined ? match.extraTimeHomeGoals ?? null : optionalMatchScore(payload.extraTimeHomeGoals),
+            extraTimeAwayGoals: payload.extraTimeAwayGoals === undefined ? match.extraTimeAwayGoals ?? null : optionalMatchScore(payload.extraTimeAwayGoals),
+            penaltyHomeGoals: payload.penaltyHomeGoals === undefined ? match.penaltyHomeGoals ?? null : optionalMatchScore(payload.penaltyHomeGoals),
+            penaltyAwayGoals: payload.penaltyAwayGoals === undefined ? match.penaltyAwayGoals ?? null : optionalMatchScore(payload.penaltyAwayGoals),
             round: stage === "playoff" ? Number(payload.round || 0) : Number(payload.round),
             date: payload.date,
             time: payload.time || "",
@@ -1070,6 +1142,37 @@ function parseNumberList(value) {
     .filter(Boolean);
 }
 
+function parseMatchEventMinute(value, label = "") {
+  const rawLabel = String(label || "").trim();
+  const rawValue = String(value ?? "").trim();
+  const source = rawLabel || rawValue;
+  if (!source) return { minute: 0, minuteLabel: "" };
+
+  const addedMatch = source.match(/^(\d{1,3})\s*\+\s*(\d{1,2})$/);
+  if (addedMatch) {
+    const base = Number(addedMatch[1]);
+    const added = Number(addedMatch[2]);
+    const minute = base + added;
+    if (minute < 0 || minute > 130) throw new Error("Los minutos del acta deben estar entre 0 y 130.");
+    return { minute, minuteLabel: `${base}+${added}` };
+  }
+
+  const minute = Number(rawValue || source);
+  if (!Number.isFinite(minute) || minute < 0 || minute > 130) {
+    throw new Error("Los minutos del acta deben estar entre 0 y 130.");
+  }
+  return { minute, minuteLabel: rawLabel && rawLabel !== String(minute) ? rawLabel : "" };
+}
+
+function optionalMatchScore(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const score = Number(value);
+  if (!Number.isInteger(score) || score < 0 || score > 99) {
+    throw new Error("Los marcadores de desempate deben ser numeros entre 0 y 99.");
+  }
+  return score;
+}
+
 function findPlayerByNumber(league, number, teamIds = []) {
   const directPlayer = league.players.find((player) => (
     Number(player.number) === Number(number) &&
@@ -1153,12 +1256,11 @@ export function saveMatchSheet(store, leagueId, payload) {
             ? eventTeamId === match.homeTeamId ? match.awayTeamId : match.homeTeamId
             : eventTeamId;
           if (!isPlayerEligibleForTeam(league, player.id, playerTeamId)) return null;
-          const minute = Number(event.minute || 0);
-          if (minute < 0 || minute > 130) throw new Error("Los minutos del acta deben estar entre 0 y 130.");
+          const { minute, minuteLabel } = parseMatchEventMinute(event.minute, event.minuteLabel);
           if (event.type === "red" && !String(event.reason || "").trim()) {
             throw new Error("Toda tarjeta roja debe tener motivo.");
           }
-          if (event.type === "red" && !event.suspensionIndefinite && Number(event.suspensionMatches || 0) < 1) {
+          if (event.type === "red" && !event.disciplinaryPending && !event.suspensionIndefinite && Number(event.suspensionMatches || 0) < 1) {
             throw new Error("Toda tarjeta roja debe tener partidos de sancion.");
           }
 
@@ -1167,12 +1269,14 @@ export function saveMatchSheet(store, leagueId, payload) {
             playerId: player.id,
             teamId: eventTeamId,
             minute,
+            minuteLabel,
             suspensionMatches: event.type === "red"
-              ? event.suspensionIndefinite
+              ? event.disciplinaryPending || event.suspensionIndefinite
                 ? 0
                 : Number(event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1)
               : 0,
-            suspensionIndefinite: event.type === "red" ? Boolean(event.suspensionIndefinite) : false,
+            suspensionIndefinite: event.type === "red" && !event.disciplinaryPending ? Boolean(event.suspensionIndefinite) : false,
+            disciplinaryPending: event.type === "red" ? Boolean(event.disciplinaryPending) : false,
             reason: event.type === "red" ? upperText(event.reason || "Tarjeta roja") : ""
           };
         })
@@ -1193,6 +1297,10 @@ export function saveMatchSheet(store, leagueId, payload) {
           resolutionType: payload.resolutionType || "no_show",
           resolutionNote: upperText(payload.resolutionNote || `Default administrativo ${maxGoals}-0`),
           observations: upperText(payload.observations || ""),
+          extraTimeHomeGoals: optionalMatchScore(payload.extraTimeHomeGoals),
+          extraTimeAwayGoals: optionalMatchScore(payload.extraTimeAwayGoals),
+          penaltyHomeGoals: optionalMatchScore(payload.penaltyHomeGoals),
+          penaltyAwayGoals: optionalMatchScore(payload.penaltyAwayGoals),
           events
         };
       }
@@ -1209,9 +1317,13 @@ export function saveMatchSheet(store, leagueId, payload) {
         homeGoals,
         awayGoals,
         status: "finished",
-        resolutionType: "normal",
+        resolutionType: payload.resolutionType || "normal",
         resolutionNote: "",
         observations: upperText(payload.observations || ""),
+        extraTimeHomeGoals: optionalMatchScore(payload.extraTimeHomeGoals),
+        extraTimeAwayGoals: optionalMatchScore(payload.extraTimeAwayGoals),
+        penaltyHomeGoals: optionalMatchScore(payload.penaltyHomeGoals),
+        penaltyAwayGoals: optionalMatchScore(payload.penaltyAwayGoals),
         events
       };
     })
@@ -1284,10 +1396,8 @@ export function addCompetition(store, leagueId, payload) {
 }
 
 export function updateCompetition(store, leagueId, competitionId, payload) {
-  return updateLeague(store, leagueId, (league) => ({
-    ...league,
-    currentCompetitionId: payload.makeCurrent ? competitionId : league.currentCompetitionId,
-    competitions: (league.competitions || []).map((competition) => (
+  return updateLeague(store, leagueId, (league) => {
+    const competitions = (league.competitions || []).map((competition) => (
       competition.id === competitionId
         ? {
             ...competition,
@@ -1300,8 +1410,21 @@ export function updateCompetition(store, leagueId, competitionId, payload) {
             endsAt: payload.endsAt || ""
           }
         : competition
-    ))
-  }));
+    ));
+    const requestedCurrentCompetition = competitions.find((competition) => competition.id === competitionId);
+    const existingCurrentCompetition = competitions.find((competition) => competition.id === league.currentCompetitionId);
+    const nextCurrentCompetitionId = payload.makeCurrent && requestedCurrentCompetition?.status !== "archived"
+      ? competitionId
+      : existingCurrentCompetition?.status !== "archived"
+        ? league.currentCompetitionId
+        : competitions.find((competition) => competition.status !== "archived")?.id || competitions[0]?.id || league.currentCompetitionId;
+
+    return {
+      ...league,
+      currentCompetitionId: nextCurrentCompetitionId,
+      competitions
+    };
+  });
 }
 
 export function updateLeagueMembership(store, leagueId, payload) {

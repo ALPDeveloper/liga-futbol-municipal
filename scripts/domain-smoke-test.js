@@ -23,6 +23,7 @@ import {
   generatePlayoffBracket,
   mergeDuplicatePlayer,
   generateSchedule,
+  resolveMatchEventDiscipline,
   saveMatchSheet,
   saveResult,
   updatePlayerInjury,
@@ -54,6 +55,14 @@ import {
   scopeLeagueToCompetition
 } from "../src/lib/domain.js";
 import { updateMatchSheetEventItem } from "../src/lib/matchSheet.js";
+import {
+  MATCH_CAPTURE_MODES,
+  MATCH_WORKFLOW_STATUSES,
+  canPublishWithoutCaptainSignatures,
+  canTransitionMatchWorkflow,
+  getNextWorkflowStatusAfterFinish,
+  requiresCaptainSignatures
+} from "../src/lib/matchWorkflow.js";
 
 assert.equal(getCurrentDisplayRound([
   { id: "round-7", round: 7, status: "finished", date: "2026-07-01", time: "10:00" },
@@ -61,6 +70,25 @@ assert.equal(getCurrentDisplayRound([
   { id: "round-8", round: 8, status: "scheduled", date: "2026-07-16", time: "10:00" },
   { id: "round-9", round: 9, status: "scheduled", date: "2026-07-23", time: "10:00" }
 ]), 8);
+assert.equal(requiresCaptainSignatures(MATCH_CAPTURE_MODES.LIVE), true);
+assert.equal(canPublishWithoutCaptainSignatures(MATCH_CAPTURE_MODES.MANUAL), true);
+assert.equal(canPublishWithoutCaptainSignatures(MATCH_CAPTURE_MODES.ADMIN), true);
+assert.equal(
+  getNextWorkflowStatusAfterFinish(MATCH_CAPTURE_MODES.LIVE),
+  MATCH_WORKFLOW_STATUSES.PENDING_CAPTAIN_REVIEW
+);
+assert.equal(
+  getNextWorkflowStatusAfterFinish(MATCH_CAPTURE_MODES.MANUAL),
+  MATCH_WORKFLOW_STATUSES.FINALIZED
+);
+assert.equal(
+  canTransitionMatchWorkflow(MATCH_WORKFLOW_STATUSES.IN_PROGRESS, MATCH_WORKFLOW_STATUSES.PENDING_CAPTAIN_REVIEW),
+  true
+);
+assert.equal(
+  canTransitionMatchWorkflow(MATCH_WORKFLOW_STATUSES.PENDING_CAPTAIN_REVIEW, MATCH_WORKFLOW_STATUSES.PUBLISHED),
+  false
+);
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { hashPassword, verifyPassword } from "../server/password.js";
 
@@ -935,6 +963,78 @@ const indefiniteNotice = calculateSuspensionNotices(league).find((notice) => not
 assert.equal(indefiniteNotice.indefinite, true);
 assert.equal(indefiniteNotice.returnRound, "Indefinido");
 assert.equal(calculatePlayerStats(league).find((row) => row.player.id === "p5").suspensionIndefinite, true);
+
+store = saveMatchSheet(store, league.id, {
+  matchId: "m4",
+  homeGoals: 2,
+  awayGoals: 0,
+  extraTimeHomeGoals: 1,
+  extraTimeAwayGoals: 0,
+  penaltyHomeGoals: 4,
+  penaltyAwayGoals: 3,
+  resolutionType: "penalties",
+  events: [
+    { type: "goal", playerId: "p3", minute: 12 },
+    { type: "own_goal", playerId: "p5", teamId: "union", minute: 55 },
+    { type: "red", playerId: "p5", minute: 48, minuteLabel: "45+3", disciplinaryPending: true, reason: "Insultos al arbitro" }
+  ]
+});
+league = getCurrentLeague(store);
+const pendingRedEvent = league.matches.find((match) => match.id === "m4").events.find((event) => event.type === "red");
+assert.equal(pendingRedEvent.minute, 48);
+assert.equal(pendingRedEvent.minuteLabel, "45+3");
+assert.equal(pendingRedEvent.disciplinaryPending, true);
+assert.equal(pendingRedEvent.suspensionMatches, 0);
+const tiebreakerMatch = league.matches.find((match) => match.id === "m4");
+assert.equal(tiebreakerMatch.resolutionType, "penalties");
+assert.equal(tiebreakerMatch.extraTimeHomeGoals, 1);
+assert.equal(tiebreakerMatch.extraTimeAwayGoals, 0);
+assert.equal(tiebreakerMatch.penaltyHomeGoals, 4);
+assert.equal(tiebreakerMatch.penaltyAwayGoals, 3);
+const pendingNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.pendingReview);
+assert.equal(pendingNotice.returnRound, "Revision");
+store = addPlayerSanction(store, league.id, {
+  competitionId: league.currentCompetitionId,
+  playerId: "p5",
+  type: "Expulsion",
+  matches: 2,
+  reason: "Comision disciplinaria",
+  notes: "RESOLUCION COMISION ACTA m4"
+});
+league = getCurrentLeague(store);
+assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.pendingReview), false);
+assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.remainingMatches === 2), true);
+
+store = saveMatchSheet(store, league.id, {
+  matchId: "m4",
+  homeGoals: 2,
+  awayGoals: 0,
+  events: [
+    { type: "goal", playerId: "p3", minute: 12 },
+    { type: "own_goal", playerId: "p5", teamId: "union", minute: 55 },
+    { type: "red", playerId: "p5", minute: 70, suspensionIndefinite: true, reason: "Insultos al arbitro" }
+  ]
+});
+store = resolveMatchEventDiscipline(store, league.id, {
+  matchId: "m4",
+  eventIndex: 2,
+  resolutionType: "matches",
+  matches: 3,
+  reason: "Insultos al arbitro",
+  notes: "Se dictamina despues de investigacion"
+});
+league = getCurrentLeague(store);
+const resolvedRedEvent = league.matches.find((match) => match.id === "m4").events[2];
+assert.equal(resolvedRedEvent.disciplinaryPending, true);
+assert.equal(resolvedRedEvent.suspensionIndefinite, false);
+assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.indefinite), false);
+assert.equal(league.sanctions.some((sanction) => (
+  sanction.playerId === "p5" &&
+  sanction.type === "EXPULSION" &&
+  sanction.matches === 3 &&
+  sanction.indefinite === false &&
+  String(sanction.notes || "").includes("ACTA M4")
+)), true);
 
 store = saveMatchSheet(store, league.id, {
   matchId: "m3",

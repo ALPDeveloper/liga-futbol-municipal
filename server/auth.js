@@ -52,7 +52,10 @@ export async function requireAuth(request, response, next) {
 
 export async function requireSuperAdmin(request, response, next) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "super_admin") return response.status(403).json({ error: "Permiso de super admin requerido" });
+  const hasSuperAdminAccess = user?.role === "super_admin" || (user?.accesses || []).some((access) => (
+    access.role === "super_admin" && access.status === "active"
+  ));
+  if (!user || !hasSuperAdminAccess) return response.status(403).json({ error: "Permiso de super admin requerido" });
   request.user = user;
   next();
 }

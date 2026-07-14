@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import alpLogo from "../../assets/alp-logo.png";
+import ligatecLogo from "../../assets/ligatec-logo.png";
 import { activateAdmin, fetchAdminActivation } from "../lib/adminActivationApi.js";
 
 function getRoleLabel(role) {
@@ -52,10 +54,20 @@ export function AdminActivationView({ token, onActivated, onNavigate }) {
   }
 
   return (
-    <main className="page activation-page">
+    <main className="page activation-page auth-experience-page">
+      <div className="access-hero-head">
+        <div className="access-brand-lockup">
+          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
+          <span>
+            <strong className="brand-wordmark">LIGA<span>TEC</span></strong>
+            <small>PLATAFORMA DEPORTIVA</small>
+          </span>
+        </div>
+      </div>
       <section className="activation-card">
-        <span className="eyebrow">Activacion administrativa</span>
+        <span className="auth-pill"><span className="access-lock-icon" />Activacion administrativa</span>
         <h1>Crear contraseña</h1>
+        <p className="activation-intro">Activa tu acceso privado para administrar la liga desde LIGATEC.</p>
         {loading ? (
           <p className="helper-text">Validando invitacion...</p>
         ) : error && !activation ? (
@@ -89,6 +101,13 @@ export function AdminActivationView({ token, onActivated, onNavigate }) {
           </>
         )}
       </section>
+      <footer className="access-footer">
+        <strong>La evolucion digital del futbol amateur.</strong>
+        <span className="access-footer-dev">
+          <small>Desarrollado por</small>
+          <img alt="ALP DEV" src={alpLogo} />
+        </span>
+      </footer>
     </main>
   );
 }

@@ -72,6 +72,32 @@ function runMigrations() {
   if (!matchEventColumns.includes("suspension_indefinite")) {
     db.prepare("ALTER TABLE match_events ADD COLUMN suspension_indefinite INTEGER NOT NULL DEFAULT 0").run();
   }
+  if (!matchEventColumns.includes("minute_label")) {
+    db.prepare("ALTER TABLE match_events ADD COLUMN minute_label TEXT").run();
+  }
+  if (!matchEventColumns.includes("disciplinary_pending")) {
+    db.prepare("ALTER TABLE match_events ADD COLUMN disciplinary_pending INTEGER NOT NULL DEFAULT 0").run();
+  }
+  [
+    ["local_uuid", "TEXT"],
+    ["secondary_player_id", "TEXT REFERENCES players(id) ON DELETE SET NULL"],
+    ["assist_player_id", "TEXT REFERENCES players(id) ON DELETE SET NULL"],
+    ["event_team_side", "TEXT"],
+    ["subtype", "TEXT"],
+    ["period", "TEXT"],
+    ["second", "INTEGER"],
+    ["metadata_json", "TEXT NOT NULL DEFAULT '{}'"],
+    ["is_official", "INTEGER NOT NULL DEFAULT 1"],
+    ["sync_status", "TEXT NOT NULL DEFAULT 'synced'"],
+    ["created_by_user_id", "TEXT REFERENCES users(id) ON DELETE SET NULL"],
+    ["created_at", "TEXT"],
+    ["updated_at", "TEXT"],
+    ["version", "INTEGER NOT NULL DEFAULT 1"]
+  ].forEach(([name, definition]) => {
+    if (!matchEventColumns.includes(name)) {
+      db.prepare(`ALTER TABLE match_events ADD COLUMN ${name} ${definition}`).run();
+    }
+  });
 
   const sponsorColumns = db.prepare("PRAGMA table_info(sponsors)").all().map((column) => column.name);
   if (!sponsorColumns.includes("image_url")) {
@@ -106,6 +132,18 @@ function runMigrations() {
   if (!matchColumns.includes("aggregate_away")) {
     db.prepare("ALTER TABLE matches ADD COLUMN aggregate_away INTEGER").run();
   }
+  if (!matchColumns.includes("extra_time_home_goals")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN extra_time_home_goals INTEGER").run();
+  }
+  if (!matchColumns.includes("extra_time_away_goals")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN extra_time_away_goals INTEGER").run();
+  }
+  if (!matchColumns.includes("penalty_home_goals")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN penalty_home_goals INTEGER").run();
+  }
+  if (!matchColumns.includes("penalty_away_goals")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN penalty_away_goals INTEGER").run();
+  }
   if (!matchColumns.includes("observations")) {
     db.prepare("ALTER TABLE matches ADD COLUMN observations TEXT").run();
   }
@@ -121,6 +159,17 @@ function runMigrations() {
   if (!matchColumns.includes("fourth_referee_user_id")) {
     db.prepare("ALTER TABLE matches ADD COLUMN fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL").run();
   }
+  [
+    ["workflow_status", "TEXT NOT NULL DEFAULT 'scheduled'"],
+    ["capture_mode", "TEXT NOT NULL DEFAULT 'admin'"],
+    ["current_report_id", "TEXT"],
+    ["published_at", "TEXT"],
+    ["finalized_at", "TEXT"]
+  ].forEach(([name, definition]) => {
+    if (!matchColumns.includes(name)) {
+      db.prepare(`ALTER TABLE matches ADD COLUMN ${name} ${definition}`).run();
+    }
+  });
 
   const teamColumns = db.prepare("PRAGMA table_info(teams)").all().map((column) => column.name);
   if (teamColumns.length && !teamColumns.includes("competition_id")) {
@@ -212,6 +261,23 @@ function runMigrations() {
       entity_id TEXT,
       detail TEXT,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_records (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      file_name TEXT,
+      file_path TEXT,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      checksum_sha256 TEXT,
+      storage_bucket TEXT,
+      storage_path TEXT,
+      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      error_message TEXT
     );
 
     CREATE TABLE IF NOT EXISTS user_accesses (
@@ -381,6 +447,150 @@ function runMigrations() {
   if (matchRosterColumns.length && !matchRosterColumns.includes("captain_pin")) {
     db.prepare("ALTER TABLE match_rosters ADD COLUMN captain_pin TEXT").run();
   }
+  [
+    ["goalkeeper_player_id", "TEXT REFERENCES players(id) ON DELETE SET NULL"],
+    ["starters_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ["substitutes_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ["lineup_json", "TEXT NOT NULL DEFAULT '{}'"],
+    ["version", "INTEGER NOT NULL DEFAULT 1"]
+  ].forEach(([name, definition]) => {
+    if (matchRosterColumns.length && !matchRosterColumns.includes(name)) {
+      db.prepare(`ALTER TABLE match_rosters ADD COLUMN ${name} ${definition}`).run();
+    }
+  });
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS match_team_pins (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      roster_id TEXT REFERENCES match_rosters(id) ON DELETE SET NULL,
+      pin_hash TEXT NOT NULL,
+      pin_salt TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until TEXT,
+      generated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      generated_at TEXT NOT NULL,
+      revealed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      revealed_at TEXT,
+      invalidated_at TEXT,
+      used_at TEXT,
+      signed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(match_id, team_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS match_sessions (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      capture_mode TEXT NOT NULL DEFAULT 'live',
+      status TEXT NOT NULL DEFAULT 'draft',
+      period TEXT,
+      started_at TEXT,
+      paused_at TEXT,
+      saved_at TEXT,
+      resumed_at TEXT,
+      finished_at TEXT,
+      suspended_at TEXT,
+      suspension_reason TEXT,
+      clock_state_json TEXT NOT NULL DEFAULT '{}',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS match_session_operations (
+      operation_id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES match_sessions(id) ON DELETE SET NULL,
+      referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      operation_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'synced',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      synced_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS match_reports (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES match_sessions(id) ON DELETE SET NULL,
+      generated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      capture_mode TEXT NOT NULL DEFAULT 'admin',
+      status TEXT NOT NULL DEFAULT 'draft',
+      version INTEGER NOT NULL DEFAULT 1,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      home_goals INTEGER,
+      away_goals INTEGER,
+      generated_at TEXT,
+      finalized_at TEXT,
+      published_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS match_report_signatures (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL REFERENCES match_reports(id) ON DELETE CASCADE,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      signed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      method TEXT NOT NULL DEFAULT 'pin',
+      status TEXT NOT NULL DEFAULT 'signed',
+      signed_at TEXT NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      UNIQUE(report_id, team_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS match_report_disputes (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL REFERENCES match_reports(id) ON DELETE CASCADE,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+      requested_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      resolution_note TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS match_sync_queue (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES match_sessions(id) ON DELETE CASCADE,
+      client_event_id TEXT,
+      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      synced_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_match_team_pins_match ON match_team_pins(match_id);
+    CREATE INDEX IF NOT EXISTS idx_match_sessions_match ON match_sessions(match_id);
+    CREATE INDEX IF NOT EXISTS idx_match_session_operations_match ON match_session_operations(match_id);
+    CREATE INDEX IF NOT EXISTS idx_match_reports_match ON match_reports(match_id);
+    CREATE INDEX IF NOT EXISTS idx_match_reports_status ON match_reports(status);
+    CREATE INDEX IF NOT EXISTS idx_match_report_signatures_report ON match_report_signatures(report_id);
+    CREATE INDEX IF NOT EXISTS idx_match_sync_queue_match_status ON match_sync_queue(match_id, status);
+  `);
 
   seedMissingCompetitions();
 }
@@ -583,6 +793,10 @@ export function getStore() {
       playoffLeg: row.playoff_leg,
       aggregateHome: row.aggregate_home,
       aggregateAway: row.aggregate_away,
+      extraTimeHomeGoals: row.extra_time_home_goals,
+      extraTimeAwayGoals: row.extra_time_away_goals,
+      penaltyHomeGoals: row.penalty_home_goals,
+      penaltyAwayGoals: row.penalty_away_goals,
       round: row.round,
       date: row.date,
       time: row.time,
@@ -590,6 +804,11 @@ export function getStore() {
       homeTeamId: row.home_team_id,
       awayTeamId: row.away_team_id,
       status: row.status,
+      workflowStatus: row.workflow_status || row.status || "scheduled",
+      captureMode: row.capture_mode || "admin",
+      currentReportId: row.current_report_id || "",
+      publishedAt: row.published_at || "",
+      finalizedAt: row.finalized_at || "",
       homeGoals: row.home_goals,
       awayGoals: row.away_goals,
       observations: row.observations,
@@ -600,13 +819,29 @@ export function getStore() {
       assistantReferee2UserId: row.assistant_referee2_user_id || "",
       fourthRefereeUserId: row.fourth_referee_user_id || "",
       events: db.prepare("SELECT * FROM match_events WHERE match_id = ? ORDER BY id").all(row.id).map((event) => ({
+        localUuid: event.local_uuid || "",
         type: event.type,
         playerId: event.player_id,
+        secondaryPlayerId: event.secondary_player_id || "",
+        assistPlayerId: event.assist_player_id || "",
         teamId: event.team_id,
+        eventTeamSide: event.event_team_side || "",
+        subtype: event.subtype || "",
+        period: event.period || "",
         minute: event.minute,
+        minuteLabel: event.minute_label || "",
+        second: event.second,
         suspensionMatches: event.suspension_matches,
         suspensionIndefinite: Boolean(event.suspension_indefinite),
-        reason: event.reason
+        disciplinaryPending: Boolean(event.disciplinary_pending),
+        reason: event.reason,
+        metadata: event.metadata_json ? JSON.parse(event.metadata_json) : {},
+        isOfficial: event.is_official !== 0,
+        syncStatus: event.sync_status || "synced",
+        createdByUserId: event.created_by_user_id || "",
+        createdAt: event.created_at || "",
+        updatedAt: event.updated_at || "",
+        version: event.version || 1
       }))
     }));
     const matchRosters = db.prepare("SELECT * FROM match_rosters WHERE league_id = ? ORDER BY submitted_at DESC").all(leagueRow.id).map((row) => ({
@@ -615,12 +850,17 @@ export function getStore() {
       teamId: row.team_id,
       submittedByUserId: row.submitted_by_user_id || "",
       captainPlayerId: row.captain_player_id || "",
+      goalkeeperPlayerId: row.goalkeeper_player_id || "",
       captainPin: row.captain_pin || "",
       players: row.players_json ? JSON.parse(row.players_json) : [],
+      starters: row.starters_json ? JSON.parse(row.starters_json) : [],
+      substitutes: row.substitutes_json ? JSON.parse(row.substitutes_json) : [],
+      lineup: row.lineup_json ? JSON.parse(row.lineup_json) : {},
       status: row.status,
       notes: row.notes || "",
       submittedAt: row.submitted_at,
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
+      version: row.version || 1
     }));
 
     return {
@@ -702,6 +942,12 @@ export function importStore(store) {
     SELECT id, user_id, assignment_id, token_hash, expires_at, used_at, revoked_at, created_at
     FROM team_delegate_activation_tokens
   `).all();
+  const preservedMatchTeamPins = db.prepare("SELECT * FROM match_team_pins").all();
+  const preservedMatchSessions = db.prepare("SELECT * FROM match_sessions").all();
+  const preservedMatchReports = db.prepare("SELECT * FROM match_reports").all();
+  const preservedMatchReportSignatures = db.prepare("SELECT * FROM match_report_signatures").all();
+  const preservedMatchReportDisputes = db.prepare("SELECT * FROM match_report_disputes").all();
+  const preservedMatchSyncQueue = db.prepare("SELECT * FROM match_sync_queue").all();
   const nextLeagueIds = new Set(normalized.leagues.map((league) => league.id));
   const nextTeamIds = new Set(normalized.leagues.flatMap((league) => (league.teams || []).map((team) => team.id)));
   const removedLeagueIds = new Set(
@@ -970,8 +1216,8 @@ export function importStore(store) {
 
       for (const match of league.matches) {
         db.prepare(`
-          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, round, date, time, venue, home_team_id, away_team_id, status, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, extra_time_home_goals, extra_time_away_goals, penalty_home_goals, penalty_away_goals, round, date, time, venue, home_team_id, away_team_id, status, workflow_status, capture_mode, current_report_id, published_at, finalized_at, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           match.id,
           league.id,
@@ -981,6 +1227,10 @@ export function importStore(store) {
           match.playoffLeg || "",
           match.aggregateHome ?? null,
           match.aggregateAway ?? null,
+          match.extraTimeHomeGoals ?? null,
+          match.extraTimeAwayGoals ?? null,
+          match.penaltyHomeGoals ?? null,
+          match.penaltyAwayGoals ?? null,
           match.round,
           match.date,
           match.time || "",
@@ -988,6 +1238,11 @@ export function importStore(store) {
           match.homeTeamId,
           match.awayTeamId,
           match.status,
+          match.workflowStatus || match.status || "scheduled",
+          match.captureMode || "admin",
+          match.currentReportId || "",
+          match.publishedAt || "",
+          match.finalizedAt || "",
           match.homeGoals,
           match.awayGoals,
           match.observations || "",
@@ -1001,16 +1256,41 @@ export function importStore(store) {
 
         for (const event of match.events || []) {
           db.prepare(`
-            INSERT INTO match_events (match_id, type, player_id, team_id, minute, suspension_matches, suspension_indefinite, reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(match.id, event.type, event.playerId, event.teamId, event.minute, event.suspensionMatches, event.suspensionIndefinite ? 1 : 0, event.reason);
+            INSERT INTO match_events (match_id, local_uuid, type, player_id, secondary_player_id, assist_player_id, team_id, event_team_side, subtype, period, minute, minute_label, second, suspension_matches, suspension_indefinite, disciplinary_pending, reason, metadata_json, is_official, sync_status, created_by_user_id, created_at, updated_at, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            match.id,
+            event.localUuid || "",
+            event.type,
+            event.playerId || null,
+            event.secondaryPlayerId || null,
+            event.assistPlayerId || null,
+            event.teamId || null,
+            event.eventTeamSide || "",
+            event.subtype || "",
+            event.period || "",
+            event.minute,
+            event.minuteLabel || "",
+            event.second || null,
+            event.suspensionMatches,
+            event.suspensionIndefinite ? 1 : 0,
+            event.disciplinaryPending ? 1 : 0,
+            event.reason,
+            JSON.stringify(event.metadata || {}),
+            event.isOfficial === false ? 0 : 1,
+            event.syncStatus || "synced",
+            event.createdByUserId || null,
+            event.createdAt || "",
+            event.updatedAt || "",
+            event.version || 1
+          );
         }
       }
 
       for (const roster of league.matchRosters || []) {
         db.prepare(`
-          INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, captain_pin, players_json, status, notes, submitted_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO match_rosters (id, league_id, match_id, team_id, submitted_by_user_id, captain_player_id, goalkeeper_player_id, captain_pin, players_json, starters_json, substitutes_json, lineup_json, status, notes, submitted_at, updated_at, version)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           roster.id,
           league.id,
@@ -1018,17 +1298,196 @@ export function importStore(store) {
           roster.teamId,
           roster.submittedByUserId || null,
           roster.captainPlayerId || null,
+          roster.goalkeeperPlayerId || null,
           roster.captainPin || "",
           JSON.stringify(roster.players || []),
+          JSON.stringify(roster.starters || []),
+          JSON.stringify(roster.substitutes || []),
+          JSON.stringify(roster.lineup || {}),
           roster.status || "submitted",
           roster.notes || "",
           roster.submittedAt || new Date().toISOString(),
-          roster.updatedAt || roster.submittedAt || new Date().toISOString()
+          roster.updatedAt || roster.submittedAt || new Date().toISOString(),
+          roster.version || 1
         );
       }
     }
 
     const userIds = new Set(db.prepare("SELECT id FROM users").all().map((user) => user.id));
+    const matchIds = new Set(db.prepare("SELECT id FROM matches").all().map((match) => match.id));
+    const teamIds = new Set(db.prepare("SELECT id FROM teams").all().map((team) => team.id));
+    const playerIds = new Set(db.prepare("SELECT id FROM players").all().map((player) => player.id));
+    const rosterIds = new Set(db.prepare("SELECT id FROM match_rosters").all().map((roster) => roster.id));
+    const restoredSessionIds = new Set();
+    const restoredReportIds = new Set();
+
+    for (const pin of preservedMatchTeamPins) {
+      if (!nextLeagueIds.has(pin.league_id) || !matchIds.has(pin.match_id) || !teamIds.has(pin.team_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_team_pins (
+          id, league_id, match_id, team_id, roster_id, pin_hash, pin_salt, status,
+          attempts, locked_until, generated_by_user_id, generated_at, revealed_by_user_id,
+          revealed_at, invalidated_at, used_at, signed_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        pin.id,
+        pin.league_id,
+        pin.match_id,
+        pin.team_id,
+        pin.roster_id && rosterIds.has(pin.roster_id) ? pin.roster_id : null,
+        pin.pin_hash,
+        pin.pin_salt || null,
+        pin.status || "active",
+        Number(pin.attempts || 0),
+        pin.locked_until || null,
+        pin.generated_by_user_id && userIds.has(pin.generated_by_user_id) ? pin.generated_by_user_id : null,
+        pin.generated_at || new Date().toISOString(),
+        pin.revealed_by_user_id && userIds.has(pin.revealed_by_user_id) ? pin.revealed_by_user_id : null,
+        pin.revealed_at || null,
+        pin.invalidated_at || null,
+        pin.used_at || null,
+        pin.signed_at || null,
+        pin.created_at || new Date().toISOString(),
+        pin.updated_at || new Date().toISOString()
+      );
+    }
+
+    for (const session of preservedMatchSessions) {
+      if (!nextLeagueIds.has(session.league_id) || !matchIds.has(session.match_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_sessions (
+          id, league_id, match_id, referee_user_id, capture_mode, status, period,
+          started_at, paused_at, saved_at, resumed_at, finished_at, suspended_at,
+          suspension_reason, clock_state_json, metadata_json, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        session.id,
+        session.league_id,
+        session.match_id,
+        session.referee_user_id && userIds.has(session.referee_user_id) ? session.referee_user_id : null,
+        session.capture_mode || "live",
+        session.status || "draft",
+        session.period || "",
+        session.started_at || null,
+        session.paused_at || null,
+        session.saved_at || null,
+        session.resumed_at || null,
+        session.finished_at || null,
+        session.suspended_at || null,
+        session.suspension_reason || "",
+        session.clock_state_json || "{}",
+        session.metadata_json || "{}",
+        session.created_at || new Date().toISOString(),
+        session.updated_at || new Date().toISOString()
+      );
+      restoredSessionIds.add(session.id);
+    }
+
+    for (const report of preservedMatchReports) {
+      if (!nextLeagueIds.has(report.league_id) || !matchIds.has(report.match_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_reports (
+          id, league_id, match_id, session_id, generated_by_user_id, capture_mode, status,
+          version, payload_json, home_goals, away_goals, generated_at, finalized_at,
+          published_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        report.id,
+        report.league_id,
+        report.match_id,
+        report.session_id && restoredSessionIds.has(report.session_id) ? report.session_id : null,
+        report.generated_by_user_id && userIds.has(report.generated_by_user_id) ? report.generated_by_user_id : null,
+        report.capture_mode || "admin",
+        report.status || "draft",
+        Number(report.version || 1),
+        report.payload_json || "{}",
+        report.home_goals ?? null,
+        report.away_goals ?? null,
+        report.generated_at || null,
+        report.finalized_at || null,
+        report.published_at || null,
+        report.created_at || new Date().toISOString(),
+        report.updated_at || new Date().toISOString()
+      );
+      restoredReportIds.add(report.id);
+    }
+
+    for (const signature of preservedMatchReportSignatures) {
+      if (!restoredReportIds.has(signature.report_id) || !nextLeagueIds.has(signature.league_id) || !matchIds.has(signature.match_id) || !teamIds.has(signature.team_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_report_signatures (
+          id, report_id, league_id, match_id, team_id, captain_player_id,
+          signed_by_user_id, method, status, signed_at, ip_address, user_agent, metadata_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        signature.id,
+        signature.report_id,
+        signature.league_id,
+        signature.match_id,
+        signature.team_id,
+        signature.captain_player_id && playerIds.has(signature.captain_player_id) ? signature.captain_player_id : null,
+        signature.signed_by_user_id && userIds.has(signature.signed_by_user_id) ? signature.signed_by_user_id : null,
+        signature.method || "pin",
+        signature.status || "signed",
+        signature.signed_at || new Date().toISOString(),
+        signature.ip_address || "",
+        signature.user_agent || "",
+        signature.metadata_json || "{}"
+      );
+    }
+
+    for (const dispute of preservedMatchReportDisputes) {
+      if (!restoredReportIds.has(dispute.report_id) || !nextLeagueIds.has(dispute.league_id) || !matchIds.has(dispute.match_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_report_disputes (
+          id, report_id, league_id, match_id, team_id, requested_by_user_id,
+          reason, status, created_at, resolved_at, resolved_by_user_id, resolution_note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        dispute.id,
+        dispute.report_id,
+        dispute.league_id,
+        dispute.match_id,
+        dispute.team_id && teamIds.has(dispute.team_id) ? dispute.team_id : null,
+        dispute.requested_by_user_id && userIds.has(dispute.requested_by_user_id) ? dispute.requested_by_user_id : null,
+        dispute.reason || "",
+        dispute.status || "open",
+        dispute.created_at || new Date().toISOString(),
+        dispute.resolved_at || null,
+        dispute.resolved_by_user_id && userIds.has(dispute.resolved_by_user_id) ? dispute.resolved_by_user_id : null,
+        dispute.resolution_note || ""
+      );
+    }
+
+    for (const queued of preservedMatchSyncQueue) {
+      if (!nextLeagueIds.has(queued.league_id) || !matchIds.has(queued.match_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_sync_queue (
+          id, league_id, match_id, session_id, client_event_id, created_by_user_id,
+          payload_json, status, attempts, last_error, created_at, synced_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        queued.id,
+        queued.league_id,
+        queued.match_id,
+        queued.session_id && restoredSessionIds.has(queued.session_id) ? queued.session_id : null,
+        queued.client_event_id || "",
+        queued.created_by_user_id && userIds.has(queued.created_by_user_id) ? queued.created_by_user_id : null,
+        queued.payload_json || "{}",
+        queued.status || "pending",
+        Number(queued.attempts || 0),
+        queued.last_error || "",
+        queued.created_at || new Date().toISOString(),
+        queued.synced_at || null
+      );
+    }
+
     const restoredAccessIds = new Set();
     const restoredAssignmentIds = new Set();
 

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import alpLogo from "../../assets/alp-logo.png";
+import ligatecLogo from "../../assets/ligatec-logo.png";
 import { activateDelegate, fetchDelegateActivation } from "../lib/delegateActivationApi.js";
 
 export function DelegateActivationView({ token, onActivated, onNavigate }) {
@@ -44,10 +46,20 @@ export function DelegateActivationView({ token, onActivated, onNavigate }) {
   }
 
   return (
-    <main className="page activation-page">
+    <main className="page activation-page auth-experience-page">
+      <div className="access-hero-head">
+        <div className="access-brand-lockup">
+          <span className="brand-mark brand-mark-logo access-logo"><img alt="" src={ligatecLogo} /></span>
+          <span>
+            <strong className="brand-wordmark">LIGA<span>TEC</span></strong>
+            <small>PLATAFORMA DEPORTIVA</small>
+          </span>
+        </div>
+      </div>
       <section className="activation-card">
-        <span className="eyebrow">Activacion de delegado</span>
+        <span className="auth-pill"><span className="access-lock-icon" />Activacion de delegado</span>
         <h1>Activa tu cuenta</h1>
+        <p className="activation-intro">Crea tu contraseña para administrar la plantilla de tu equipo en LIGATEC.</p>
         {loading ? (
           <p className="helper-text">Validando invitacion...</p>
         ) : error && !activation ? (
@@ -97,6 +109,13 @@ export function DelegateActivationView({ token, onActivated, onNavigate }) {
           </>
         )}
       </section>
+      <footer className="access-footer">
+        <strong>La evolucion digital del futbol amateur.</strong>
+        <span className="access-footer-dev">
+          <small>Desarrollado por</small>
+          <img alt="ALP DEV" src={alpLogo} />
+        </span>
+      </footer>
     </main>
   );
 }
