@@ -5179,15 +5179,15 @@ function SuperAdmin({
 }
 
 const SUPER_ADMIN_MODULES = [
-  { id: "dashboard", label: "Dashboard", short: "IN" },
-  { id: "platform", label: "Plataforma", short: "PL" },
-  { id: "leagues", label: "Ligas", short: "LG" },
-  { id: "users", label: "Usuarios", short: "US" },
-  { id: "tournaments", label: "Torneos", short: "TR" },
-  { id: "advertising", label: "Publicidad", short: "AD" },
-  { id: "audit", label: "Auditoria", short: "AU" },
-  { id: "backups", label: "Respaldos", short: "BK" },
-  { id: "settings", label: "Configuracion", short: "CF" }
+  { id: "dashboard", label: "Dashboard", short: "Inicio" },
+  { id: "platform", label: "Plataforma", short: "Sistema" },
+  { id: "leagues", label: "Ligas", short: "Ligas" },
+  { id: "users", label: "Usuarios", short: "Usuarios" },
+  { id: "tournaments", label: "Torneos", short: "Torneos" },
+  { id: "advertising", label: "Publicidad", short: "Ads" },
+  { id: "audit", label: "Auditoria", short: "Audit" },
+  { id: "backups", label: "Respaldos", short: "Backup" },
+  { id: "settings", label: "Configuracion", short: "Config" }
 ];
 
 const SUPER_ADMIN_BOTTOM_MODULES = ["dashboard", "leagues", "users", "platform", "settings"];
@@ -5298,16 +5298,31 @@ function getLeagueSummary(league) {
 
 function SuperAdminDashboard({ leagues, stats, onOpenCreateLeague, onOpenLeagues, onOpenUsers }) {
   const latestLeagues = leagues.filter((league) => league.status !== "deleted").slice(0, 4);
+  const actionCards = [
+    { label: "Crear liga", text: "Alta guiada con admin, municipio y estado inicial.", action: onOpenCreateLeague },
+    { label: "Gestionar ligas", text: "Revisar ligas activas, suspendidas y sus administradores.", action: onOpenLeagues },
+    { label: "Usuarios y permisos", text: "Controlar super admin, admin liga, capturistas y roles limitados.", action: onOpenUsers }
+  ];
 
   return (
     <section className="super-dashboard">
       <div className="super-hero-panel">
         <div>
-          <span>Estado de la plataforma</span>
-          <h2>Todos los modulos operando con datos locales del store actual.</h2>
-          <p>No se agregan consultas extra a la API en este dashboard. Las acciones sensibles siguen protegidas en sus modulos.</p>
+          <span>Centro de control</span>
+          <h2>Operacion general de LIGATEC</h2>
+          <p>Resumen ejecutivo de ligas, usuarios, torneos y servicios. Todo este panel trabaja con el store ya cargado para evitar peticiones innecesarias.</p>
         </div>
         <button className="primary" type="button" onClick={onOpenCreateLeague}>+ Nueva liga</button>
+      </div>
+
+      <div className="super-action-grid" aria-label="Acciones principales">
+        {actionCards.map((card) => (
+          <button key={card.label} type="button" onClick={card.action}>
+            <span>{card.label}</span>
+            <strong>{card.text}</strong>
+            <em>Entrar</em>
+          </button>
+        ))}
       </div>
 
       <div className="super-metric-grid">

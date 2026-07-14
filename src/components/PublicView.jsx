@@ -224,8 +224,14 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     if (updateUrl) updatePublicCompetitionUrl(league, nextCompetition);
     if (clearHash && window.location.hash) {
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      window.dispatchEvent(new Event("hashchange"));
     }
-    if (scrollTop) window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+    if (scrollTop) {
+      window.requestAnimationFrame(() => {
+        document.getElementById("inicio")?.scrollIntoView({ block: "start" });
+        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      });
+    }
   }
 
   function handlePublicSearchResult(result) {
@@ -262,7 +268,16 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   }, [league.id, league.competitions, selectedCompetitionId, showCompetitionGate]);
 
   useEffect(() => {
-    setShowCompetitionGate(hasTournamentSelector(league));
+    const shouldShowGate = hasTournamentSelector(league);
+    if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+    setShowCompetitionGate(shouldShowGate);
+    if (shouldShowGate) {
+      if (window.location.hash) {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+        window.dispatchEvent(new Event("hashchange"));
+      }
+      window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+    }
   }, [league.id]);
 
   useEffect(() => {
@@ -3206,16 +3221,6 @@ function StandingsTable({ rows, rules, league, competition, onShare }) {
             </div>
           );
         })}
-      </div>
-      <div className="standings-legend standings-legend-modern">
-        <span><strong>PJ:</strong> Partidos jugados</span>
-        <span><strong>G:</strong> Ganados</span>
-        <span><strong>E:</strong> Empatados</span>
-        <span><strong>P:</strong> Perdidos</span>
-        <span><strong>GF:</strong> A favor</span>
-        <span><strong>GC:</strong> En contra</span>
-        <span><strong>DG:</strong> Dif. goles</span>
-        <span><strong>PTS:</strong> Puntos</span>
       </div>
     </section>
   );

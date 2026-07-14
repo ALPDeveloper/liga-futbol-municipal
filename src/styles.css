@@ -7471,7 +7471,8 @@ th {
   padding: 10px;
   border-radius: 16px;
   background:
-    radial-gradient(circle at 8% 0%, rgba(36, 211, 127, 0.18), transparent 32%),
+    radial-gradient(circle at 8% 0%, rgba(36, 211, 127, 0.2), transparent 32%),
+    radial-gradient(circle at 94% 0%, rgba(20, 184, 166, 0.16), transparent 30%),
     linear-gradient(145deg, #071319, #0a1e19 58%, #061416);
   color: #f8fafc;
 }
@@ -7561,7 +7562,7 @@ th {
 }
 
 .super-admin-nav button span {
-  width: 28px;
+  min-width: 58px;
   height: 28px;
   display: inline-flex;
   align-items: center;
@@ -7570,6 +7571,7 @@ th {
   background: rgba(255, 255, 255, 0.06);
   color: var(--lime);
   font-size: 0.72rem;
+  padding: 0 8px;
 }
 
 .super-admin-nav button.active {
@@ -7683,7 +7685,8 @@ th {
   padding: 18px;
   border-radius: 14px;
   background:
-    linear-gradient(135deg, rgba(8, 24, 33, 0.96), rgba(11, 91, 67, 0.92)),
+    radial-gradient(circle at 90% 10%, rgba(163, 230, 53, 0.22), transparent 28%),
+    linear-gradient(135deg, rgba(8, 24, 33, 0.98), rgba(10, 82, 77, 0.92) 48%, rgba(14, 103, 71, 0.88)),
     var(--super-panel);
   color: #fff;
 }
@@ -7714,6 +7717,65 @@ th {
   gap: 12px;
 }
 
+.super-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.super-action-grid button {
+  min-height: 116px;
+  display: grid;
+  align-content: space-between;
+  justify-items: start;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid rgba(134, 239, 172, 0.22);
+  border-radius: 14px;
+  color: #f8fafc;
+  text-align: left;
+  background:
+    linear-gradient(135deg, rgba(5, 33, 47, 0.96), rgba(6, 82, 66, 0.92)),
+    #071319;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16);
+}
+
+.super-action-grid button:hover,
+.super-action-grid button:focus-visible {
+  border-color: rgba(163, 230, 53, 0.72);
+  box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.2),
+    0 0 0 3px rgba(163, 230, 53, 0.14);
+}
+
+.super-action-grid span {
+  color: var(--lime);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.super-action-grid strong {
+  color: #fff;
+  font-size: 0.96rem;
+  line-height: 1.28;
+}
+
+.super-action-grid em {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #062015;
+  background: linear-gradient(135deg, #20e7c5, #a8ff2f);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
 .super-metric-grid.compact {
   margin-top: 14px;
 }
@@ -7724,7 +7786,8 @@ th {
   border: 1px solid rgba(15, 118, 110, 0.16);
   border-radius: 12px;
   background:
-    linear-gradient(135deg, #ffffff, #f5fbf8 72%, rgba(163, 230, 53, 0.11));
+    radial-gradient(circle at 92% 10%, rgba(20, 184, 166, 0.14), transparent 28%),
+    linear-gradient(135deg, #ffffff, #f5fbf8 72%, rgba(163, 230, 53, 0.12));
   color: var(--ink);
 }
 
@@ -7762,7 +7825,9 @@ th {
 .super-panel-card {
   padding: 16px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
+  background:
+    radial-gradient(circle at 96% 0%, rgba(163, 230, 53, 0.1), transparent 32%),
+    rgba(255, 255, 255, 0.98);
   color: var(--ink);
 }
 
@@ -8451,6 +8516,7 @@ th {
   }
 
   .super-dashboard-grid,
+  .super-action-grid,
   .super-list-toolbar,
   .super-user-toolbar,
   .super-tournament-toolbar,
@@ -8576,7 +8642,8 @@ th {
   }
 
   .super-admin-bottom-nav button span {
-    width: 24px;
+    min-width: 0;
+    width: auto;
     height: 24px;
     display: inline-flex;
     align-items: center;
@@ -8584,7 +8651,8 @@ th {
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.08);
     color: var(--lime);
-    font-size: 0.62rem;
+    padding: 0 4px;
+    font-size: 0.55rem;
   }
 
   .super-admin-bottom-nav button.active {
@@ -15831,14 +15899,14 @@ button.arbitration-metric-card {
   display: grid;
   place-items: initial;
   align-content: start;
-  gap: 24px;
-  padding: 34px 0 28px;
+  gap: 16px;
+  padding: 22px 0 18px;
   color: #fff;
 }
 
 .access-hero-head {
   display: grid;
-  gap: 20px;
+  gap: 14px;
   min-width: 0;
 }
 
@@ -15846,7 +15914,7 @@ button.arbitration-metric-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 20px;
+  gap: 16px;
 }
 
 .access-brand-lockup .brand-wordmark {
@@ -15867,8 +15935,8 @@ button.arbitration-metric-card {
 }
 
 .auth-experience-page .access-logo {
-  width: 96px;
-  height: 96px;
+  width: 78px;
+  height: 78px;
   border-radius: 8px;
   box-shadow: 0 18px 38px rgba(0, 0, 0, 0.28);
 }
@@ -15919,8 +15987,8 @@ button.arbitration-metric-card {
 .auth-experience-page .activation-card {
   width: 100%;
   display: grid;
-  gap: 22px;
-  padding: 38px 46px;
+  gap: 16px;
+  padding: 26px 38px;
   border: 1px solid rgba(168, 255, 66, 0.9);
   border-radius: 8px;
   color: #fff;
@@ -15938,7 +16006,7 @@ button.arbitration-metric-card {
   display: grid;
   grid-template-columns: 1fr;
   justify-items: center;
-  gap: 12px;
+  gap: 8px;
   text-align: center;
 }
 
@@ -15947,8 +16015,8 @@ button.arbitration-metric-card {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  min-height: 44px;
-  padding: 0 22px;
+  min-height: 36px;
+  padding: 0 18px;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 999px;
   color: #9df6e8;
@@ -15960,7 +16028,7 @@ button.arbitration-metric-card {
 .auth-experience-page .activation-card h1 {
   margin: 0;
   color: #fff;
-  font-size: 4rem;
+  font-size: 3.05rem;
   line-height: 1;
   text-transform: none;
   text-shadow: 0 8px 30px rgba(0, 0, 0, 0.36);
@@ -15978,8 +16046,8 @@ button.arbitration-metric-card {
 .auth-experience-page .access-lock-banner {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 18px;
-  padding: 18px 22px;
+  gap: 14px;
+  padding: 14px 18px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 8px;
   background:
@@ -16011,8 +16079,8 @@ button.arbitration-metric-card {
 
 .access-user-icon {
   position: relative;
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   color: #a8ff42;
 }
 
@@ -16042,7 +16110,7 @@ button.arbitration-metric-card {
 .auth-experience-page .auth-panel {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 18px;
+  gap: 14px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -16050,7 +16118,7 @@ button.arbitration-metric-card {
 
 .auth-field {
   display: grid;
-  gap: 10px;
+  gap: 7px;
   color: #fff;
   font-weight: 900;
 }
@@ -16064,8 +16132,8 @@ button.arbitration-metric-card {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
-  min-height: 66px;
-  padding: 0 20px;
+  min-height: 54px;
+  padding: 0 16px;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.07);
@@ -16073,14 +16141,14 @@ button.arbitration-metric-card {
 }
 
 .auth-input-shell > svg {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   color: #a8ff42;
 }
 
 .auth-input-shell input {
   width: 100%;
-  min-height: 60px;
+  min-height: 50px;
   padding: 0;
   border: 0;
   color: #fff;
@@ -16133,8 +16201,8 @@ button.arbitration-metric-card {
 }
 
 .auth-remember input {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   margin: 0;
   accent-color: #a8ff42;
 }
@@ -16170,13 +16238,13 @@ button.arbitration-metric-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 66px;
-  padding: 0 26px;
+  min-height: 56px;
+  padding: 0 22px;
   border: 0;
   border-radius: 8px;
   color: #03120d;
   background: linear-gradient(135deg, #20e7c5, #a8ff2f);
-  font-size: 1.28rem;
+  font-size: 1.14rem;
   font-weight: 950;
   box-shadow:
     0 18px 34px rgba(61, 255, 158, 0.2),
@@ -16184,8 +16252,8 @@ button.arbitration-metric-card {
 }
 
 .auth-submit-button svg {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
 }
 
 .auth-help {
@@ -16329,14 +16397,14 @@ button.arbitration-metric-card {
 .access-footer {
   display: grid;
   justify-items: center;
-  gap: 14px;
+  gap: 8px;
   color: #a8ff42;
   text-align: center;
 }
 
 .access-footer-ball {
-  width: 54px;
-  height: 54px;
+  width: 42px;
+  height: 42px;
   border: 2px solid rgba(255, 255, 255, 0.76);
   border-radius: 999px;
   background:
@@ -16353,22 +16421,22 @@ button.arbitration-metric-card {
   justify-content: center;
   gap: 14px;
   width: min(100%, 560px);
-  padding-top: 14px;
+  padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.28);
   color: rgba(255, 255, 255, 0.78);
 }
 
 .access-footer-dev img {
-  width: 132px;
-  max-height: 48px;
+  width: 110px;
+  max-height: 40px;
   object-fit: contain;
 }
 
 @media (max-width: 640px) {
   .auth-experience-page {
     width: min(100% - 24px, 430px);
-    gap: 18px;
-    padding: 28px 0 22px;
+    gap: 12px;
+    padding: 16px 0 14px;
   }
 
   .portal-stat-strip {
@@ -16384,8 +16452,8 @@ button.arbitration-metric-card {
   }
 
   .auth-experience-page .access-logo {
-    width: 68px;
-    height: 68px;
+    width: 58px;
+    height: 58px;
   }
 
   .access-brand-lockup .brand-wordmark {
@@ -16397,18 +16465,18 @@ button.arbitration-metric-card {
   }
 
   .access-active-league strong {
-    font-size: 1.18rem;
+    font-size: 1.04rem;
   }
 
   .auth-experience-page .access-card,
   .auth-experience-page .activation-card {
-    gap: 18px;
-    padding: 28px 22px;
+    gap: 13px;
+    padding: 20px 18px;
   }
 
   .auth-experience-page .access-card h1,
   .auth-experience-page .activation-card h1 {
-    font-size: 3.15rem;
+    font-size: 2.42rem;
   }
 
   .auth-pill {
@@ -16419,7 +16487,7 @@ button.arbitration-metric-card {
 
   .auth-experience-page .access-lock-banner {
     grid-template-columns: auto minmax(0, 1fr);
-    padding: 16px;
+    padding: 12px;
   }
 
   .access-user-icon {
@@ -16428,12 +16496,12 @@ button.arbitration-metric-card {
   }
 
   .auth-input-shell {
-    min-height: 60px;
-    padding-inline: 16px;
+    min-height: 52px;
+    padding-inline: 14px;
   }
 
   .auth-input-shell input {
-    min-height: 56px;
+    min-height: 48px;
     font-size: 1rem;
   }
 
@@ -16443,8 +16511,8 @@ button.arbitration-metric-card {
   }
 
   .auth-submit-button {
-    min-height: 60px;
-    font-size: 1.1rem;
+    min-height: 54px;
+    font-size: 1.02rem;
   }
 
   .auth-experience-page .activation-form,
@@ -16470,7 +16538,7 @@ button.arbitration-metric-card {
 
   .auth-experience-page .access-card h1,
   .auth-experience-page .activation-card h1 {
-    font-size: 2.62rem;
+    font-size: 2.12rem;
   }
 
   .access-brand-lockup .brand-wordmark {
@@ -16478,8 +16546,8 @@ button.arbitration-metric-card {
   }
 
   .auth-experience-page .access-logo {
-    width: 60px;
-    height: 60px;
+    width: 52px;
+    height: 52px;
   }
 }
 
