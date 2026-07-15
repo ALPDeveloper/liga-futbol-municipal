@@ -629,6 +629,7 @@ function TeamDelegatesPanel({ authToken, league }) {
   const [delegateSearch, setDelegateSearch] = useState("");
   const [delegateCompetitionFilter, setDelegateCompetitionFilter] = useState("all");
   const [delegateStatusFilter, setDelegateStatusFilter] = useState("all");
+  const [delegateListTab, setDelegateListTab] = useState("delegates");
   const teams = useMemo(() => [...(league.teams || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.teams]);
   const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
   const filteredTeams = useMemo(() => {
@@ -847,42 +848,80 @@ function TeamDelegatesPanel({ authToken, league }) {
     return delegates.find((delegate) => delegate.teamId === teamId) || {};
   }
 
+  const activeDelegates = delegates.filter((delegate) => delegate.status === "active").length;
+  const pendingDelegates = delegates.filter((delegate) => delegate.status === "pending_activation").length;
+  const inactiveDelegates = delegates.filter((delegate) => delegate.status === "disabled" || delegate.status === "suspended").length;
+  const teamsWithoutDelegate = Math.max(teams.length - assignedTeamIds.size, 0);
+
   return (
-    <section className="panel">
-      <SectionHeading eyebrow="Equipos" title="Delegados y registro de plantillas" />
-      <p className="helper-text">
-        Crea un usuario por equipo y controla cuando puede registrar jugadores. Los delegados usan la ruta /equipo y no tienen acceso al panel administrativo completo.
-      </p>
-      <div className="module-guide">
-        <span>1. Crea delegado</span>
-        <span>2. Abre o cierra registro</span>
-        <span>3. Revisa plantilla enviada</span>
+    <section className="panel delegate-admin-shell">
+      <div className="delegate-admin-hero">
+        <span className="delegate-hero-icon" aria-hidden="true">◉</span>
+        <div>
+          <small>Delegados</small>
+          <h2>Centro de delegados</h2>
+          <p>Gestiona responsables por equipo, invitaciones y control de registro de plantillas.</p>
+        </div>
+        <a href="#delegate-create" className="delegate-hero-action">Crear delegado</a>
       </div>
+
+      <div className="delegate-quick-actions" aria-label="Acciones rapidas de delegados">
+        <a href="#delegate-create"><span aria-hidden="true">+</span><b>Crear delegado</b><small>Invita a un responsable</small></a>
+        <button type="button" onClick={() => setDelegateListTab("delegates")}><span aria-hidden="true">☷</span><b>Delegados y equipos</b><small>Ver asignaciones</small></button>
+        <button type="button" onClick={() => setDelegateListTab("teams")}><span aria-hidden="true">□</span><b>Plantillas</b><small>Permisos de registro</small></button>
+      </div>
+
       {notice && <p className="auth-ok">{notice}</p>}
       {error && <p className="auth-error">{error}</p>}
 
-      <form className="delegate-create-form" onSubmit={submitDelegate}>
-        <h3>Crear delegado de equipo</h3>
-        <label>Torneo / categoria
-          <select value={delegateCompetitionFilter} onChange={(event) => setDelegateCompetitionFilter(event.target.value)}>
-            <option value="all">Todos los torneos</option>
-            {competitions.map((competition) => (
-              <option key={competition.id} value={competition.id}>{competition.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>Equipo
-          <select name="teamId" required disabled={!createTeamOptions.length}>
-            {createTeamOptions.map((team) => (
-              <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Categoria"}</option>
-            ))}
-          </select>
-        </label>
-        <label>Nombre del delegado<input name="name" required placeholder="Nombre del responsable" /></label>
-        <label>Telefono<input name="phone" required inputMode="tel" placeholder="354..." /></label>
-        <label>Correo<input name="email" required type="email" placeholder="delegado@correo.com" /></label>
-        <button className="primary" type="submit" disabled={!createTeamOptions.length || busyAction === "create-delegate"}>
-          {busyAction === "create-delegate" ? "Creando invitacion..." : "Crear invitacion"}
+      <div className="delegate-summary-strip delegate-summary-cards">
+        <span><strong>{delegates.length}</strong> delegados totales</span>
+        <span><strong>{activeDelegates}</strong> activos</span>
+        <span><strong>{teams.length}</strong> equipos</span>
+        <span><strong>{teamsWithoutDelegate}</strong> sin delegado</span>
+        <span><strong>{pendingDelegates}</strong> invitaciones pendientes</span>
+        <span><strong>{inactiveDelegates}</strong> inactivos</span>
+      </div>
+
+      <form className="delegate-create-form delegate-wizard-card" id="delegate-create" onSubmit={submitDelegate}>
+        <div className="delegate-wizard-head">
+          <div>
+            <small>Crear delegado</small>
+            <h3>Nueva invitacion</h3>
+          </div>
+          <div className="delegate-stepper" aria-label="Flujo de creacion">
+            <span className="active">1<b>Delegado</b></span>
+            <span className="active">2<b>Asignacion</b></span>
+            <span>3<b>Resumen</b></span>
+          </div>
+        </div>
+        <fieldset>
+          <legend>Informacion del delegado</legend>
+          <label>Nombre completo<input name="name" required placeholder="Ej. Juan Perez Lopez" /></label>
+          <label>Telefono<input name="phone" required inputMode="tel" placeholder="Ej. 353 123 4567" /></label>
+          <label>Correo electronico<input name="email" required type="email" placeholder="Ej. juan@correo.com" /></label>
+        </fieldset>
+        <fieldset>
+          <legend>Asignar a equipo</legend>
+          <label>Torneo / categoria
+            <select value={delegateCompetitionFilter} onChange={(event) => setDelegateCompetitionFilter(event.target.value)}>
+              <option value="all">Todos los torneos</option>
+              {competitions.map((competition) => (
+                <option key={competition.id} value={competition.id}>{competition.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>Equipo
+            <select name="teamId" required disabled={!createTeamOptions.length}>
+              {createTeamOptions.map((team) => (
+                <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Categoria"}</option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
+        <p className="delegate-form-note">Se enviara una invitacion con enlace unico para que el delegado active su cuenta.</p>
+        <button className="primary delegate-submit-button" type="submit" disabled={!createTeamOptions.length || busyAction === "create-delegate"}>
+          {busyAction === "create-delegate" ? "Creando invitacion..." : "Crear y generar invitacion"}
         </button>
       </form>
 
@@ -898,13 +937,13 @@ function TeamDelegatesPanel({ authToken, league }) {
         </div>
       )}
 
-      <div className="delegate-filter-bar">
-        <label>Buscar equipo o delegado
+      <div className="delegate-filter-bar" id="delegate-list">
+        <label>Buscar
           <input
             type="search"
             value={delegateSearch}
             onChange={(event) => setDelegateSearch(event.target.value)}
-            placeholder="Equipo, delegado, correo o telefono"
+            placeholder="Delegado, equipo o correo..."
           />
         </label>
         <label>Torneo / categoria
@@ -932,15 +971,19 @@ function TeamDelegatesPanel({ authToken, league }) {
           Limpiar filtros
         </button>
       </div>
-      <div className="delegate-summary-strip">
-        <span><strong>{delegates.length}</strong> delegados</span>
-        <span><strong>{assignedTeamIds.size}</strong> equipos asignados</span>
-        <span><strong>{Math.max(teams.length - assignedTeamIds.size, 0)}</strong> equipos sin delegado</span>
+
+      <div className="delegate-tabs" role="tablist" aria-label="Vista de delegados">
+        <button type="button" role="tab" aria-selected={delegateListTab === "delegates"} className={delegateListTab === "delegates" ? "active" : ""} onClick={() => setDelegateListTab("delegates")}>Delegados</button>
+        <button type="button" role="tab" aria-selected={delegateListTab === "teams"} className={delegateListTab === "teams" ? "active" : ""} onClick={() => setDelegateListTab("teams")}>Equipos</button>
       </div>
 
       <div className="delegate-grid">
-        <div>
-          <h3>Permisos por equipo</h3>
+        {delegateListTab === "teams" && (
+        <div className="delegate-list-panel">
+          <div className="delegate-section-head">
+            <h3>Permisos por equipo</h3>
+            <small>{filteredTeams.length} equipo(s)</small>
+          </div>
           <div className="delegate-group-list">
             {teamsByCompetition.map((group) => (
               <details className="delegate-compact-group" key={group.id} open={delegateCompetitionFilter !== "all" || Boolean(delegateSearch)}>
@@ -983,9 +1026,14 @@ function TeamDelegatesPanel({ authToken, league }) {
             {teams.length > 0 && !filteredTeams.length && <p className="empty">No hay equipos que coincidan con los filtros.</p>}
           </div>
         </div>
+        )}
 
-        <div>
-          <h3>Delegados asignados</h3>
+        {delegateListTab === "delegates" && (
+        <div className="delegate-list-panel">
+          <div className="delegate-section-head">
+            <h3>Lista de delegados</h3>
+            <small>{filteredDelegates.length} resultado(s)</small>
+          </div>
           <div className="delegate-group-list">
             {loading ? <p className="empty">Cargando delegados...</p> : delegatesByCompetition.map((group) => (
               <details className="delegate-compact-group" key={group.id} open={delegateCompetitionFilter !== "all" || Boolean(delegateSearch) || delegateStatusFilter !== "all"}>
@@ -1046,6 +1094,7 @@ function TeamDelegatesPanel({ authToken, league }) {
             {!loading && delegates.length > 0 && !filteredDelegates.length && <p className="empty">No hay delegados que coincidan con los filtros.</p>}
           </div>
         </div>
+        )}
       </div>
     </section>
   );
@@ -1878,7 +1927,7 @@ function RefereeCreateSheet({ busyAction, lastInvitation, league, onClose, onSub
       <div className="referee-bottom-sheet" role="dialog" aria-modal="true" aria-label="Nuevo arbitro" onClick={(event) => event.stopPropagation()}>
         <div className="referee-bottom-sheet-head">
           <strong>Nuevo arbitro</strong>
-          <button type="button" onClick={onClose}>Cerrar</button>
+          <button className="referee-sheet-close" type="button" aria-label="Cerrar" onClick={onClose}>×</button>
         </div>
         <form className="referee-sheet-form-grid" onSubmit={onSubmit}>
           <label>Nombre completo<input name="name" required placeholder="Ej. Juan Perez Lopez" /></label>
@@ -5136,8 +5185,12 @@ function SuperAdmin({
       <main className="super-admin-main">
         <header className="super-admin-topbar">
           <button className="super-admin-menu-button" type="button" aria-label="Abrir menu" onClick={() => setDrawerOpen(true)}>☰</button>
+          <div className="super-admin-mobile-brand">
+            <img alt="LIGATEC" src={ligatecLogo} />
+            <span>Super Admin</span>
+          </div>
           <div className="super-admin-title-block">
-            <span>Panel Super Admin</span>
+            <span>{currentUser?.name ? `Buenos dias, ${currentUser.name.split(" ")[0]}` : "Panel Super Admin"}</span>
             <h1>{activeModuleInfo.label}</h1>
             <small>Control general de LIGATEC</small>
           </div>
@@ -5145,6 +5198,7 @@ function SuperAdmin({
             <span />
             Plataforma estable
           </div>
+          <span className="super-admin-avatar" aria-label="Usuario actual">{getInitials(currentUser?.name || currentUser?.email || "SA")}</span>
         </header>
 
         {moduleContent[activeModule] || moduleContent.dashboard}
@@ -5179,15 +5233,15 @@ function SuperAdmin({
 }
 
 const SUPER_ADMIN_MODULES = [
-  { id: "dashboard", label: "Dashboard", short: "Inicio" },
-  { id: "platform", label: "Plataforma", short: "Sistema" },
-  { id: "leagues", label: "Ligas", short: "Ligas" },
-  { id: "users", label: "Usuarios", short: "Usuarios" },
-  { id: "tournaments", label: "Torneos", short: "Torneos" },
-  { id: "advertising", label: "Publicidad", short: "Ads" },
-  { id: "audit", label: "Auditoria", short: "Audit" },
-  { id: "backups", label: "Respaldos", short: "Backup" },
-  { id: "settings", label: "Configuracion", short: "Config" }
+  { id: "dashboard", label: "Dashboard", short: "⌂" },
+  { id: "platform", label: "Plataforma", short: "◉" },
+  { id: "leagues", label: "Ligas", short: "▣" },
+  { id: "users", label: "Usuarios", short: "◌" },
+  { id: "tournaments", label: "Torneos", short: "♕" },
+  { id: "advertising", label: "Publicidad", short: "◧" },
+  { id: "audit", label: "Auditoria", short: "◎" },
+  { id: "backups", label: "Respaldos", short: "▤" },
+  { id: "settings", label: "Configuracion", short: "⚙" }
 ];
 
 const SUPER_ADMIN_BOTTOM_MODULES = ["dashboard", "leagues", "users", "platform", "settings"];
@@ -5306,34 +5360,38 @@ function SuperAdminDashboard({ leagues, stats, onOpenCreateLeague, onOpenLeagues
 
   return (
     <section className="super-dashboard">
-      <div className="super-hero-panel">
+      <div className="super-status-card">
         <div>
-          <span>Centro de control</span>
-          <h2>Operacion general de LIGATEC</h2>
-          <p>Resumen ejecutivo de ligas, usuarios, torneos y servicios. Todo este panel trabaja con el store ya cargado para evitar peticiones innecesarias.</p>
+          <span>Estado de la plataforma</span>
+          <strong>Todo funcionando</strong>
+          <small>{stats.totalLeagues} ligas bajo monitoreo activo</small>
         </div>
-        <button className="primary" type="button" onClick={onOpenCreateLeague}>+ Nueva liga</button>
+        <b aria-hidden="true">✓</b>
       </div>
 
-      <div className="super-action-grid" aria-label="Acciones principales">
-        {actionCards.map((card) => (
-          <button key={card.label} type="button" onClick={card.action}>
-            <span>{card.label}</span>
-            <strong>{card.text}</strong>
-            <em>Entrar</em>
-          </button>
-        ))}
-      </div>
-
+      <div className="super-section-label">Resumen general</div>
       <div className="super-metric-grid">
         <SuperMetricCard label="Ligas activas" value={stats.activeLeagues} />
         <SuperMetricCard label="Municipios" value={stats.municipalities} />
-        <SuperMetricCard label="Jugadores" value={stats.players} />
+        <SuperMetricCard label="Usuarios" value={stats.delegates + stats.referees} />
         <SuperMetricCard label="Equipos" value={stats.teams} />
+        <SuperMetricCard label="Jugadores" value={stats.players} />
         <SuperMetricCard label="Arbitros" value={stats.referees} />
+        <SuperMetricCard label="Delegados" value={stats.delegates} />
         <SuperMetricCard label="Torneos activos" value={stats.activeTournaments} />
-        <SuperMetricCard label="Partidos hoy" value={stats.matchesToday} detail={`${stats.scheduledToday} programados | ${stats.finalizedToday} finalizados`} />
-        <SuperMetricCard label="Publicidad activa" value={stats.activeSponsors} />
+      </div>
+
+      <div className="super-today-strip">
+        <article>
+          <small>Partidos hoy</small>
+          <strong>{stats.matchesToday}</strong>
+          <span>{stats.scheduledToday} programados</span>
+        </article>
+        <article className="warning">
+          <small>Actas pendientes</small>
+          <strong>{Math.max(stats.scheduledToday - stats.finalizedToday, 0)}</strong>
+          <span>{stats.finalizedToday} finalizados</span>
+        </article>
       </div>
 
       <div className="super-dashboard-grid">
@@ -5363,12 +5421,20 @@ function SuperAdminDashboard({ leagues, stats, onOpenCreateLeague, onOpenLeagues
         <article className="super-panel-card">
           <div className="super-card-head">
             <div>
-              <span>Accesos</span>
-              <h3>Usuarios y permisos</h3>
+              <span>Acciones rápidas</span>
+              <h3>Operación</h3>
             </div>
             <button type="button" onClick={onOpenUsers}>Administrar</button>
           </div>
-          <p className="helper-text">Los usuarios se mantienen en su modulo para evitar mezclar permisos con creacion de ligas. Admin limitado, capturistas y super admin se controlan ahi.</p>
+          <div className="super-action-grid" aria-label="Acciones principales">
+            {actionCards.map((card) => (
+              <button key={card.label} type="button" onClick={card.action}>
+                <span>{card.label}</span>
+                <strong>{card.text}</strong>
+                <em>Entrar</em>
+              </button>
+            ))}
+          </div>
         </article>
       </div>
     </section>

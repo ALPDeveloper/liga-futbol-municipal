@@ -70,6 +70,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
   const [recoveryMessage, setRecoveryMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [rememberSession, setRememberSession] = useState(true);
 
   if (currentUser) {
     return (
@@ -149,7 +150,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
         event.preventDefault();
         setError("");
         try {
-          await onLogin(email, password);
+          await onLogin(email, password, rememberSession);
         } catch (loginError) {
           setError(loginError.message);
         }
@@ -174,7 +175,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
       </label>
       <div className="auth-inline-actions">
         <label className="auth-remember">
-          <input type="checkbox" defaultChecked aria-label="Mantener mi sesion iniciada" />
+          <input type="checkbox" checked={rememberSession} onChange={(event) => setRememberSession(event.target.checked)} aria-label="Mantener mi sesion iniciada" />
           <span>Mantener mi sesion iniciada</span>
         </label>
         <button className="auth-link-action" type="button" onClick={() => setMode("recover")}>Olvidaste tu contraseña?</button>

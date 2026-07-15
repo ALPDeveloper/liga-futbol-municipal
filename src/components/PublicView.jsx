@@ -78,13 +78,14 @@ function getSeasonId(value) {
   return `season-${slug || "actual"}`;
 }
 
-function updatePublicCompetitionUrl(league, competition) {
+function updatePublicCompetitionUrl(league, competition, options = {}) {
   try {
     if (!competition) return;
+    const { preserveHash = false } = options;
     const url = new URL(window.location.href);
     url.searchParams.set("temporada", getSeasonId(getSeasonValue(competition, league)));
     url.searchParams.set("torneo", competition.id);
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${preserveHash ? url.hash : ""}`);
   } catch {
     // Si el navegador no permite modificar la URL, la seleccion local sigue funcionando.
   }
@@ -221,7 +222,11 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     setSelectedPlayerId("");
     if (nextCompetition?.season) setSelectedSeason(nextCompetition.season);
     if (closeGate) setShowCompetitionGate(false);
-    if (updateUrl) updatePublicCompetitionUrl(league, nextCompetition);
+    if (clearHash && window.location.hash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      window.dispatchEvent(new Event("hashchange"));
+    }
+    if (updateUrl) updatePublicCompetitionUrl(league, nextCompetition, { preserveHash: !clearHash });
     if (clearHash && window.location.hash) {
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
       window.dispatchEvent(new Event("hashchange"));
@@ -285,6 +290,14 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   }, [league.id, showCompetitionGate]);
+
+  useEffect(() => {
+    if (showCompetitionGate || window.location.hash) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById("inicio")?.scrollIntoView({ block: "start" });
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+  }, [league.id, selectedCompetitionId, showCompetitionGate]);
 
   useEffect(() => {
     onEntryModeChange?.(showCompetitionGate);

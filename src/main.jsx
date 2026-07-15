@@ -9,7 +9,7 @@ import heroImage from "../assets/league-hero.webp";
 import { DEFAULT_IDENTITY } from "./data/seedData.js";
 import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
 import { loadStore, saveStore } from "./lib/storage.js";
-import { clearAuth, loadAuth, saveAuth } from "./lib/authStorage.js";
+import { clearAuth, isAuthRemembered, loadAuth, saveAuth } from "./lib/authStorage.js";
 import { fetchSessionFromApi, fetchStoreFromApi, loginWithApi, persistStoreToApi } from "./lib/api.js";
 import { IntroAnimation } from "./components/IntroAnimation.jsx";
 import "./styles.css";
@@ -890,7 +890,7 @@ function App() {
       .then(({ user }) => {
         const nextAuth = { token: auth.token, user };
         setAuth(nextAuth);
-        saveAuth(nextAuth);
+        saveAuth(nextAuth, isAuthRemembered());
       })
       .catch((sessionError) => {
         if (![401, 403].includes(sessionError.status) && auth.user) {
@@ -982,7 +982,7 @@ function App() {
     if (!isPrivateRoute && league?.id) saveLastPublicLeagueId(league.id);
   }, [isPrivateRoute, league?.id]);
 
-  async function login(email, password) {
+  async function login(email, password, rememberSession = true) {
     const nextAuth = await loginWithApi(email, password);
     const apiStore = await fetchStoreFromApi(nextAuth.token);
     const preferredLeagueId = nextAuth.user.role === "league_admin" && nextAuth.user.leagueId
@@ -990,7 +990,7 @@ function App() {
       : apiStore.currentLeagueId;
     const normalizedStore = normalizeStore({ ...apiStore, currentLeagueId: preferredLeagueId });
     setAuth(nextAuth);
-    saveAuth(nextAuth);
+    saveAuth(nextAuth, rememberSession);
     setStore(normalizedStore);
     saveStore(normalizedStore);
     setApiStatus("connected");

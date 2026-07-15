@@ -1692,7 +1692,48 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
   }
 
   return (
-    <main className="page referee-portal-page portal-mobile-shell" id="referee-home">
+    <main className="page referee-portal-page portal-mobile-shell portal-board-shell" id="referee-home">
+      <div className="portal-board-layout referee-board">
+        <aside className="portal-side-rail referee">
+          <div className="portal-side-brand">
+            <img alt="LIGATEC" src={ligatecLogo} />
+            <span>Plataforma deportiva</span>
+          </div>
+          <div className="portal-side-title">
+            <span>Panel</span>
+            <h1>Arbitro</h1>
+            <p>Gestiona partidos asignados, captura en vivo, genera el acta y publica en la plataforma.</p>
+          </div>
+          <article className="portal-side-profile">
+            <span className="portal-avatar blue">{getTeamInitials(referee?.name || currentUser?.name || "AC")}</span>
+            <div>
+              <strong>{referee?.name || currentUser?.name || "Arbitro central"}</strong>
+              <small>Licencia: {referee?.license || "ACT-2025"}</small>
+            </div>
+            <b>Activo</b>
+          </article>
+          <nav className="portal-side-menu" aria-label="Menu arbitro">
+            <a href="#referee-home" className="active"><PortalNavIcon type="home" />Inicio</a>
+            <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="assignments" />Mis partidos</button>
+            <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="acts" />Actas pendientes</button>
+            <button type="button" onClick={() => setActiveView("history")}><PortalNavIcon type="history" />Historial de actas</button>
+            <a href="#referee-tools"><PortalNavIcon type="more" />Herramientas</a>
+          </nav>
+          <article className="portal-side-pin">
+            <strong>Modalidades de acta</strong>
+            <p>En vivo usa firma digital con PIN. Manual se captura con respaldo fisico y no obliga firma digital.</p>
+            <span>La publicacion sucede al finalizar el acta.</span>
+          </article>
+          <div className="portal-side-flow">
+            <strong>Flujo del arbitro</strong>
+            <span>Convocatorias</span>
+            <span>Inicio del partido</span>
+            <span>Captura de eventos</span>
+            <span>Firmas con PIN</span>
+            <span>Publicacion oficial</span>
+          </div>
+        </aside>
+        <div className="portal-screen-stack">
       <section className="referee-portal-home">
         <div className="portal-topline">
           <span className="portal-brand">
@@ -1765,6 +1806,32 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
           <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="acts" /><span>Actas</span></button>
           <button type="button" onClick={() => setActiveView("history")}><PortalNavIcon type="history" /><span>Historial</span></button>
           <a href="#referee-tools"><PortalNavIcon type="stats" /><span>Estadisticas</span></a>
+        </div>
+
+        <div className="portal-info-grid referee">
+          <article className="portal-info-card">
+            <span>Acta digital en vivo</span>
+            <strong>Con firma digital</strong>
+            <small>Captura eventos con cronometro, solicita PIN a capitanes y publica al finalizar el acta.</small>
+          </article>
+          <article className="portal-info-card">
+            <span>Acta manual</span>
+            <strong>Sin firma obligatoria</strong>
+            <small>Usa el acta fisica como respaldo, captura el resultado y publica directo al sistema.</small>
+          </article>
+          <article className="portal-info-card">
+            <span>Sincronizacion</span>
+            <strong>Preparado sin conexion</strong>
+            <small>Los cambios en vivo se guardan localmente y se reintentan cuando vuelva la conexion.</small>
+          </article>
+        </div>
+
+        <div className="portal-flow-strip referee" aria-label="Flujo del arbitro">
+          <span><b>1</b> Convocatorias</span>
+          <span><b>2</b> Captura</span>
+          <span><b>3</b> Revision</span>
+          <span><b>4</b> Firmas</span>
+          <span><b>5</b> Publicacion</span>
         </div>
       </section>
       {portalNotice && <p className="auth-ok referee-portal-notice">{portalNotice}</p>}
@@ -1862,7 +1929,22 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
             <span><strong>Guia rapida</strong><small>Ayuda y tutoriales</small></span>
           </button>
         </div>
+        <div className="portal-support-grid">
+          <article>
+            <strong>Estados del partido</strong>
+            <span><i className="status-dot pending" /> Pendiente</span>
+            <span><i className="status-dot live" /> En progreso</span>
+            <span><i className="status-dot saved" /> Guardado temporal</span>
+            <span><i className="status-dot published" /> Publicado</span>
+          </article>
+          <article>
+            <strong>Consideraciones</strong>
+            <p>Los PIN son privados del equipo. En modo manual, las firmas viven en el acta fisica y toda correccion posterior se controla desde administracion.</p>
+          </article>
+        </div>
       </section>
+        </div>
+      </div>
       <nav className="portal-bottom-nav referee" aria-label="Navegacion arbitro">
         <a href="#referee-home" className="active"><PortalNavIcon type="home" /><span>Inicio</span></a>
         <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="assignments" /><span>Asignaciones</span></button>

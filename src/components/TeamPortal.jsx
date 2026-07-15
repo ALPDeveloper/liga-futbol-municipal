@@ -382,7 +382,48 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const rosterProgress = Math.min(100, Math.round((players.length / Math.max(1, rosterLimit)) * 100));
 
   return (
-    <main className="page team-portal-page portal-mobile-shell" id="delegate-home">
+    <main className="page team-portal-page portal-mobile-shell portal-board-shell" id="delegate-home">
+      <div className="portal-board-layout delegate-board">
+        <aside className="portal-side-rail delegate">
+          <div className="portal-side-brand">
+            <img alt="LIGATEC" src={ligatecLogo} />
+            <span>Plataforma deportiva</span>
+          </div>
+          <div className="portal-side-title">
+            <span>Panel</span>
+            <h1>Delegado</h1>
+            <p>Gestiona tu equipo, plantilla, convocatorias y seguimiento de cada partido.</p>
+          </div>
+          <article className="portal-side-profile">
+            <TeamBadge logoUrl={context.teamLogoUrl} name={context.teamName} />
+            <div>
+              <strong>{context.teamName}</strong>
+              <small>{context.competitionName || "Categoria asignada"}</small>
+            </div>
+            <b>{context.canManageRoster ? "Activo" : "Cerrado"}</b>
+          </article>
+          <nav className="portal-side-menu" aria-label="Menu delegado">
+            <a href="#delegate-home" className="active"><PortalNavIcon type="home" />Inicio</a>
+            <a href="#delegate-roster"><PortalNavIcon type="teams" />Mi plantilla</a>
+            <a href="#delegate-matches"><PortalNavIcon type="matches" />Proximos partidos</a>
+            <a href="#delegate-matches"><PortalNavIcon type="history" />Convocatorias</a>
+            <a href="#delegate-tools"><PortalNavIcon type="more" />Configuracion</a>
+          </nav>
+          <article className="portal-side-pin">
+            <strong>PIN de tu equipo</strong>
+            <p>Es unico por partido y solo debe compartirse con el capitan para firmar el acta al finalizar.</p>
+            <span>No lo publiques ni lo compartas fuera del equipo.</span>
+          </article>
+          <div className="portal-side-flow">
+            <strong>Flujo general</strong>
+            <span>Convocatoria enviada</span>
+            <span>Partido en curso</span>
+            <span>Acta pendiente</span>
+            <span>Acta finalizada</span>
+            <span>Publicacion automatica</span>
+          </div>
+        </aside>
+        <div className="portal-screen-stack">
       <section className="team-portal-app-hero">
         <div className="portal-topline">
           <span className="portal-brand">
@@ -441,11 +482,11 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
           </article>
         )}
 
-        <div className="portal-quick-actions">
-          <a href="#delegate-roster"><PortalNavIcon type="teams" /><span>Mi equipo</span></a>
-          <a href="#delegate-players"><PortalNavIcon type="matches" /><span>Plantilla</span></a>
-          <a href="#delegate-matches"><PortalNavIcon type="history" /><span>Partidos</span></a>
-          <a href="#delegate-tools"><PortalNavIcon type="more" /><span>Jugadores</span></a>
+        <div className="portal-quick-actions delegate">
+          <a href="#delegate-roster"><PortalNavIcon type="teams" /><span>Mi plantilla</span></a>
+          <a href="#delegate-matches"><PortalNavIcon type="matches" /><span>Proximos partidos</span></a>
+          <a href="#delegate-matches"><PortalNavIcon type="history" /><span>Convocatorias</span></a>
+          <a href="#delegate-tools"><PortalNavIcon type="more" /><span>Herramientas</span></a>
         </div>
 
         <div className="portal-summary-card">
@@ -455,6 +496,24 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
           <span><b>{openRosterMatches}</b> partidos por jugar</span>
         </div>
 
+        <div className="portal-info-grid delegate">
+          <article className="portal-info-card">
+            <span>PIN de tu equipo</span>
+            <strong>Privado por partido</strong>
+            <small>El PIN solo se muestra al delegado con validacion de contrasena y sirve para autorizar el acta al final.</small>
+          </article>
+          <article className="portal-info-card">
+            <span>Acta digital</span>
+            <strong>Firma con capitanes</strong>
+            <small>Cuando el arbitro cierre el partido en vivo, ambos capitanes revisan y firman antes de publicar.</small>
+          </article>
+          <article className="portal-info-card">
+            <span>Acta manual</span>
+            <strong>Sin PIN obligatorio</strong>
+            <small>Si el partido se captura desde acta fisica, la publicacion la realiza el arbitro o administracion.</small>
+          </article>
+        </div>
+
         <div className={`team-roster-status ${context.canManageRoster ? "open" : "closed"}`}>
           <strong>{context.canManageRoster ? "Registro abierto" : "Registro cerrado"}</strong>
           <span>
@@ -462,6 +521,13 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
               ? "Puedes agregar jugadores a tu plantilla en este momento."
               : "Tu liga debe habilitar el registro para que puedas agregar jugadores."}
           </span>
+        </div>
+        <div className="portal-flow-strip delegate" aria-label="Flujo del delegado">
+          <span><b>1</b> Convocatoria</span>
+          <span><b>2</b> Partido en curso</span>
+          <span><b>3</b> Acta pendiente</span>
+          <span><b>4</b> Firma PIN</span>
+          <span><b>5</b> Publicacion</span>
         </div>
         {notice && <p className="auth-ok">{notice}</p>}
         {error && <p className="auth-error">{error}</p>}
@@ -762,6 +828,8 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
           </div>
         )}
       </section>
+        </div>
+      </div>
       <nav className="portal-bottom-nav" aria-label="Navegacion delegado">
         <a href="#delegate-home" className="active"><PortalNavIcon type="home" /><span>Inicio</span></a>
         <a href="#delegate-roster"><PortalNavIcon type="teams" /><span>Equipo</span></a>

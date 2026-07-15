@@ -1,7 +1,7 @@
 const AUTH_KEY = "liga-futbol-municipal:auth";
 
 export function loadAuth() {
-  const raw = localStorage.getItem(AUTH_KEY);
+  const raw = localStorage.getItem(AUTH_KEY) || sessionStorage.getItem(AUTH_KEY);
   if (!raw) return { token: "", user: null };
 
   try {
@@ -11,10 +11,18 @@ export function loadAuth() {
   }
 }
 
-export function saveAuth(auth) {
-  localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+export function saveAuth(auth, remember = true) {
+  const targetStorage = remember ? localStorage : sessionStorage;
+  const staleStorage = remember ? sessionStorage : localStorage;
+  staleStorage.removeItem(AUTH_KEY);
+  targetStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+}
+
+export function isAuthRemembered() {
+  return Boolean(localStorage.getItem(AUTH_KEY));
 }
 
 export function clearAuth() {
   localStorage.removeItem(AUTH_KEY);
+  sessionStorage.removeItem(AUTH_KEY);
 }
