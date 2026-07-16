@@ -1,5 +1,9 @@
-import { DEFAULT_IDENTITY } from "../data/seedData.js";
-import { calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, isPlayerEligibleForTeam, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
+import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
+import { ACTIVE_SCHEDULE_MATCH_STATUSES, calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, isPlayerEligibleForTeam, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
+
+function isActiveScheduleMatch(match) {
+  return ACTIVE_SCHEDULE_MATCH_STATUSES.includes(match?.status || "scheduled");
+}
 
 function updateLeague(store, leagueId, updater) {
   return {
@@ -64,7 +68,7 @@ function applyWithdrawalWalkovers(league, teamId, payload) {
   return league.matches.map((match) => {
     const involvesWithdrawnTeam = match.homeTeamId === teamId || match.awayTeamId === teamId;
     const isFutureRound = !fromRound || Number(match.round) >= fromRound;
-    if (!involvesWithdrawnTeam || !isFutureRound || match.status !== "scheduled") return match;
+    if (!involvesWithdrawnTeam || !isFutureRound || !isActiveScheduleMatch(match)) return match;
 
     const withdrawnIsHome = match.homeTeamId === teamId;
     return {
@@ -732,7 +736,7 @@ export function addMatch(store, leagueId, payload) {
         venue: upperText(payload.venue || ""),
         homeTeamId: payload.homeTeamId,
         awayTeamId: payload.awayTeamId,
-        status: "scheduled",
+        status: payload.status || "scheduled",
         homeGoals: null,
         awayGoals: null,
         observations: "",
@@ -985,7 +989,7 @@ export function generateSchedule(store, leagueId, payload) {
       ? league.matches.filter((match) => (
           match.competitionId !== competitionId ||
           (match.stage || "regular") !== "regular" ||
-          match.status !== "scheduled"
+          !isActiveScheduleMatch(match)
         ))
       : league.matches;
 
@@ -1024,7 +1028,7 @@ export function generatePlayoffBracket(store, leagueId, payload) {
           match.competitionId !== competitionId ||
           (match.stage || "regular") !== "playoff" ||
           match.playoffRound !== targetPhase ||
-          match.status !== "scheduled"
+          !isActiveScheduleMatch(match)
         ))
       : league.matches;
 
@@ -1268,8 +1272,13 @@ export function saveMatchSheet(store, leagueId, payload) {
             type: event.type,
             playerId: player.id,
             teamId: eventTeamId,
+            period: event.period === "extra_time" ? "extra_time" : "regular",
             minute,
             minuteLabel,
+            cardDetail: event.cardDetail || "",
+            countsForAccumulation: event.type === "yellow" ? event.countsForAccumulation !== false && !event.excludedFromAccumulation : undefined,
+            excludedFromAccumulation: event.type === "yellow" ? event.countsForAccumulation === false || Boolean(event.excludedFromAccumulation) : undefined,
+            sourceYellowCardMinutes: Array.isArray(event.sourceYellowCardMinutes) ? event.sourceYellowCardMinutes : undefined,
             suspensionMatches: event.type === "red"
               ? event.disciplinaryPending || event.suspensionIndefinite
                 ? 0
@@ -1356,6 +1365,7 @@ export function addLeague(store, payload) {
           }
         ],
         status: "active",
+        publicVisibility: payload.publicVisibility || "visible",
         plan: "Sin limite",
         ownerEmail: payload.ownerEmail,
         renewalDate: "",
@@ -1432,6 +1442,7 @@ export function updateLeagueMembership(store, leagueId, payload) {
     ...league,
     plan: payload.plan || league.plan,
     status: payload.status || league.status,
+    publicVisibility: payload.publicVisibility || league.publicVisibility || "visible",
     ownerEmail: payload.ownerEmail || "",
     renewalDate: payload.renewalDate || "",
     membershipNotes: upperText(payload.membershipNotes || "")

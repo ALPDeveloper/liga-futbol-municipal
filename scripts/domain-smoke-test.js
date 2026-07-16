@@ -886,6 +886,60 @@ const ownGoalChangedEvent = updateMatchSheetEventItem(sheetEvent, "type", "own_g
 assert.equal(ownGoalChangedEvent.teamId, "halcones");
 assert.equal(ownGoalChangedEvent.playerId, "");
 
+const doubleYellowStore = normalizeStore({
+  currentLeagueId: "liga-doble-amarilla",
+  leagues: [
+    {
+      id: "liga-doble-amarilla",
+      name: "Liga Doble Amarilla",
+      city: "Ciudad",
+      currentCompetitionId: "comp-dy",
+      identity: {},
+      rules: { yellowSuspensionLimit: 3 },
+      competitions: [{ id: "comp-dy", name: "Torneo Doble Amarilla", type: "league", status: "active" }],
+      teams: [
+        { id: "team-dy-a", competitionId: "comp-dy", name: "Equipo A" },
+        { id: "team-dy-b", competitionId: "comp-dy", name: "Equipo B" }
+      ],
+      players: [
+        { id: "player-dy", competitionId: "comp-dy", teamId: "team-dy-a", name: "Jugador Doble", number: 8 }
+      ],
+      matches: [
+        {
+          id: "match-dy",
+          competitionId: "comp-dy",
+          round: 1,
+          date: "2026-02-01",
+          status: "scheduled",
+          homeTeamId: "team-dy-a",
+          awayTeamId: "team-dy-b",
+          homeGoals: null,
+          awayGoals: null,
+          events: []
+        }
+      ],
+      sanctions: [],
+      injuries: []
+    }
+  ]
+});
+const doubleYellowSavedStore = saveMatchSheet(doubleYellowStore, "liga-doble-amarilla", {
+  matchId: "match-dy",
+  homeGoals: 0,
+  awayGoals: 0,
+  events: [
+    { type: "yellow", playerId: "player-dy", teamId: "team-dy-a", minute: 22, cardDetail: "double_yellow_first", countsForAccumulation: false },
+    { type: "yellow", playerId: "player-dy", teamId: "team-dy-a", minute: 71, cardDetail: "double_yellow_second", countsForAccumulation: false },
+    { type: "red", playerId: "player-dy", teamId: "team-dy-a", minute: 71, cardDetail: "double_yellow", disciplinaryPending: true, reason: "Doble amonestacion (segunda amarilla)" }
+  ]
+});
+const doubleYellowLeague = getCurrentLeague(doubleYellowSavedStore);
+assert.equal(calculateYellowCardDiscipline(doubleYellowLeague).length, 0);
+const doubleYellowStats = calculatePlayerStats(doubleYellowLeague).find((row) => row.player.id === "player-dy");
+assert.equal(doubleYellowStats.yellowCards, 0);
+assert.equal(doubleYellowStats.redCards, 1);
+assert.ok(calculateSuspensionNotices(doubleYellowLeague).some((notice) => notice.player.id === "player-dy" && notice.type === "Expulsion" && notice.pendingReview));
+
 const multiLeagueStore = normalizeStore({
   ...structuredClone(seedData),
   currentLeagueId: "liga-centro",
@@ -974,7 +1028,7 @@ store = saveMatchSheet(store, league.id, {
   penaltyAwayGoals: 3,
   resolutionType: "penalties",
   events: [
-    { type: "goal", playerId: "p3", minute: 12 },
+    { type: "goal", playerId: "p3", minute: 92, period: "extra_time" },
     { type: "own_goal", playerId: "p5", teamId: "union", minute: 55 },
     { type: "red", playerId: "p5", minute: 48, minuteLabel: "45+3", disciplinaryPending: true, reason: "Insultos al arbitro" }
   ]
@@ -991,6 +1045,7 @@ assert.equal(tiebreakerMatch.extraTimeHomeGoals, 1);
 assert.equal(tiebreakerMatch.extraTimeAwayGoals, 0);
 assert.equal(tiebreakerMatch.penaltyHomeGoals, 4);
 assert.equal(tiebreakerMatch.penaltyAwayGoals, 3);
+assert.equal(tiebreakerMatch.events.find((event) => event.minute === 92).period, "extra_time");
 const pendingNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.pendingReview);
 assert.equal(pendingNotice.returnRound, "Revision");
 store = addPlayerSanction(store, league.id, {

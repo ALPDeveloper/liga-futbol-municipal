@@ -1,4 +1,4 @@
-import { DEFAULT_IDENTITY, seedData } from "../data/seedData.js";
+import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import {
   MATCH_CAPTURE_MODES,
   MATCH_WORKFLOW_STATUSES,
@@ -8,6 +8,7 @@ import {
 
 export const YELLOW_SUSPENSION_LIMIT = 3;
 export const MAX_IMAGE_DATA_URL_LENGTH = 1_800_000;
+export const ACTIVE_SCHEDULE_MATCH_STATUSES = ["scheduled", "rescheduled", "advanced"];
 
 const ALLOWED_IMAGE_DATA_URL_PATTERN = /^data:image\/(png|jpe?g|webp);base64,[a-z0-9+/=\s]+$/i;
 
@@ -54,6 +55,12 @@ function upperLines(items = []) {
   return items.map((item) => upperText(item)).filter(Boolean);
 }
 
+export function isAccumulatingYellowCard(event) {
+  if (!event || event.type !== "yellow") return false;
+  if (event.countsForAccumulation === false || event.excludedFromAccumulation === true) return false;
+  return !["double_yellow_first", "double_yellow_second"].includes(event.cardDetail);
+}
+
 function venueIdFromName(name) {
   const slug = upperText(name)
     .normalize("NFD")
@@ -94,7 +101,7 @@ export function defaultCompetitionForLeague(league) {
 
 export function normalizeStore(data) {
   return {
-    currentLeagueId: data.currentLeagueId || data.leagues?.[0]?.id || seedData.currentLeagueId,
+    currentLeagueId: data.currentLeagueId || data.leagues?.[0]?.id || "",
     leagues: (data.leagues || []).map((league) => {
       const fallbackCompetition = defaultCompetitionForLeague(league);
       const competitions = (league.competitions?.length ? league.competitions : [fallbackCompetition]).map((competition) => ({
@@ -132,6 +139,7 @@ export function normalizeStore(data) {
         city: upperText(league.city),
         season: upperText(league.season),
         adBanner: upperText(league.adBanner),
+        publicVisibility: league.publicVisibility || "visible",
         currentCompetitionId,
         competitions,
         identity: {
@@ -454,7 +462,7 @@ export function getPlayerSeasonBreakdown(league, playerId) {
       const row = ensureRow(event.teamId || player.teamId);
       if (!row) continue;
       if (event.type === "goal") row.goals += 1;
-      if (event.type === "yellow") row.yellowCards += 1;
+      if (isAccumulatingYellowCard(event)) row.yellowCards += 1;
       if (event.type === "red") row.redCards += 1;
     }
   }
@@ -635,7 +643,7 @@ export function calculatePlayerStats(league) {
         row.goals += 1;
         registerTeamActivity(row, event.teamId, 3);
       }
-      if (event.type === "yellow") {
+      if (isAccumulatingYellowCard(event)) {
         row.yellowCards += 1;
         registerTeamActivity(row, event.teamId);
       }
@@ -810,7 +818,7 @@ export function calculateYellowCardDiscipline(league) {
     ...sortMatches(finishedMatches(league)).flatMap((match) => [
       { movementType: "match-start", date: match.date, round: match.round, match },
       ...(match.events || [])
-        .filter((event) => event.type === "yellow")
+        .filter(isAccumulatingYellowCard)
         .map((event) => ({ movementType: "yellow", date: match.date, round: match.round, match, event }))
     ]),
     ...(league.disciplineAdjustments || [])
@@ -931,6 +939,10 @@ function involvesTeam(match, teamId) {
   return match.homeTeamId === teamId || match.awayTeamId === teamId;
 }
 
+function isActiveScheduleMatch(match) {
+  return ACTIVE_SCHEDULE_MATCH_STATUSES.includes(match?.status || "scheduled");
+}
+
 function isAfterOrigin(match, origin) {
   if (!origin?.date) return true;
   if (match.date > origin.date) return true;
@@ -944,11 +956,11 @@ function getServedMatches(league, teamId, origin) {
 }
 
 function getNextScheduledMatch(league, teamId) {
-  return sortMatches(league.matches.filter((match) => match.status === "scheduled" && involvesTeam(match, teamId)))[0] || null;
+  return sortMatches(league.matches.filter((match) => isActiveScheduleMatch(match) && involvesTeam(match, teamId)))[0] || null;
 }
 
 function getReturnMatch(league, teamId, remainingMatches, origin) {
-  const scheduled = sortMatches(league.matches.filter((match) => match.status === "scheduled" && involvesTeam(match, teamId) && isAfterOrigin(match, origin)));
+  const scheduled = sortMatches(league.matches.filter((match) => isActiveScheduleMatch(match) && involvesTeam(match, teamId) && isAfterOrigin(match, origin)));
   if (remainingMatches > 0) return scheduled[remainingMatches] || null;
   return scheduled[0] || null;
 }
@@ -967,7 +979,7 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
   )));
   if (indefinite) {
     const nextIndefiniteMatch = sortMatches(league.matches.filter((match) => (
-      match.status === "scheduled" && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
+      isActiveScheduleMatch(match) && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
     )))[0] || null;
     return {
       id: `${type}-${origin?.matchId || origin?.sanctionId || player.id}-${player.id}`,
@@ -989,10 +1001,10 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
   const served = Math.min(servedMatches.length, total);
   const remaining = Math.max(total - served, 0);
   const nextMatch = sortMatches(league.matches.filter((match) => (
-    match.status === "scheduled" && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
+    isActiveScheduleMatch(match) && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
   )))[0] || null;
   const scheduled = sortMatches(league.matches.filter((match) => (
-    match.status === "scheduled" &&
+    isActiveScheduleMatch(match) &&
     eligibleTeamIds.some((teamId) => involvesTeam(match, teamId)) &&
     isAfterOrigin(match, origin)
   )));
@@ -1025,7 +1037,7 @@ function buildPendingDisciplinaryNotice(league, { playerId, reason, type, origin
   const team = getTeam(league, player.teamId);
   const eligibleTeamIds = getEligibleTeamIdsForPlayer(league, playerId);
   const nextMatch = sortMatches(league.matches.filter((match) => (
-    match.status === "scheduled" && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
+    isActiveScheduleMatch(match) && eligibleTeamIds.some((teamId) => involvesTeam(match, teamId))
   )))[0] || null;
 
   return {
@@ -1123,12 +1135,12 @@ export function getCurrentDisplayRound(matches) {
 
   const today = todayIso();
   const upcoming = regular
-    .filter((match) => match.status === "scheduled" && match.date >= today)
+    .filter((match) => isActiveScheduleMatch(match) && match.date >= today)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)));
   if (upcoming[0]) return upcoming[0].round;
 
   const pending = regular
-    .filter((match) => match.status === "scheduled")
+    .filter(isActiveScheduleMatch)
     .sort((a, b) => Number(a.round || 0) - Number(b.round || 0) || String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)));
   if (pending[0]) return pending[0].round;
 
@@ -1169,7 +1181,7 @@ export function buildSmartHighlights(league) {
   const standings = calculateStandings(league);
   const topTeams = standings.slice(0, 2).map((row) => row.team.id);
   const featuredMatch = league.matches
-    .filter((match) => match.status === "scheduled")
+    .filter(isActiveScheduleMatch)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)))
     .find((match) => topTeams.includes(match.homeTeamId) && topTeams.includes(match.awayTeamId));
 

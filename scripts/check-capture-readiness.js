@@ -14,8 +14,16 @@ if (DATABASE_PROVIDER === "postgres" && !process.env.DATABASE_URL) {
   problems.push("DATABASE_URL no esta configurada.");
 }
 
+if (process.env.NODE_ENV !== "production") {
+  problems.push("NODE_ENV debe ser production para revisar captura real sin defaults de desarrollo.");
+}
+
+if (process.env.SEED_DEMO_DATA !== "false") {
+  problems.push("SEED_DEMO_DATA debe ser false antes de conectar con una base real.");
+}
+
 if (process.env.SEED_DEMO_USERS !== "false") {
-  warnings.push("SEED_DEMO_USERS no esta en false. Antes del lanzamiento final conviene desactivarlo y eliminar/deshabilitar usuarios demo.");
+  problems.push("SEED_DEMO_USERS debe ser false antes de conectar con una base real.");
 }
 
 if (runtimeConfig.imageStorageProvider !== "supabase") {
@@ -28,7 +36,20 @@ if (runtimeConfig.imageStorageProvider === "supabase") {
   if (!runtimeConfig.supabaseStorageBucket) problems.push("SUPABASE_STORAGE_BUCKET no esta configurado.");
 }
 
-await initializeData();
+if (problems.length) {
+  console.error("Revision para captura real bloqueada por configuracion insegura:");
+  for (const problem of problems) console.error(`- ${problem}`);
+  process.exit(1);
+}
+
+try {
+  await initializeData();
+} catch (error) {
+  console.error("No se pudo conectar con la base configurada para validar captura real.");
+  console.error(`- ${error.code || "ERROR"}: ${error.message || error}`);
+  await postgresPool?.end();
+  process.exit(1);
+}
 
 const store = await getStoreData();
 const users = await listUsersData();

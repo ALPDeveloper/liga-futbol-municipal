@@ -74,6 +74,11 @@ export function PlayerPhotoUploader({
     const file = event.target.files?.[0];
     setError("");
     if (!file) return;
+    if (!authorized) {
+      event.target.value = "";
+      setError("Marca la autorizacion de foto antes de subir el archivo.");
+      return;
+    }
 
     try {
       validatePlayerPhotoFile(file);
@@ -83,7 +88,6 @@ export function PlayerPhotoUploader({
       setSourceUrl(nextUrl);
       setPhotoDataUrl("");
       setRemoved(false);
-      setAuthorized(true);
       setCrop({ zoom: 1, offsetX: 0, offsetY: 0 });
     } catch (validationError) {
       event.target.value = "";
@@ -141,9 +145,9 @@ export function PlayerPhotoUploader({
           {visiblePhotoUrl ? <img alt="" src={visiblePhotoUrl} /> : <span>{initials}</span>}
         </div>
         <div className="player-photo-actions">
-          <label className="player-photo-file">
-            {visiblePhotoUrl ? changeLabel : addLabel}
-            <input type="file" accept={PLAYER_PHOTO_ACCEPT} capture="environment" onChange={handleFileChange} />
+          <label className={`player-photo-file ${!authorized ? "disabled" : ""}`}>
+            {!authorized ? "Autoriza foto primero" : visiblePhotoUrl ? changeLabel : addLabel}
+            <input disabled={!authorized} type="file" accept={PLAYER_PHOTO_ACCEPT} capture="environment" onChange={handleFileChange} />
           </label>
           {visiblePhotoUrl && (
             <button type="button" className="secondary" onClick={removePhoto}>{removeLabel}</button>
@@ -159,6 +163,7 @@ export function PlayerPhotoUploader({
             />
             {authorizedLabel}
           </label>
+          {!authorized && <small className="player-photo-permission-hint">Para subir foto, primero marca la autorizacion del jugador.</small>}
         </div>
       </div>
 

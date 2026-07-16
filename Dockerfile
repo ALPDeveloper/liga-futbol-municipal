@@ -27,4 +27,4 @@ COPY scripts ./scripts
 COPY supabase ./supabase
 
 EXPOSE 3001
-CMD ["npm", "start"]
+CMD ["npm", "run", "start:api"]

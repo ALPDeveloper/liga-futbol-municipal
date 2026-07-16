@@ -17,7 +17,7 @@ if (!fs.existsSync(resolvedSource)) {
 }
 
 const store = JSON.parse(fs.readFileSync(resolvedSource, "utf8"));
-initializeDatabase();
+await initializeDatabase();
 importStore(store);
 const restored = getStore();
 

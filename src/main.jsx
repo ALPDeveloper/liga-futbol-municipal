@@ -6,7 +6,7 @@ import iconLigas from "../assets/icon-ligas.png";
 import iconPublico from "../assets/icon-publico.png";
 import ligatecLogo from "../assets/ligatec-logo.png";
 import heroImage from "../assets/league-hero.webp";
-import { DEFAULT_IDENTITY } from "./data/seedData.js";
+import { DEFAULT_IDENTITY } from "./data/defaultIdentity.js";
 import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
 import { loadStore, saveStore } from "./lib/storage.js";
 import { clearAuth, isAuthRemembered, loadAuth, saveAuth } from "./lib/authStorage.js";
@@ -67,6 +67,16 @@ function getRoleLabel(role) {
   if (role === "team_delegate") return "Delegado de equipo";
   if (role === "referee") return "Arbitro";
   return "Usuario LIGATEC";
+}
+
+function getUserInitials(name = "") {
+  return String(name || "LT")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] || "")
+    .join("")
+    .toUpperCase() || "LT";
 }
 
 function getPanelPathForRole(role) {
@@ -410,7 +420,7 @@ function getLeagueLandingStats(league) {
     teams: league.teams?.length || 0,
     players: league.players?.length || 0,
     competitions: league.competitions?.length || 0,
-    activeCompetitions: (league.competitions || []).filter((competition) => competition.status !== "archived").length,
+    activeCompetitions: (league.competitions || []).filter((competition) => !["archived", "hidden"].includes(competition.status)).length,
     scheduled,
     finished,
     nextMatch
@@ -429,7 +439,7 @@ function getLeagueInitials(name) {
 function LeagueDirectoryPage({ onNavigate, store }) {
   const [query, setQuery] = useState("");
   const activeLeagues = useMemo(
-    () => (store.leagues || []).filter((league) => league.status !== "deleted"),
+    () => (store.leagues || []).filter((league) => league.status !== "deleted" && (league.publicVisibility || "visible") !== "hidden"),
     [store.leagues]
   );
   const filteredLeagues = useMemo(() => {
@@ -546,7 +556,7 @@ function LeagueDirectoryPage({ onNavigate, store }) {
 function LandingPage({ onNavigate, store }) {
   const whatsappUrl = "https://wa.me/523541073146?text=Hola%2C%20quiero%20informaci%C3%B3n%20sobre%20LIGATEC.";
   const activeLeagues = useMemo(
-    () => (store.leagues || []).filter((league) => league.status !== "deleted"),
+    () => (store.leagues || []).filter((league) => league.status !== "deleted" && (league.publicVisibility || "visible") !== "hidden"),
     [store.leagues]
   );
   const globalStats = useMemo(() => activeLeagues.reduce((summary, league) => {
@@ -561,7 +571,7 @@ function LandingPage({ onNavigate, store }) {
   const featuredLeague = activeLeagues.find((item) => item.status === "active") || activeLeagues[0] || null;
   const featuredStats = featuredLeague ? getLeagueLandingStats(featuredLeague) : null;
   const featuredCompetition = featuredLeague
-    ? ((featuredLeague.competitions || []).find((competition) => competition.status !== "archived") || featuredLeague.competitions?.[0])
+    ? ((featuredLeague.competitions || []).find((competition) => !["archived", "hidden"].includes(competition.status)) || featuredLeague.competitions?.[0])
     : null;
   const featuredMatch = featuredStats?.nextMatch;
   const featuredHomeTeam = featuredMatch ? (featuredLeague.teams || []).find((team) => team.id === featuredMatch.homeTeamId)?.name || "Local" : "Local";
@@ -771,7 +781,7 @@ function LandingPage({ onNavigate, store }) {
 function App() {
   const [store, setStore] = useState(initialStore);
   const [routePath, setRoutePath] = useState(window.location.pathname);
-  const [adminPanel, setAdminPanel] = useState("league");
+  const [adminPanel, setAdminPanel] = useState(initialSelectedAccess?.role === "super_admin" ? "super" : "league");
   const [apiStatus, setApiStatus] = useState("checking");
   const [initialApiLoaded, setInitialApiLoaded] = useState(false);
   const [auth, setAuth] = useState(initialAuth);
@@ -970,6 +980,7 @@ function App() {
     const nextAccess = { ...option, selectedAt: new Date().toISOString() };
     setSelectedAccess(nextAccess);
     saveSelectedAccess(nextAccess);
+    setAdminPanel(option.role === "super_admin" ? "super" : "league");
     if (option.leagueId && sourceStore.leagues.some((item) => item.id === option.leagueId)) {
       const normalized = normalizeStore({ ...sourceStore, currentLeagueId: option.leagueId });
       setStore(normalized);
@@ -1103,7 +1114,7 @@ function App() {
             <small>PLATAFORMA DEPORTIVA</small>
           </span>
         </a>
-        <div className="topbar-actions">
+        <div className={`topbar-actions ${isPrivateRoute ? "private-topbar-actions" : ""}`}>
           {!isPrivateRoute && (
             <a className="access-ligatec-link" href="/acceso" onClick={(event) => {
               event.preventDefault();
@@ -1117,7 +1128,7 @@ function App() {
             </a>
           )}
           {isAdminRoute ? (
-            <label className="league-switcher">
+            <label className="league-switcher private-league-switcher">
               <span>Liga</span>
               <select value={league?.id || ""} onChange={(event) => selectLeague(event.target.value)} disabled={!store.leagues.length}>
                 {store.leagues.map((item) => (
@@ -1155,19 +1166,45 @@ function App() {
           )}
           {isPrivateRoute && (
             <>
-              {(league?.id || isAccessRoute || isAccessSelectionRoute) && <a className="admin-public-link" href={privatePublicReturnPath} onClick={(event) => {
-                event.preventDefault();
-                navigateTo(privatePublicReturnPath);
-              }}>
-                Vista publica
-              </a>}
-              {isAdminRoute && <span className={`api-pill ${apiStatus}`}>
+              <nav className="private-panel-nav" aria-label="Navegacion del panel">
+                {isAdminRoute && (
+                  <>
+                    <button className={adminPanel === "league" ? "active" : ""} type="button" onClick={() => setAdminPanel("league")}>
+                      <span>⌂</span>
+                      <strong>Admin liga</strong>
+                    </button>
+                    {canUseSuperAdmin && (
+                      <button className={adminPanel === "super" ? "active" : ""} type="button" onClick={() => setAdminPanel("super")}>
+                        <span>◆</span>
+                        <strong>Super admin</strong>
+                      </button>
+                    )}
+                    <button className={adminPanel === "model" ? "active" : ""} type="button" onClick={() => setAdminPanel("model")}>
+                      <span>◌</span>
+                      <strong>Modelo</strong>
+                    </button>
+                  </>
+                )}
+                {(league?.id || isAccessRoute || isAccessSelectionRoute) && <a className="private-panel-link" href={privatePublicReturnPath} onClick={(event) => {
+                  event.preventDefault();
+                  navigateTo(privatePublicReturnPath);
+                }}>
+                  <span>↗</span>
+                  <strong>Vista publica</strong>
+                </a>}
+              </nav>
+              {isAdminRoute && <span className={`api-pill private-api-pill ${apiStatus}`}>
                 {apiStatus === "connected" ? "API local" : apiStatus === "local" ? "Modo local" : "Conectando"}
               </span>}
               {currentUser && (
-                <Suspense fallback={<span className="auth-loading">Sesion activa</span>}>
-                  <LazyAuthPanel currentUser={currentUser} onLogin={login} onLogout={logout} />
-                </Suspense>
+                <div className="private-user-chip">
+                  <span className="private-user-avatar">{getUserInitials(currentUser.name || currentUser.email)}</span>
+                  <span>
+                    <strong>{currentUser.name || currentUser.email}</strong>
+                    <small>{getRoleLabel(activeAccessRole)}</small>
+                  </span>
+                  <button type="button" onClick={logout}>Salir</button>
+                </div>
               )}
             </>
           )}

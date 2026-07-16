@@ -145,3 +145,15 @@ export async function regenerateTeamMatchPin(token, matchId, payload) {
   });
   return parseResponse(response, "No se pudo regenerar el PIN");
 }
+
+export async function signTeamMatchReport(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/team-portal/matches/${matchId}/report/sign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo firmar el acta");
+}

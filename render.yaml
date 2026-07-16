@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm start
+    startCommand: npm run start:api
     healthCheckPath: /api/health
     autoDeployTrigger: off
     envVars:
@@ -31,6 +31,8 @@ services:
       - key: SHOW_RECOVERY_CODE_IN_RESPONSE
         value: "false"
       - key: SEED_DEMO_USERS
+        value: "false"
+      - key: SEED_DEMO_DATA
         value: "false"
       - key: VITE_API_BASE_URL
         value: /api

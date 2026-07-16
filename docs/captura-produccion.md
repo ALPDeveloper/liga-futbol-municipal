@@ -94,7 +94,7 @@ Con `DATABASE_PROVIDER=postgres`, estos comandos exportan datos desde Postgres, 
 - Crear un super admin real.
 - Crear admin real de liga.
 - Deshabilitar usuarios demo.
-- Cambiar `SEED_DEMO_USERS=false`.
+- Cambiar `SEED_DEMO_DATA=false` y `SEED_DEMO_USERS=false`.
 - Usar `AUTH_SECRET` largo y privado.
 - Definir `CORS_ORIGIN` con el dominio final.
 - Definir `VITE_API_BASE_URL` con la URL final de la API.

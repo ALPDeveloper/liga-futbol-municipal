@@ -1,11 +1,4 @@
-export const DEFAULT_IDENTITY = {
-  nickname: "",
-  activities: "",
-  publicIntro: "Resultados, tabla de posiciones, goleadores, sanciones y proximos partidos en un solo lugar para aficionados y equipos.",
-  primaryColor: "#0f6b4f",
-  accentColor: "#b8d84c",
-  secondaryColor: "#34699a"
-};
+import { DEFAULT_IDENTITY } from "./defaultIdentity.js";
 
 export const seedData = {
   currentLeagueId: "liga-centro",

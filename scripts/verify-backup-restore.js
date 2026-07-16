@@ -23,7 +23,7 @@ const script = `
   import { initializeDatabase, importStore, getStore, db } from "./server/database.js";
   const source = ${JSON.stringify(path.resolve(filePath))};
   const store = JSON.parse(fs.readFileSync(source, "utf8"));
-  initializeDatabase();
+  await initializeDatabase();
   const restored = importStore(store);
   const readBack = getStore();
   const summary = {

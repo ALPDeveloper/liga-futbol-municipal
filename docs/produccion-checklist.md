@@ -11,10 +11,11 @@ Este documento sirve para preparar una primera salida real de la Liga Municipal 
 - Ejecutar `npm run check:capture` y confirmar que indique `Proveedor: postgres`.
 - Cambiar `AUTH_SECRET` por una cadena larga y privada.
 - Definir `LOGIN_MAX_ATTEMPTS` y `LOGIN_LOCK_MINUTES`.
-- Definir `SEED_DEMO_USERS=false`.
+- Definir `SEED_DEMO_DATA=false` o dejarlo sin configurar; solo se siembra demo si se activa explicitamente.
+- Definir `SEED_DEMO_USERS=false` o dejarlo sin configurar; solo se crean usuarios demo si se activa explicitamente.
 - Definir `SHOW_RECOVERY_CODE_IN_RESPONSE=false`.
-- Definir `DB_PATH` en una ruta persistente del servidor.
-- Definir `BACKUP_DIR` en una ruta persistente y respaldada.
+- No usar SQLite para produccion; `DB_PATH` aplica solo para desarrollo o restauraciones locales.
+- Definir `BACKUP_DIR` en una ruta temporal/privada y `BACKUP_STORAGE_BUCKET` para conservar respaldos fuera del servidor.
 - Si se hara piloto Supabase, revisar `docs/piloto-supabase.md`.
 - Si se hara piloto gratuito, revisar `docs/entorno-gratuito.md`.
 - Para Supabase, copiar `.env.supabase.example` como `.env` y configurar `DATABASE_URL`.
@@ -37,7 +38,9 @@ Este documento sirve para preparar una primera salida real de la Liga Municipal 
 - Crear el super admin real.
 - Revisar `docs/usuarios-produccion.md`.
 - Deshabilitar o eliminar usuarios demo.
+- Confirmar que `data/`, `backups/`, `uploads/`, `uploads-local-test*/`, `.env` y scripts QA locales no esten versionados ni incluidos en Docker.
 - Ejecutar `npm run check:production-config` y no lanzar si marca errores.
+- Ejecutar `npm run check:deployment`; ahora tambien valida que `dist` no incluya rastros QA/demo y que Render mantenga apagado el seed demo.
 - Ejecutar `npm run setup:storage` y confirmar `Supabase Storage OK`.
 
 ## Prueba operativa con una liga
@@ -88,7 +91,7 @@ Este documento sirve para preparar una primera salida real de la Liga Municipal 
 npm run backup:db
 ```
 
-- Validar que el archivo se genere en `BACKUP_DIR`.
+- Validar que el archivo se genere en `BACKUP_DIR` y, en produccion, que se suba al bucket privado configurado.
 - Si `DATABASE_PROVIDER=postgres`, confirmar que el respaldo diga `Base origen: postgres`.
 - Exportar estado completo a JSON antes de migrar:
 

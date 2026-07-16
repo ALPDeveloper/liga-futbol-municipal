@@ -95,11 +95,11 @@ export async function fetchFinalizedMatchReports(token, { leagueId = "", status 
   return parseResponse(response, "No se pudieron cargar las actas finalizadas");
 }
 
-export async function publishFinalizedMatchReport(token, reportId) {
+export async function publishFinalizedMatchReport(token, reportId, payload = {}) {
   const response = await fetch(`${API_BASE_URL}/match-reports/${encodeURIComponent(reportId)}/publish`, {
     method: "POST",
     headers: authHeaders(token),
-    body: JSON.stringify({})
+    body: JSON.stringify(payload)
   });
   return parseResponse(response, "No se pudo publicar el acta finalizada");
 }
@@ -186,6 +186,40 @@ export async function fetchRefereeMatchReport(token, matchId) {
     headers: { Authorization: `Bearer ${token}` }
   });
   return parseResponse(response, "No se pudo cargar el acta preliminar");
+}
+
+export async function updateRefereeMatchReportDraft(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/report`, {
+    method: "PATCH",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  const responsePayload = await response.json().catch(() => ({}));
+  if (response.ok) return responsePayload;
+  if (response.status === 404 && responsePayload.error === "Ruta no encontrada") {
+    const fallbackResponse = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/finish-match`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        ...payload,
+        operationId: "",
+        captureMode: payload.captureMode || payload.reportPayload?.captureMode || "live"
+      })
+    });
+    const fallbackPayload = await parseResponse(fallbackResponse, "No se pudo guardar la revision del acta");
+    if (fallbackPayload.report && !("signatures" in fallbackPayload)) {
+      return {
+        report: fallbackPayload.report,
+        signatures: [],
+        homeSigned: false,
+        awaySigned: false,
+        readyToFinalize: false,
+        payload: fallbackPayload.payload
+      };
+    }
+    return fallbackPayload;
+  }
+  throw new Error(responsePayload.error || "No se pudo guardar la revision del acta");
 }
 
 export async function signRefereeMatchReport(token, matchId, payload) {

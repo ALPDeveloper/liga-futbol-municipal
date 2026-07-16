@@ -21,7 +21,7 @@ Puertos esperados:
 | --- | --- | --- |
 | Credenciales reales en `.env` local | Alta | Mitigado localmente: `.env` queda en SQLite y sin URL externa. Rotar credencial externa si fue compartida. |
 | API expuesta en LAN durante pruebas | Media | Documentado. Usar solo temporalmente y con CORS limitado a origen exacto. |
-| Usuarios demo en produccion | Alta | Mitigado: `SEED_DEMO_USERS=false` obligatorio en produccion. |
+| Usuarios y datos demo en produccion | Alta | Mitigado: no se siembran por default; `SEED_DEMO_DATA=true` y `SEED_DEMO_USERS=true` deben activarse explicitamente solo en pruebas locales. |
 | Recuperacion mostrando codigo | Alta | Mitigado: default `SHOW_RECOVERY_CODE_IN_RESPONSE=false`. |
 | Login sin limite por IP | Alta | Mitigado: rate limit por IP en login. |
 | Recuperacion sin limite por IP/correo | Alta | Mitigado: rate limit por IP/correo. |
@@ -36,7 +36,7 @@ Puertos esperados:
 - `server/index.js`: usa headers, CORS con metodos/headers definidos, limites de login/reset, store segun rol.
 - `server/runtimeConfig.js`: nuevas variables de seguridad y validaciones de produccion.
 - `server/auth.js` y `server/password.js`: tolerancia a tokens/hashes malformados sin error 500.
-- `server/database.js` y `server/postgresDatabase.js`: no siembra usuarios demo cuando `SEED_DEMO_USERS=false`.
+- `server/database.js` y `server/postgresDatabase.js`: no siembran datos ni usuarios demo cuando `SEED_DEMO_DATA=false` y `SEED_DEMO_USERS=false`.
 - `src/lib/api.js` y `src/main.jsx`: carga store autenticado cuando existe token.
 - `.env`: entorno local limpio, SQLite, CORS explicito y recuperacion sin exponer codigo.
 
@@ -58,6 +58,7 @@ NODE_ENV=production
 API_HOST=0.0.0.0
 AUTH_SECRET=valor-largo-aleatorio-minimo-32-caracteres
 SHOW_RECOVERY_CODE_IN_RESPONSE=false
+SEED_DEMO_DATA=false
 SEED_DEMO_USERS=false
 TRUST_PROXY=true
 CORS_ORIGIN=https://tu-dominio.com

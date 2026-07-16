@@ -30,6 +30,7 @@ export function periodNumberToKey(period) {
 }
 
 export function periodKeyToNumber(period) {
+  if (period === LIVE_PERIODS.FINISHED) return 5;
   if (period === LIVE_PERIODS.EXTRA_TIME_SECOND) return 4;
   if (period === LIVE_PERIODS.EXTRA_TIME_FIRST) return 3;
   if (period === LIVE_PERIODS.SECOND_HALF) return 2;

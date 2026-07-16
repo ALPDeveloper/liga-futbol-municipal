@@ -12,7 +12,8 @@ import {
   signRefereeMatchReport,
   startRefereeMatchSession,
   syncRefereeLiveState,
-  suspendRefereeMatchSession
+  suspendRefereeMatchSession,
+  updateRefereeMatchReportDraft
 } from "../lib/refereeApi.js";
 import {
   LIVE_PERIODS,
@@ -71,6 +72,25 @@ function formatClock(seconds) {
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
+const MATCH_EVENT_PERIODS = Object.freeze({
+  REGULAR: "regular",
+  EXTRA_TIME: "extra_time"
+});
+
+const DOUBLE_YELLOW_REASON = "Doble amonestacion (segunda amarilla)";
+const SIGNATURE_ISSUE_REASONS = Object.freeze([
+  { id: "forgot_pin", label: "Capitan no recuerda PIN" },
+  { id: "no_signal", label: "Sin señal / falla tecnica" },
+  { id: "captain_unavailable", label: "Capitan no disponible" },
+  { id: "refused_to_sign", label: "Capitan se niega a firmar" },
+  { id: "physical_backup", label: "Se firmo en acta fisica" }
+]);
+
+function getMatchEventPeriodLabel(period) {
+  if (period === MATCH_EVENT_PERIODS.EXTRA_TIME) return "Tiempo extra";
+  return "Tiempo regular";
+}
+
 function getTeamInitials(name) {
   const words = String(name || "EQ")
     .trim()
@@ -79,6 +99,52 @@ function getTeamInitials(name) {
   if (!words.length) return "EQ";
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+}
+
+function getMatchStartTime(match) {
+  const date = String(match?.date || "").slice(0, 10);
+  const time = String(match?.time || "23:59").slice(0, 5);
+  if (!date) return Number.POSITIVE_INFINITY;
+  const timestamp = new Date(`${date}T${time || "23:59"}:00`).getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
+}
+
+function hasLocalRefereeCapture(match) {
+  const draft = readRefereeDraft(`ligatec-referee-draft-${match.id}`);
+  if (draft?.liveTimer?.timerStatus === LIVE_TIMER_STATUSES.FINISHED) return false;
+  return Boolean(draft?.liveStarted || draft?.sessionId || (Array.isArray(draft?.events) && draft.events.length));
+}
+
+function isPreliminaryReportMatch(match) {
+  const sessionStatus = match?.sessionStatus || "";
+  const workflowStatus = match?.workflowStatus || "";
+  return (
+    sessionStatus === "match_finished" ||
+    ["pending_captain_review", "both_signed", "finalized_pending_sync"].includes(workflowStatus)
+  );
+}
+
+function isMatchInCapture(match) {
+  const sessionStatus = match?.sessionStatus || "";
+  const workflowStatus = match?.workflowStatus || "";
+  const serverTimerStatus = match?.session?.clockState?.timerStatus || "";
+  const postMatchStatuses = ["match_finished", "pending_captain_review", "both_signed", "finalized_pending_sync", "finalized", "published"];
+  if (postMatchStatuses.includes(sessionStatus) || postMatchStatuses.includes(workflowStatus)) return false;
+  return (
+    ["in_progress", "temporarily_saved"].includes(sessionStatus) ||
+    ["in_progress", "temporarily_saved"].includes(workflowStatus) ||
+    Boolean(match?.session && !["match_finished", "finalized", "published"].includes(sessionStatus)) ||
+    Boolean(serverTimerStatus && ![LIVE_TIMER_STATUSES.NOT_STARTED, LIVE_TIMER_STATUSES.FINISHED].includes(serverTimerStatus)) ||
+    hasLocalRefereeCapture(match)
+  );
+}
+
+function getOperationalRefereeMatch(matches = []) {
+  const sorted = [...matches].sort((a, b) => getMatchStartTime(a) - getMatchStartTime(b));
+  const activeMatch = sorted.find((match) => isMatchInCapture(match));
+  if (activeMatch) return activeMatch;
+  const now = Date.now();
+  return sorted.find((match) => getMatchStartTime(match) >= now) || null;
 }
 
 function PortalNavIcon({ type }) {
@@ -109,6 +175,35 @@ function PortalNavIcon({ type }) {
   return <svg {...common}><path d="M3 11 12 3l9 8" /><path d="M5 10v10h14V10" /><path d="M9 20v-6h6v6" /></svg>;
 }
 
+function RefereeTinyIcon({ type }) {
+  const common = {
+    className: "referee-tiny-icon",
+    fill: "none",
+    stroke: "currentColor",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true"
+  };
+  if (type === "clock") {
+    return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5v5l3.2 1.9" /></svg>;
+  }
+  if (type === "field") {
+    return <svg {...common}><rect x="3.5" y="5" width="17" height="14" rx="2.5" /><path d="M12 5v14" /><circle cx="12" cy="12" r="2.5" /><path d="M3.5 9h3" /><path d="M17.5 9h3" /><path d="M3.5 15h3" /><path d="M17.5 15h3" /></svg>;
+  }
+  if (type === "flag") {
+    return <svg {...common}><path d="M6 20V5" /><path d="M6 5h10l-1.5 3L16 11H6" /></svg>;
+  }
+  if (type === "logout") {
+    return <svg {...common}><path d="M10 6H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4" /><path d="M14 8l4 4-4 4" /><path d="M18 12H9" /></svg>;
+  }
+  if (type === "check") {
+    return <svg {...common}><path d="m5 12 4 4 10-10" /></svg>;
+  }
+  return <svg {...common}><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4" /><path d="M16 3v4" /><path d="M4 10h16" /></svg>;
+}
+
 function RefereeTeamMark({ name, tone = "home" }) {
   return <span className={`portal-team-badge ${tone}`}><b>{getTeamInitials(name)}</b></span>;
 }
@@ -135,14 +230,296 @@ function notifyClockWarning() {
 }
 
 function getMatchStatus(match, history) {
+  if (match.status === "postponed") return { className: "review", label: "Pospuesto" };
+  if (match.status === "rescheduled") return { className: "ready", label: "Reprogramado" };
+  if (match.status === "advanced") return { className: "ready", label: "Adelantado" };
   if (match.sheetReviewStatus === "pending_review") return { className: "review", label: "En revision" };
   if (match.sheetReviewStatus === "rejected") return { className: "rejected", label: "Correccion solicitada" };
+  if (match.sessionStatus === "in_progress" || match.workflowStatus === "in_progress" || isMatchInCapture(match)) return { className: "progress", label: "En captura" };
   if (match.sessionStatus === "temporarily_saved") return { className: "review", label: "Guardado" };
   if (String(match.sessionStatus || "").startsWith("suspended")) return { className: "rejected", label: "Suspendido" };
   if (match.sessionStatus === "match_finished") return { className: "review", label: "Acta preliminar" };
+  if (isPreliminaryReportMatch(match)) return { className: "review", label: "Acta preliminar" };
   if (history) return { className: "done", label: "Finalizado" };
   if (!match.canCapture) return { className: "readonly", label: "Solo consulta" };
   return { className: "ready", label: "Listo para capturar" };
+}
+
+function getMatchActionLabel(match) {
+  if (match.status === "postponed") return "Partido pospuesto";
+  if (match.sheetReviewStatus === "rejected") return "Corregir acta";
+  if (isPreliminaryReportMatch(match)) return "Revisar acta";
+  if (match.sessionStatus === "in_progress" || match.workflowStatus === "in_progress" || isMatchInCapture(match)) return "Continuar captura";
+  if (match.sessionStatus === "temporarily_saved") return "Continuar captura";
+  if (match.homeRosterSubmitted && match.awayRosterSubmitted) return "Preparar partido";
+  if (match.canCapture) return "Ver partido";
+  return "Solo consulta";
+}
+
+function getRosterLabel(match) {
+  if (match.homeRosterSubmitted && match.awayRosterSubmitted) return "Convocatorias completas";
+  if (!match.homeRosterSubmitted && !match.awayRosterSubmitted) return "Esperando convocatorias";
+  return match.homeRosterSubmitted ? "Convocatoria visitante pendiente" : "Convocatoria local pendiente";
+}
+
+function getMatchDayLabel(match) {
+  return match.roundName || match.round || match.matchday || match.jornada || "Jornada por definir";
+}
+
+function getConnectionSnapshot() {
+  const online = typeof navigator === "undefined" ? true : navigator.onLine;
+  const now = new Intl.DateTimeFormat("es-MX", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+  return {
+    online,
+    connectionLabel: online ? "Con conexion" : "Sin conexion",
+    syncLabel: online ? "Sincronizado" : "Cambios pendientes",
+    lastSyncLabel: `Hoy ${now}`
+  };
+}
+
+function RefereeHeader({ referee, currentUser, nextMatch, pendingCount, savedCount, onLogout }) {
+  const nextMatchDate = nextMatch ? formatDate(nextMatch.date) : "Sin partido";
+  const nextMatchTime = nextMatch?.time || "";
+  return (
+    <header className="referee-app-header">
+      <img className="referee-header-watermark" alt="" src={ligatecLogo} aria-hidden="true" />
+      <div className="referee-header-brand">
+        <img alt="LIGATEC" src={ligatecLogo} />
+        <span>
+          <b>LIGATEC</b>
+          <small>Panel arbitro</small>
+        </span>
+      </div>
+      <div className="referee-header-profile">
+        <span className="portal-avatar blue">{getTeamInitials(referee?.name || currentUser?.name || "AL")}</span>
+        <div>
+          <strong>{referee?.name || currentUser?.name || "Arbitro central"}</strong>
+          <small>Licencia: {referee?.license || "ACT-2025"}</small>
+        </div>
+      </div>
+      <div className="referee-header-actions">
+        <b>Activo</b>
+        <button className="portal-mini-link" type="button" onClick={onLogout}>
+          <RefereeTinyIcon type="logout" />
+          <span>Salir</span>
+        </button>
+      </div>
+      <div className="referee-header-dock" aria-label="Resumen operativo">
+        <span>
+          <small><RefereeTinyIcon />Proximo</small>
+          <strong>{nextMatchDate}{nextMatchTime ? <em><RefereeTinyIcon type="clock" />{nextMatchTime}</em> : null}</strong>
+        </span>
+        <span><small>Pendientes</small><strong>{pendingCount}</strong></span>
+        <span><small>Guardadas</small><strong>{savedCount}</strong></span>
+      </div>
+    </header>
+  );
+}
+
+function ConnectionStatusBar() {
+  const snapshot = getConnectionSnapshot();
+  return (
+    <section className="referee-sync-bar" aria-label="Estado del sistema">
+      <div>
+        <span className={snapshot.online ? "is-ok" : "is-warning"}><i />{snapshot.connectionLabel}</span>
+        <span className={snapshot.online ? "is-ok" : "is-warning"}><i />{snapshot.syncLabel}</span>
+      </div>
+      <small>Sync <b>{snapshot.lastSyncLabel}</b></small>
+    </section>
+  );
+}
+
+function NextMatchCard({ match, onOpen }) {
+  if (!match) {
+    return (
+      <article className="referee-next-card">
+        <div className="portal-card-head">
+          <strong>Proximo partido</strong>
+          <span className="portal-status-pill neutral">Sin asignacion</span>
+        </div>
+        <p className="helper-text">Cuando la liga te asigne un partido, aparecera aqui.</p>
+      </article>
+    );
+  }
+  const status = getMatchStatus(match, false);
+  return (
+    <article className="referee-next-card">
+      <div className="portal-card-head">
+        <span>
+          <small>Asignacion principal</small>
+          <strong>Proximo partido</strong>
+        </span>
+        <span className={`portal-status-pill ${status.className}`}>{status.label}</span>
+      </div>
+      <div className="referee-match-stage">
+        <span>{match.competitionName || "Categoria"}</span>
+        <b>{getMatchDayLabel(match)}</b>
+      </div>
+      <div className="portal-match-date">
+        <span><RefereeTinyIcon />{formatDate(match.date)}</span>
+        <span><RefereeTinyIcon type="clock" />{match.time || "Hora por definir"}</span>
+      </div>
+      <div className="portal-match-teams">
+        <div>
+          <RefereeTeamMark name={match.homeTeamName} />
+          <strong>{match.homeTeamName}</strong>
+          <small>Local</small>
+        </div>
+        <b>VS</b>
+        <div>
+          <RefereeTeamMark name={match.awayTeamName} tone="away" />
+          <strong>{match.awayTeamName}</strong>
+          <small>Visitante</small>
+        </div>
+      </div>
+      <div className="portal-match-meta">
+        <span><RefereeTinyIcon type="field" />{match.venue || "Cancha por definir"}</span>
+        <span><RefereeTinyIcon type="flag" />{match.refereeRole === "central" ? "Arbitro central" : "Arbitro asignado"}</span>
+      </div>
+      <span className={`referee-roster-pill ${match.homeRosterSubmitted && match.awayRosterSubmitted ? "ready" : "warning"}`}>
+        <RefereeTinyIcon type="check" />
+        {getRosterLabel(match)}
+      </span>
+      <button className="portal-primary-action blue" type="button" onClick={() => onOpen(match.id)}>
+        <span>{getMatchActionLabel(match)}</span>
+        <b>›</b>
+      </button>
+    </article>
+  );
+}
+
+function CompactSummary({ pendingCount, savedCount, publishedCount }) {
+  return (
+    <section className="referee-summary-strip" aria-label="Resumen del arbitro">
+      <span><strong>{pendingCount}</strong><small>Pendientes</small></span>
+      <span><strong>{savedCount}</strong><small>Guardadas</small></span>
+      <span><strong>{publishedCount}</strong><small>Publicadas</small></span>
+    </section>
+  );
+}
+
+function UpcomingPreview({ matches, onOpen, onViewAll }) {
+  return (
+    <section className="referee-brief-list">
+      <div className="referee-section-title">
+        <strong>Siguientes partidos</strong>
+        <button type="button" onClick={onViewAll}>Ver todos</button>
+      </div>
+      {matches.slice(1, 3).map((match) => (
+        <button className="referee-brief-match" key={match.id} type="button" onClick={() => onOpen(match.id)}>
+          <span>{formatDate(match.date)} | {match.time || "Hora por definir"}</span>
+          <strong>{match.homeTeamName} vs {match.awayTeamName}</strong>
+          <small>{getRosterLabel(match)}</small>
+        </button>
+      ))}
+      {matches.length <= 1 && <p className="empty">No hay mas partidos proximos por ahora.</p>}
+    </section>
+  );
+}
+
+function MatchFilterChips({ activeFilter, onChange }) {
+  const filters = [
+    ["upcoming", "Proximos"],
+    ["progress", "En progreso"],
+    ["saved", "Guardados"],
+    ["signatures", "Pendientes de firma"],
+    ["all", "Todos"]
+  ];
+  return (
+    <div className="referee-filter-chips" role="tablist" aria-label="Filtros de partidos">
+      {filters.map(([value, label]) => (
+        <button className={activeFilter === value ? "active" : ""} key={value} type="button" onClick={() => onChange(value)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RefereeMatchPreparation({ match, onBack, onChooseMode }) {
+  const checklist = [
+    ["Arbitro autorizado", true, match.refereeRole === "central" ? "Central" : "Asignado"],
+    ["Partido vigente", Boolean(match.canCapture), match.canCapture ? "Editable" : "Solo consulta"],
+    ["Convocatoria local recibida", Boolean(match.homeRosterSubmitted), match.homeTeamName],
+    ["Convocatoria visitante recibida", Boolean(match.awayRosterSubmitted), match.awayTeamName],
+    ["Plantillas disponibles", Boolean((match.homePlayers || []).length && (match.awayPlayers || []).length), "Jugadores cargados"],
+    ["Datos guardados en el dispositivo", true, "Cache local activo"],
+    ["Estado de conexion", getConnectionSnapshot().online, getConnectionSnapshot().connectionLabel],
+    ["Sin cambios pendientes", true, "Listo"]
+  ];
+  return (
+    <main className="page referee-portal-page referee-acta-page referee-prep-page">
+      <section className="referee-phone-panel">
+        <div className="referee-screen-top">
+          <button type="button" onClick={onBack} aria-label="Volver">‹</button>
+          <strong>Detalles del partido</strong>
+          <span>{getMatchStatus(match, false).label}</span>
+        </div>
+        <article className="referee-prep-card">
+          <span className="portal-match-date">{formatDate(match.date)} | {match.time || "Hora por definir"}</span>
+          <div className="portal-match-teams">
+            <div>
+              <RefereeTeamMark name={match.homeTeamName} />
+              <strong>{match.homeTeamName}</strong>
+              <small>Local</small>
+            </div>
+            <b>VS</b>
+            <div>
+              <RefereeTeamMark name={match.awayTeamName} tone="away" />
+              <strong>{match.awayTeamName}</strong>
+              <small>Visitante</small>
+            </div>
+          </div>
+          <div className="portal-match-meta">
+            <span>{match.venue || "Cancha por definir"}</span>
+            <span>{match.competitionName || "Categoria"}</span>
+            <span>{getMatchDayLabel(match)}</span>
+          </div>
+        </article>
+        <section className="referee-checklist">
+          <strong>Lista de comprobacion</strong>
+          {checklist.map(([label, ok, detail]) => (
+            <div className={ok ? "ok" : "blocked"} key={label}>
+              <i>{ok ? "✓" : "!"}</i>
+              <span>{label}</span>
+              <small>{detail}</small>
+            </div>
+          ))}
+        </section>
+        <button className="portal-primary-action blue" type="button" onClick={onChooseMode} disabled={!match.canCapture}>
+          Elegir modalidad de captura
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function CaptureModeSelector({ match, onBack, onSelect }) {
+  return (
+    <main className="page referee-portal-page referee-acta-page referee-prep-page">
+      <section className="referee-phone-panel">
+        <div className="referee-screen-top">
+          <button type="button" onClick={onBack} aria-label="Volver">‹</button>
+          <strong>Elegir modalidad</strong>
+          <span />
+        </div>
+        <button className="referee-mode-option live" type="button" onClick={() => onSelect("live")}>
+          <span>
+            <strong>Acta digital en vivo</strong>
+            <b>Recomendado</b>
+          </span>
+          <small>Usa cronometro y registra eventos en tiempo real. Requiere firma digital de capitanes con PIN.</small>
+        </button>
+        <button className="referee-mode-option manual" type="button" onClick={() => onSelect("manual")}>
+          <span>
+            <strong>Captura manual</strong>
+          </span>
+          <small>Basado en acta fisica. Minuto manual, sin firma digital obligatoria y con revision segun la liga.</small>
+        </button>
+        <p className="referee-info-note">Podras cambiar de modalidad solo antes de iniciar la captura de {match.homeTeamName} vs {match.awayTeamName}.</p>
+      </section>
+    </main>
+  );
 }
 
 function MatchCard({ match, history = false, onCapture }) {
@@ -158,7 +535,7 @@ function MatchCard({ match, history = false, onCapture }) {
   const status = getMatchStatus(match, history);
   const scoreLabel = `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}`;
   return (
-    <article className="referee-match-card">
+    <article className={`referee-match-card ${history ? "history-card" : ""}`}>
       <div className="referee-match-top">
         <span>{formatDate(match.date)} | {match.time || "Hora por definir"}</span>
         <b className={`referee-status ${status.className}`}>{status.label}</b>
@@ -183,6 +560,11 @@ function MatchCard({ match, history = false, onCapture }) {
         <span>{match.competitionName || "Categoria"}</span>
         <span>{match.venue || "Cancha por definir"}</span>
       </div>
+      {["postponed", "rescheduled", "advanced"].includes(match.status || "") && (
+        <p className="referee-card-note">
+          {match.scheduleNote || (match.status === "postponed" ? "La liga pospuso este partido. Espera nueva indicacion." : match.status === "advanced" ? "Partido adelantado por la liga." : "Partido reprogramado por la liga.")}
+        </p>
+      )}
       <div className="referee-roster-status-row">
         <span>{match.homeRosterSubmitted ? `${match.homeTeamName}: convocatoria enviada` : `${match.homeTeamName}: sin convocatoria`}</span>
         <span>{match.awayRosterSubmitted ? `${match.awayTeamName}: convocatoria enviada` : `${match.awayTeamName}: sin convocatoria`}</span>
@@ -216,7 +598,7 @@ function MatchCard({ match, history = false, onCapture }) {
         <button className="referee-action-button" type="button" disabled>Solo consulta</button>
       ) : (
         <button className="referee-action-button primary-action" type="button" onClick={() => onCapture?.(match.id)}>
-          {match.sessionStatus === "match_finished" ? "Revisar acta" : "Capturar acta"}
+          {getMatchActionLabel(match)}
         </button>
       )}
     </article>
@@ -242,6 +624,7 @@ function createEvent(match, type, teamId, minuteInfo = "") {
     playerId: "",
     minute: normalizedMinute.minute || "",
     minuteLabel: normalizedMinute.minuteLabel || "",
+    period: normalizedMinute.period || MATCH_EVENT_PERIODS.REGULAR,
     suspensionMatches: 0,
     suspensionIndefinite: false,
     disciplinaryPending: type === "red",
@@ -299,7 +682,28 @@ function writeRefereePortalCache(userId, payload) {
   }
 }
 
-function getEventLabel(type) {
+function RefereeLoadingShell() {
+  return (
+    <main className="page referee-mobile-app portal-loading-page">
+      <section className="portal-loading-card referee">
+        <img alt="LIGATEC" src={ligatecLogo} />
+        <span>Panel arbitro</span>
+        <strong>Preparando partidos</strong>
+        <small>Sincronizando asignaciones y actas.</small>
+        <div className="portal-loading-bars" aria-hidden="true">
+          <b />
+          <b />
+          <b />
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function getEventLabel(type, eventItem = null) {
+  if (eventItem?.cardDetail === "double_yellow") return "Doble amarilla";
+  if (eventItem?.cardDetail === "double_yellow_second") return "2a amarilla";
+  if (eventItem?.cardDetail === "double_yellow_first") return "1a amarilla";
   if (type === "goal") return "Gol";
   if (type === "own_goal") return "Autogol";
   if (type === "yellow") return "Amarilla";
@@ -307,12 +711,85 @@ function getEventLabel(type) {
   return "Evento";
 }
 
-function getEventIcon(type) {
+function getEventIcon(type, eventItem = null) {
+  if (eventItem?.cardDetail === "double_yellow") return "🟨🟥";
   if (type === "goal") return "⚽";
   if (type === "own_goal") return "↩";
   if (type === "yellow") return "🟨";
   if (type === "red") return "🟥";
   return "•";
+}
+
+function normalizeDoubleYellowDraftEvents(eventList = []) {
+  const baseEvents = eventList
+    .filter((eventItem) => !(eventItem.type === "red" && eventItem.cardDetail === "double_yellow" && eventItem.autoGenerated))
+    .map((eventItem) => {
+      if (eventItem.type !== "yellow") return eventItem;
+      if (!["double_yellow_first", "double_yellow_second"].includes(eventItem.cardDetail)) return eventItem;
+      return {
+        ...eventItem,
+        cardDetail: "",
+        countsForAccumulation: true,
+        excludedFromAccumulation: false
+      };
+    });
+  const nextEvents = [];
+  const firstYellowByPlayer = new Map();
+  const sentOffPlayers = new Set();
+
+  for (const eventItem of baseEvents) {
+    if (eventItem.type !== "yellow" || !eventItem.playerId) {
+      nextEvents.push(eventItem);
+      if (eventItem.type === "red" && eventItem.playerId && eventItem.cardDetail === "double_yellow") {
+        sentOffPlayers.add(eventItem.playerId);
+      }
+      continue;
+    }
+
+    const playerKey = eventItem.playerId;
+    if (!firstYellowByPlayer.has(playerKey)) {
+      firstYellowByPlayer.set(playerKey, { eventItem, index: nextEvents.length });
+      nextEvents.push(eventItem);
+      continue;
+    }
+
+    const firstYellow = firstYellowByPlayer.get(playerKey);
+    const firstMinute = firstYellow.eventItem.minuteLabel || firstYellow.eventItem.minute || "";
+    const secondMinute = eventItem.minuteLabel || eventItem.minute || "";
+    nextEvents[firstYellow.index] = {
+      ...firstYellow.eventItem,
+      cardDetail: "double_yellow_first",
+      countsForAccumulation: false,
+      excludedFromAccumulation: true
+    };
+    nextEvents.push({
+      ...eventItem,
+      cardDetail: "double_yellow_second",
+      countsForAccumulation: false,
+      excludedFromAccumulation: true
+    });
+
+    if (!sentOffPlayers.has(playerKey)) {
+      nextEvents.push({
+        ...eventItem,
+        id: `event-double-yellow-${playerKey}-${firstYellow.eventItem.id || firstYellow.index}-${eventItem.id || nextEvents.length}`,
+        type: "red",
+        lockedType: "red",
+        cardDetail: "double_yellow",
+        autoGenerated: true,
+        countsForAccumulation: false,
+        excludedFromAccumulation: true,
+        suspensionMatches: 0,
+        suspensionIndefinite: false,
+        disciplinaryPending: true,
+        reason: DOUBLE_YELLOW_REASON,
+        sourceYellowCardMinutes: [firstMinute, secondMinute].filter(Boolean)
+      });
+      sentOffPlayers.add(playerKey);
+    }
+  }
+
+  return nextEvents;
 }
 
 function EventQuickButton({ className, icon, title, subtitle, onClick }) {
@@ -353,7 +830,7 @@ function createTimerStateFromSources({ draft, serverClock }) {
   });
 }
 
-function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
+function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCancel, onSaved }) {
   const draftKey = `ligatec-referee-draft-${match.id}`;
   const savedEvents = (match.events || []).map((event, index) => ({
     id: `saved-${match.id}-${index}-${event.type}-${event.playerId}`,
@@ -403,16 +880,50 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [reportState, setReportState] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [captureMode] = useState(draft?.captureMode || initialCaptureMode);
+  const [selectedEventTeam, setSelectedEventTeam] = useState(match.homeTeamId);
+  const [eventComposer, setEventComposer] = useState(null);
+  const [eventComposerQuery, setEventComposerQuery] = useState("");
+  const [eventComposerFilter, setEventComposerFilter] = useState("all");
   const wakeLockRef = useRef(null);
   const lastEventRef = useRef({ type: "", teamId: "", at: 0 });
+  const signatureSnapshotRef = useRef({ initialized: false, homeSigned: false, awaySigned: false });
 
   useEffect(() => {
-    if (!["match_finished", "pending_captain_review", "both_signed", "finalized_pending_sync"].includes(match.sessionStatus || match.workflowStatus)) return;
+    if (!isPreliminaryReportMatch(match)) return;
     let cancelled = false;
     setLoadingReport(true);
     fetchRefereeMatchReport(authToken, match.id)
       .then((nextReportState) => {
-        if (!cancelled) setReportState(nextReportState);
+        if (cancelled) return;
+        setReportState(nextReportState);
+        signatureSnapshotRef.current = {
+          initialized: true,
+          homeSigned: Boolean(nextReportState.homeSigned),
+          awaySigned: Boolean(nextReportState.awaySigned)
+        };
+        const reportPayload = nextReportState.report?.payload && typeof nextReportState.report.payload === "object"
+          ? nextReportState.report.payload
+          : null;
+        if (!reportPayload) return;
+        setHomeGoals(reportPayload.homeGoals ?? nextReportState.report.homeGoals ?? homeGoals);
+        setAwayGoals(reportPayload.awayGoals ?? nextReportState.report.awayGoals ?? awayGoals);
+        setExtraTimeEnabled(Boolean(reportPayload.extraTimeEnabled));
+        setPenaltiesEnabled(Boolean(reportPayload.penaltiesEnabled));
+        setExtraTimeHomeGoals(reportPayload.extraTimeHomeGoals ?? "");
+        setExtraTimeAwayGoals(reportPayload.extraTimeAwayGoals ?? "");
+        setPenaltyHomeGoals(reportPayload.penaltyHomeGoals ?? "");
+        setPenaltyAwayGoals(reportPayload.penaltyAwayGoals ?? "");
+        setObservations(reportPayload.observations || "");
+        setEvents(Array.isArray(reportPayload.events) ? reportPayload.events : []);
+        if (reportPayload.liveTimer) {
+          const nextTimer = createLiveTimerState(reportPayload.liveTimer);
+          setLiveTimer(nextTimer);
+          setLiveStarted(nextTimer.timerStatus !== LIVE_TIMER_STATUSES.NOT_STARTED);
+          setLiveRunning(nextTimer.timerStatus === LIVE_TIMER_STATUSES.RUNNING);
+          setLivePeriod(periodKeyToNumber(nextTimer.currentPeriod));
+          setLiveElapsedSeconds(calculateElapsedSeconds(nextTimer));
+        }
       })
       .catch((reportError) => {
         if (!cancelled) setMessage(reportError.message || "No se pudo cargar el acta preliminar.");
@@ -424,6 +935,48 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       cancelled = true;
     };
   }, [authToken, match.id, match.sessionStatus, match.workflowStatus]);
+
+  useEffect(() => {
+    if (!reportState?.report || ["finalized", "published"].includes(reportState.report.status)) return undefined;
+    let cancelled = false;
+    const getCaptainSignatureLabel = (teamSide) => {
+      const playerId = teamSide === "home" ? match.homeCaptainPlayerId : match.awayCaptainPlayerId;
+      const players = teamSide === "home" ? match.homePlayers || [] : match.awayPlayers || [];
+      const teamName = teamSide === "home" ? match.homeTeamName : match.awayTeamName;
+      const captain = players.find((player) => player.id === playerId || player.isCaptain);
+      return captain?.name ? `${captain.name} (${teamName})` : teamName;
+    };
+    const pollSignatures = async () => {
+      try {
+        const nextReportState = await fetchRefereeMatchReport(authToken, match.id);
+        if (cancelled) return;
+        const previous = signatureSnapshotRef.current;
+        const nextHomeSigned = Boolean(nextReportState.homeSigned);
+        const nextAwaySigned = Boolean(nextReportState.awaySigned);
+        const updates = [];
+        if (previous.initialized && !previous.homeSigned && nextHomeSigned) updates.push(`Firma recibida: ${getCaptainSignatureLabel("home")}.`);
+        if (previous.initialized && !previous.awaySigned && nextAwaySigned) updates.push(`Firma recibida: ${getCaptainSignatureLabel("away")}.`);
+        signatureSnapshotRef.current = {
+          initialized: true,
+          homeSigned: nextHomeSigned,
+          awaySigned: nextAwaySigned
+        };
+        setReportState(nextReportState);
+        if (updates.length) {
+          setMessage(nextReportState.readyToFinalize
+            ? `${updates.join(" ")} Firmas completas; ya puedes publicar el acta.`
+            : updates.join(" "));
+        }
+      } catch {
+        // El estado en pantalla se conserva; el siguiente ciclo intentara sincronizar de nuevo.
+      }
+    };
+    const intervalId = window.setInterval(pollSignatures, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [authToken, match.id, reportState?.report?.id, reportState?.report?.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -627,8 +1180,31 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     return type === "goal" || type === "own_goal";
   }
 
+  function getCurrentEventPeriod() {
+    if (captureMode === "live" && livePeriod >= 3) return MATCH_EVENT_PERIODS.EXTRA_TIME;
+    return MATCH_EVENT_PERIODS.REGULAR;
+  }
+
+  function getExtraTimeGoalSummary(eventList = events) {
+    return eventList.reduce((summary, eventItem) => {
+      if (eventItem.period !== MATCH_EVENT_PERIODS.EXTRA_TIME || !isGoalEventType(eventItem.type)) return summary;
+      if (eventItem.teamId === match.homeTeamId) return { ...summary, home: summary.home + 1 };
+      if (eventItem.teamId === match.awayTeamId) return { ...summary, away: summary.away + 1 };
+      return summary;
+    }, { home: 0, away: 0 });
+  }
+
+  function getPenaltyShootoutSummary() {
+    return {
+      home: penaltiesEnabled ? penaltyHomeGoals : "",
+      away: penaltiesEnabled ? penaltyAwayGoals : ""
+    };
+  }
+
   function buildDraftPayload() {
     return {
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
       homeGoals,
       awayGoals,
       extraTimeEnabled,
@@ -652,12 +1228,14 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       liveElapsedSeconds,
       liveAlerted,
       liveTimer,
-      batterySaver
+      captureMode,
+      batterySaver,
+      signatureIssue: reportState?.report?.payload?.signatureIssue || null
     };
   }
 
   function getCaptureMode() {
-    return liveStarted ? "live" : "manual";
+    return captureMode;
   }
 
   async function persistLiveDraft(nextDraft = buildDraftPayload(), options = {}) {
@@ -717,25 +1295,25 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     const extraDuration = Number(extraTimeDuration || 15);
     const elapsedMinute = Math.max(1, Math.ceil(Math.max(1, liveElapsedSeconds) / 60));
     if (livePeriod === 1 && elapsedMinute > periodDuration) {
-      return { minute: elapsedMinute, minuteLabel: `${periodDuration}+${elapsedMinute - periodDuration}` };
+      return { minute: elapsedMinute, minuteLabel: `${periodDuration}+${elapsedMinute - periodDuration}`, period: MATCH_EVENT_PERIODS.REGULAR };
     }
     if (livePeriod === 3) {
       const base = periodDuration * 2;
       const absoluteMinute = base + elapsedMinute;
-      if (elapsedMinute > extraDuration) return { minute: absoluteMinute, minuteLabel: `${base + extraDuration}+${elapsedMinute - extraDuration}` };
-      return { minute: absoluteMinute, minuteLabel: "" };
+      if (elapsedMinute > extraDuration) return { minute: absoluteMinute, minuteLabel: `${base + extraDuration}+${elapsedMinute - extraDuration}`, period: MATCH_EVENT_PERIODS.EXTRA_TIME };
+      return { minute: absoluteMinute, minuteLabel: "", period: MATCH_EVENT_PERIODS.EXTRA_TIME };
     }
     if (livePeriod === 4) {
       const base = periodDuration * 2 + extraDuration;
       const absoluteMinute = base + elapsedMinute;
-      if (elapsedMinute > extraDuration) return { minute: absoluteMinute, minuteLabel: `${base + extraDuration}+${elapsedMinute - extraDuration}` };
-      return { minute: absoluteMinute, minuteLabel: "" };
+      if (elapsedMinute > extraDuration) return { minute: absoluteMinute, minuteLabel: `${base + extraDuration}+${elapsedMinute - extraDuration}`, period: MATCH_EVENT_PERIODS.EXTRA_TIME };
+      return { minute: absoluteMinute, minuteLabel: "", period: MATCH_EVENT_PERIODS.EXTRA_TIME };
     }
     const absoluteMinute = livePeriod === 2 ? periodDuration + elapsedMinute : elapsedMinute;
     if (livePeriod === 2 && absoluteMinute > periodDuration * 2) {
-      return { minute: absoluteMinute, minuteLabel: `${periodDuration * 2}+${absoluteMinute - (periodDuration * 2)}` };
+      return { minute: absoluteMinute, minuteLabel: `${periodDuration * 2}+${absoluteMinute - (periodDuration * 2)}`, period: MATCH_EVENT_PERIODS.REGULAR };
     }
-    return { minute: absoluteMinute, minuteLabel: "" };
+    return { minute: absoluteMinute, minuteLabel: "", period: MATCH_EVENT_PERIODS.REGULAR };
   }
 
   function getLiveEventMinuteLabel() {
@@ -759,9 +1337,15 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     return `${String(absoluteMinute).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 
-  function canFinishCurrentPeriod() {
-    const targetDuration = livePeriod >= 3 ? Number(extraTimeDuration || 15) : Number(liveDuration || 45);
-    return liveStarted && liveElapsedSeconds >= Math.max(0, targetDuration - 5) * 60;
+  function getLiveFlowStepLabel() {
+    if (!liveStarted) return "Prepartido";
+    if (liveTimer.timerStatus === LIVE_TIMER_STATUSES.FINISHED) return "Partido finalizado";
+    if (liveTimer.timerStatus === LIVE_TIMER_STATUSES.HALFTIME) {
+      if (liveTimer.currentPeriod === LIVE_PERIODS.EXTRA_TIME_FIRST) return "Descanso T.E.";
+      if (liveTimer.currentPeriod === LIVE_PERIODS.SECOND_HALF) return "Regular finalizado";
+      return "Descanso";
+    }
+    return `${getLivePeriodName()} en curso`;
   }
 
   function getLivePeriodName() {
@@ -893,6 +1477,15 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     setMessage("Segundo tiempo iniciado.");
   }
 
+  function finishRegularTime() {
+    if (!window.confirm("¿Finalizar tiempo regular? El reloj quedara detenido y podras iniciar tiempo extra o cerrar el partido.")) return;
+    const nextTimer = applyLiveTimer(finishLivePeriod(liveTimer, LIVE_PERIODS.SECOND_HALF));
+    const nextDraft = { ...buildDraftPayload(), liveTimer: nextTimer, liveRunning: false, liveElapsedSeconds: calculateElapsedSeconds(nextTimer) };
+    persistLiveDraft(nextDraft);
+    recordLiveOperation("finish_regular_time", { elapsedSeconds: calculateElapsedSeconds(nextTimer) }, nextDraft);
+    setMessage("Tiempo regular finalizado. Puedes iniciar 1TE o finalizar el partido.");
+  }
+
   function startExtraTime() {
     if (!window.confirm("¿Iniciar primer tiempo extra? Usa esta opcion solo para liguilla o finales cuando el reglamento lo indique.")) return;
     setExtraTimeEnabled(true);
@@ -914,13 +1507,13 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     setMessage("Segundo tiempo extra iniciado.");
   }
 
-  function finishExtraTimePeriod() {
-    if (!window.confirm(livePeriod === 3 ? "¿Finalizar primer tiempo extra?" : "¿Finalizar tiempo extra?")) return;
-    const nextTimer = applyLiveTimer(finishLivePeriod(liveTimer, livePeriod === 3 ? LIVE_PERIODS.EXTRA_TIME_FIRST : LIVE_PERIODS.HALFTIME));
+  function finishFirstExtraTime() {
+    if (!window.confirm("¿Finalizar primer tiempo extra?")) return;
+    const nextTimer = applyLiveTimer(finishLivePeriod(liveTimer, LIVE_PERIODS.EXTRA_TIME_FIRST));
     const nextDraft = { ...buildDraftPayload(), liveTimer: nextTimer, liveRunning: false, liveElapsedSeconds: calculateElapsedSeconds(nextTimer) };
     persistLiveDraft(nextDraft);
-    recordLiveOperation(livePeriod === 3 ? "finish_extra_time_first" : "finish_extra_time", { elapsedSeconds: calculateElapsedSeconds(nextTimer) }, nextDraft);
-    setMessage(livePeriod === 3 ? "Primer tiempo extra finalizado. Puedes iniciar 2TE." : "Tiempo extra finalizado. Si procede, captura penales.");
+    recordLiveOperation("finish_extra_time_first", { elapsedSeconds: calculateElapsedSeconds(nextTimer) }, nextDraft);
+    setMessage("Primer tiempo extra finalizado. Puedes iniciar 2TE.");
   }
 
   function finishFirstHalf() {
@@ -952,7 +1545,14 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       setSyncStatus("Sincronizado con LIGATEC");
       releaseWakeLock();
       writeRefereeDraft(draftKey, { ...nextDraft, sessionId: response.session?.id || sessionId });
-      onSaved(response.payload, { draft: true, message: "Partido finalizado y acta preliminar generada. Falta fase de firmas para publicarla." });
+      const nextReportState = await fetchRefereeMatchReport(authToken, match.id).catch(() => (
+        response.report
+          ? { report: response.report, signatures: [], homeSigned: false, awaySigned: false, readyToFinalize: false }
+          : null
+      ));
+      if (nextReportState) setReportState(nextReportState);
+      setMessage("Partido finalizado. Revisa el acta, agrega observaciones y solicita las firmas de capitanes.");
+      onSaved(response.payload, { draft: true, keepOpen: true, message: "" });
     } catch (sessionError) {
       if (operation?.operationId) await markLiveOperationFailed(operation.operationId);
       setSyncStatus("Guardado en este dispositivo");
@@ -962,24 +1562,74 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     }
   }
 
-  function addEvent(type, teamId) {
+  function createEventFromSelection(type, teamId, playerId, minuteInfo = getLiveEventMinute()) {
     setMessage("");
     const now = Date.now();
-    if (lastEventRef.current.type === type && lastEventRef.current.teamId === teamId && now - lastEventRef.current.at < 800) {
+    if (lastEventRef.current.type === type && lastEventRef.current.teamId === teamId && lastEventRef.current.playerId === playerId && now - lastEventRef.current.at < 800) {
       setMessage("Evento ignorado para evitar duplicado por doble toque. Si fue intencional, vuelve a tocar.");
       return;
     }
-    lastEventRef.current = { type, teamId, at: now };
-    const nextEvent = createEvent(match, type, teamId, getLiveEventMinute());
+    lastEventRef.current = { type, teamId, playerId, at: now };
+    const nextEvent = {
+      ...createEvent(match, type, teamId, minuteInfo),
+      playerId,
+      period: minuteInfo?.period || getCurrentEventPeriod()
+    };
     if (sheetMode === "played" && isGoalEventType(type)) adjustScore(teamId, 1);
     setEvents((current) => {
-      const nextEvents = [...current, nextEvent];
+      const createsDoubleYellow = type === "yellow" && playerId && current.some((eventItem) => (
+        eventItem.type === "yellow" &&
+        eventItem.playerId === playerId &&
+        eventItem.teamId === teamId
+      ));
+      const nextEvents = normalizeDoubleYellowDraftEvents([...current, nextEvent]);
       const nextDraft = { ...buildDraftPayload(), events: nextEvents };
       persistLiveDraft(nextDraft);
       recordLiveOperation("add_event", { event: nextEvent }, nextDraft);
+      setMessage(createsDoubleYellow
+        ? "Segunda amarilla registrada: se agrego expulsion por doble amarilla y no suma para acumulacion."
+        : `${getEventLabel(type)} registrado. Guardado en este dispositivo.`);
       return nextEvents;
     });
-    setMessage(`${getEventLabel(type)} registrado. Guardado en este dispositivo.`);
+  }
+
+  function addEvent(type, teamId) {
+    createEventFromSelection(type, teamId, "", getLiveEventMinute());
+  }
+
+  function openEventComposer(type, teamId) {
+    setMessage("");
+    setEventComposer({
+      type,
+      teamId,
+      minuteInfo: getLiveEventMinute()
+    });
+    setEventComposerQuery("");
+    setEventComposerFilter("all");
+  }
+
+  function cancelEventComposer() {
+    setEventComposer(null);
+    setEventComposerQuery("");
+    setEventComposerFilter("all");
+  }
+
+  function getEventComposerPlayers() {
+    if (!eventComposer) return [];
+    const players = getPlayersForEvent(match, { type: eventComposer.type, teamId: eventComposer.teamId });
+    const query = normalizeSearch(eventComposerQuery);
+    return players.filter((player) => {
+      if (eventComposerFilter === "captains" && !player.isCaptain) return false;
+      if (eventComposerFilter === "numbered" && !player.number) return false;
+      if (!query) return true;
+      return normalizeSearch(`#${player.number || ""} ${player.name}`).includes(query);
+    });
+  }
+
+  function confirmEventComposer(player) {
+    if (!eventComposer) return;
+    createEventFromSelection(eventComposer.type, eventComposer.teamId, player.id, eventComposer.minuteInfo);
+    cancelEventComposer();
   }
 
   function updateEvent(eventId, field, value) {
@@ -1001,11 +1651,19 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     };
     const isGoal = isGoalEventType(nextEvent.type);
     if (sheetMode === "played" && wasGoal !== isGoal) adjustScore(nextEvent.teamId, isGoal ? 1 : -1);
-    setEvents((current) => current.map((event) => (event.id === eventId ? nextEvent : event)));
+    setEvents((current) => normalizeDoubleYellowDraftEvents(current.map((event) => (event.id === eventId ? nextEvent : event))));
   }
 
   function updatePlayerSearch(eventId, value) {
     setPlayerSearches((current) => ({ ...current, [eventId]: value }));
+  }
+
+  function selectEventPlayer(eventId, player) {
+    updateEvent(eventId, "playerId", player.id);
+    setPlayerSearches((current) => ({
+      ...current,
+      [eventId]: `#${player.number || "-"} ${player.name}`
+    }));
   }
 
   function removeEvent(eventId) {
@@ -1013,7 +1671,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     const eventToRemove = events.find((event) => event.id === eventId);
     if (sheetMode === "played" && eventToRemove && isGoalEventType(eventToRemove.type)) adjustScore(eventToRemove.teamId, -1);
     setEvents((current) => {
-      const nextEvents = current.filter((event) => event.id !== eventId);
+      const nextEvents = normalizeDoubleYellowDraftEvents(current.filter((event) => event.id !== eventId));
       const nextDraft = { ...buildDraftPayload(), events: nextEvents };
       persistLiveDraft(nextDraft);
       recordLiveOperation("cancel_event", { eventId, event: eventToRemove || null }, nextDraft);
@@ -1024,6 +1682,11 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       delete next[eventId];
       return next;
     });
+  }
+
+  function getEventPlayerName(eventItem) {
+    const players = getPlayersForEvent(match, eventItem);
+    return players.find((player) => player.id === eventItem.playerId)?.name || "Jugador pendiente";
   }
 
   async function saveDraft() {
@@ -1082,6 +1745,87 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     }
   }
 
+  async function syncPreliminaryReportDraft({ silent = false, payloadOverrides = {} } = {}) {
+    if (!reportState?.report) return reportState;
+    if (["finalized", "published"].includes(reportState.report.status)) return reportState;
+    const nextDraft = { ...buildDraftPayload(), ...payloadOverrides };
+    const nextReportState = await updateRefereeMatchReportDraft(authToken, match.id, {
+      reportId: reportState.report.id,
+      sessionId,
+      captureMode,
+      reportPayload: nextDraft,
+      homeGoals,
+      awayGoals
+    });
+    setReportState(nextReportState);
+    writeRefereeDraft(draftKey, { ...nextDraft, sessionId });
+    if (nextReportState.payload) onSaved(nextReportState.payload, { draft: true, keepOpen: true, message: "" });
+    if (!silent) setMessage("Revision del acta guardada. Ya puedes continuar con las firmas.");
+    return nextReportState;
+  }
+
+  async function savePreliminaryReportReview() {
+    setSaving(true);
+    setMessage("Guardando revision del acta...");
+    try {
+      const nextReportState = await syncPreliminaryReportDraft({ silent: true });
+      onSaved(nextReportState?.payload || null, {
+        draft: true,
+        returnHome: true,
+        message: "Acta preliminar guardada. Sigue pendiente de firmas y no se publicara hasta tocar Publicar acta."
+      });
+    } catch (syncError) {
+      setMessage(syncError.message || "No se pudo guardar la revision del acta.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reportSignatureIssue(reason) {
+    if (!reportState?.report) return;
+    const reasonLabel = reason?.label || "Problema con firma";
+    const timestamp = new Intl.DateTimeFormat("es-MX", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(new Date());
+    const issueNote = `Incidencia de firma: ${reasonLabel}. Registrado por el arbitro ${timestamp}.`;
+    const nextObservations = [observations, issueNote].filter(Boolean).join("\n");
+    const signatureIssue = {
+      id: `signature-issue-${Date.now()}`,
+      reasonId: reason?.id || "other",
+      reasonLabel,
+      status: "pending_admin_attention",
+      reportedAt: new Date().toISOString(),
+      reportedBy: "referee",
+      homeSigned: Boolean(reportState.homeSigned),
+      awaySigned: Boolean(reportState.awaySigned),
+      online: typeof navigator === "undefined" ? true : navigator.onLine
+    };
+    setSaving(true);
+    setMessage("Guardando incidencia de firma...");
+    try {
+      setObservations(nextObservations);
+      const nextReportState = await syncPreliminaryReportDraft({
+        silent: true,
+        payloadOverrides: {
+          observations: nextObservations,
+          signatureIssue
+        }
+      });
+      onSaved(nextReportState?.payload || null, {
+        draft: true,
+        returnHome: true,
+        message: "Incidencia de firma guardada. El acta sigue pendiente y no se publicara hasta resolver firmas o validacion admin."
+      });
+    } catch (issueError) {
+      setMessage(issueError.message || "No se pudo guardar la incidencia de firma.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function signPreliminaryReport(teamSide) {
     const pin = teamSide === "home" ? homeCaptainPin : awayCaptainPin;
     const teamName = teamSide === "home" ? match.homeTeamName : match.awayTeamName;
@@ -1093,11 +1837,17 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     setSaving(true);
     setMessage(`Firmando acta de ${teamName}...`);
     try {
+      await syncPreliminaryReportDraft({ silent: true });
       const nextReportState = await signRefereeMatchReport(authToken, match.id, {
         teamSide,
         pin: normalizePin(pin)
       });
       setReportState(nextReportState);
+      signatureSnapshotRef.current = {
+        initialized: true,
+        homeSigned: Boolean(nextReportState.homeSigned),
+        awaySigned: Boolean(nextReportState.awaySigned)
+      };
       if (nextReportState.payload) onSaved(nextReportState.payload, { draft: true, keepOpen: true, message: "" });
       setMessage(`Firma de ${teamName} registrada correctamente.`);
     } catch (signError) {
@@ -1117,6 +1867,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     setSaving(true);
     setMessage("Finalizando acta...");
     try {
+      await syncPreliminaryReportDraft({ silent: true });
       const nextReportState = await finalizeRefereeMatchReport(authToken, match.id);
       setReportState(nextReportState);
       clearRefereeDraft(draftKey);
@@ -1172,14 +1923,16 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
 
     setSaving(true);
     try {
+      const extraTimeSummary = getExtraTimeGoalSummary(cleanEvents);
+      const penaltySummary = getPenaltyShootoutSummary();
       const nextPayload = await saveRefereeMatchSheet(authToken, match.id, {
         captureMode: getCaptureMode(),
         homeGoals,
         awayGoals,
-        extraTimeHomeGoals: extraTimeEnabled ? extraTimeHomeGoals : "",
-        extraTimeAwayGoals: extraTimeEnabled ? extraTimeAwayGoals : "",
-        penaltyHomeGoals: penaltiesEnabled ? penaltyHomeGoals : "",
-        penaltyAwayGoals: penaltiesEnabled ? penaltyAwayGoals : "",
+        extraTimeHomeGoals: extraTimeEnabled ? extraTimeSummary.home : "",
+        extraTimeAwayGoals: extraTimeEnabled ? extraTimeSummary.away : "",
+        penaltyHomeGoals: penaltiesEnabled ? penaltySummary.home : "",
+        penaltyAwayGoals: penaltiesEnabled ? penaltySummary.away : "",
         observations,
         status: isDefault ? "walkover" : "finished",
         resolutionType: isDefault ? "no_show" : penaltiesEnabled ? "penalties" : extraTimeEnabled ? "extra_time" : "normal",
@@ -1194,6 +1947,11 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           playerId: item.playerId,
           minute: item.minute,
           minuteLabel: item.minuteLabel || "",
+          period: item.period || MATCH_EVENT_PERIODS.REGULAR,
+          cardDetail: item.cardDetail || "",
+          countsForAccumulation: item.type === "yellow" ? item.countsForAccumulation !== false && !item.excludedFromAccumulation : undefined,
+          excludedFromAccumulation: item.type === "yellow" ? item.countsForAccumulation === false || Boolean(item.excludedFromAccumulation) : undefined,
+          sourceYellowCardMinutes: Array.isArray(item.sourceYellowCardMinutes) ? item.sourceYellowCardMinutes : undefined,
           suspensionMatches: 0,
           suspensionIndefinite: false,
           disciplinaryPending: item.type === "red",
@@ -1207,6 +1965,62 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function renderEventComposer() {
+    if (!eventComposer) return null;
+    const eventTeamName = eventComposer.teamId === match.homeTeamId ? match.homeTeamName : match.awayTeamName;
+    const playerTeamName = eventComposer.type === "own_goal"
+      ? eventComposer.teamId === match.homeTeamId ? match.awayTeamName : match.homeTeamName
+      : eventTeamName;
+    const players = getEventComposerPlayers();
+    const filters = [
+      ["all", "Todos"],
+      ["captains", "Capitanes"],
+      ["numbered", "Con numero"]
+    ];
+    return (
+      <section className="referee-event-composer" aria-label="Seleccionar jugador del evento">
+        <div className="referee-event-composer-top">
+          <button type="button" onClick={cancelEventComposer} aria-label="Volver">‹</button>
+          <div>
+            <span>{getEventIcon(eventComposer.type)}</span>
+            <strong>{getEventLabel(eventComposer.type)}</strong>
+            <small>{eventComposer.type === "own_goal" ? `A favor de ${eventTeamName}` : eventTeamName}</small>
+          </div>
+        </div>
+        <div className="referee-event-composer-meta">
+          <span>{getMatchEventPeriodLabel(eventComposer.minuteInfo?.period || getCurrentEventPeriod())}</span>
+          <span>Min {eventComposer.minuteInfo?.minuteLabel || eventComposer.minuteInfo?.minute || "Manual"}</span>
+        </div>
+        <label className="referee-event-composer-search">
+          Buscar jugador de {playerTeamName}
+          <input
+            autoFocus
+            value={eventComposerQuery}
+            onChange={(event) => setEventComposerQuery(event.target.value)}
+            placeholder="Numero, nombre o apellido"
+          />
+        </label>
+        <div className="referee-event-composer-filters" role="tablist" aria-label="Filtros de jugadores">
+          {filters.map(([value, label]) => (
+            <button className={eventComposerFilter === value ? "active" : ""} key={value} type="button" onClick={() => setEventComposerFilter(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="referee-event-composer-list">
+          {players.map((player) => (
+            <button key={player.id} type="button" onClick={() => confirmEventComposer(player)}>
+              <b>{player.number || "-"}</b>
+              <span>{player.name}</span>
+              {player.isCaptain && <small>Capitan</small>}
+            </button>
+          ))}
+          {!players.length && <p>No hay jugadores que coincidan con la busqueda.</p>}
+        </div>
+      </section>
+    );
   }
 
   function renderEventRow(eventItem, index, isLatest = false) {
@@ -1223,18 +2037,19 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       return normalizeSearch(`#${player.number || ""} ${player.name}`).includes(playerQuery);
     });
     const visiblePlayers = filteredPlayers.length ? filteredPlayers : players;
+    const suggestedPlayers = playerQuery ? filteredPlayers.slice(0, 5) : [];
     return (
       <article className={`referee-event-row event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
         <div className="referee-event-row-head">
           <div>
-            <strong>#{index + 1} <span className="event-icon" aria-hidden="true">{getEventIcon(eventItem.type)}</span>{getEventLabel(eventItem.type)}</strong>
+            <strong>#{index + 1} <span className="event-icon" aria-hidden="true">{getEventIcon(eventItem.type, eventItem)}</span>{getEventLabel(eventItem.type, eventItem)}</strong>
             <span>{eventItem.type === "own_goal" ? `A favor de ${eventTeam}` : eventTeam}</span>
           </div>
           <button className="danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
         </div>
         <div className="referee-locked-team">
           <span>Evento</span>
-          <strong><span className="event-icon" aria-hidden="true">{getEventIcon(eventItem.type)}</span>{getEventLabel(eventItem.type)}</strong>
+          <strong><span className="event-icon" aria-hidden="true">{getEventIcon(eventItem.type, eventItem)}</span>{getEventLabel(eventItem.type, eventItem)}</strong>
           <small>Fijo segun el boton elegido</small>
         </div>
         <div className="referee-locked-team">
@@ -1249,8 +2064,24 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
             placeholder={`Numero, nombre o apellido de ${playerTeam}`}
             aria-label="Buscar jugador del evento"
           />
+          {suggestedPlayers.length > 0 && (
+            <div className="referee-player-suggestions" aria-label="Opciones de jugador">
+              {suggestedPlayers.map((player) => (
+                <button
+                  className={eventItem.playerId === player.id ? "selected" : ""}
+                  key={player.id}
+                  type="button"
+                  onClick={() => selectEventPlayer(eventItem.id, player)}
+                >
+                  <b>{player.number || "-"}</b>
+                  <span>{player.name}</span>
+                  {player.isCaptain && <small>Capitan</small>}
+                </button>
+              ))}
+            </div>
+          )}
         </label>
-        <label>Jugador
+        <label>Jugador seleccionado
           <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label="Jugador">
             <option value="">{filteredPlayers.length ? "Selecciona jugador" : "Sin coincidencias, mostrando plantilla"}</option>
             {visiblePlayers.map((player) => (
@@ -1261,6 +2092,14 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
         <label>Minuto
           <input value={eventItem.minuteLabel || eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} inputMode="numeric" placeholder="Min" type="text" aria-label="Minuto" />
         </label>
+        {extraTimeEnabled && (
+          <label>Periodo
+            <select value={eventItem.period || MATCH_EVENT_PERIODS.REGULAR} onChange={(event) => updateEvent(eventItem.id, "period", event.target.value)} aria-label="Periodo del evento">
+              <option value={MATCH_EVENT_PERIODS.REGULAR}>Tiempo regular</option>
+              <option value={MATCH_EVENT_PERIODS.EXTRA_TIME}>Tiempo extra</option>
+            </select>
+          </label>
+        )}
         {eventItem.type === "red" && (
           <>
             <div className="referee-locked-team">
@@ -1277,11 +2116,196 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
     );
   }
 
+  function getReportStatusLabel(report) {
+    const status = typeof report === "string" ? report : report?.status;
+    const signatureIssue = typeof report === "object" ? report?.payload?.signatureIssue : null;
+    if (signatureIssue?.status === "pending_admin_attention") return "Incidencia de firma";
+    if (status === "published") return "Publicada";
+    if (status === "finalized") return "Finalizada";
+    if (status === "both_signed") return "Firmas completas";
+    if (status === "correction_requested") return "Correccion solicitada";
+    return "Pendiente de firmas";
+  }
+
+  function renderPostMatchReview() {
+    const report = reportState?.report || null;
+    const reportLocked = ["finalized", "published"].includes(report?.status);
+    const reviewEvents = events.filter((eventItem) => eventItem.playerId || eventItem.type);
+    const extraSummary = getExtraTimeGoalSummary(reviewEvents);
+    const shootoutSummary = getPenaltyShootoutSummary();
+    return (
+      <form className="referee-sheet-form referee-live-capture-mode referee-post-match-form" onSubmit={(event) => event.preventDefault()}>
+        <div className="referee-acta-title referee-review-title">
+          <button type="button" onClick={onCancel} disabled={saving}>Volver al inicio</button>
+          <div>
+            <div className="referee-acta-brand">
+              <img alt="LIGATEC" src={ligatecLogo} />
+              <span>Revision del acta</span>
+            </div>
+            <strong>{match.homeTeamName} vs {match.awayTeamName}</strong>
+            <small>{match.competitionName || "Categoria"} | {formatDate(match.date)} | {match.time || "Hora por definir"} | {match.venue || "Cancha por definir"}</small>
+          </div>
+        </div>
+
+        <div className="referee-flow-steps referee-review-flow" aria-label="Flujo del acta">
+          <span>1. Captura</span>
+          <span className="active">2. Revisa acta</span>
+          <span className={reportState?.readyToFinalize || reportLocked ? "active" : ""}>3. Firma capitanes</span>
+          <span className={reportLocked ? "active" : ""}>4. Publica acta</span>
+        </div>
+
+        <section className="referee-post-review-card" aria-label="Resumen del acta">
+          <img className="referee-review-watermark" alt="" src={ligatecLogo} aria-hidden="true" />
+          <div className="referee-post-review-head">
+            <span>{loadingReport ? "Cargando acta preliminar" : getReportStatusLabel(report)}</span>
+            <strong>Resultado final</strong>
+          </div>
+          <div className="referee-post-scoreline">
+            <div>
+              <RefereeTeamMark name={match.homeTeamName} />
+              <strong>{match.homeTeamName}</strong>
+              <small>Local</small>
+            </div>
+            <b>{homeGoals || 0} - {awayGoals || 0}</b>
+            <div>
+              <RefereeTeamMark name={match.awayTeamName} tone="away" />
+              <strong>{match.awayTeamName}</strong>
+              <small>Visitante</small>
+            </div>
+          </div>
+          <div className="referee-post-summary-grid">
+            <span><small>Eventos</small><strong>{reviewEvents.length}</strong></span>
+            <span><small>Tiempo extra</small><strong>{extraTimeEnabled ? `${extraSummary.home} - ${extraSummary.away}` : "No"}</strong></span>
+            <span><small>Penales</small><strong>{penaltiesEnabled ? `${shootoutSummary.home || 0} - ${shootoutSummary.away || 0}` : "No"}</strong></span>
+          </div>
+        </section>
+
+        <section className="referee-review-events-panel">
+          <div className="referee-review-section-head">
+            <span>Eventos registrados</span>
+            <strong>{reviewEvents.length} evento(s)</strong>
+          </div>
+          {reviewEvents.length ? (
+            <div className="referee-review-event-list">
+              {reviewEvents.map((eventItem) => (
+                <article className={`event-kind-${eventItem.type}`} key={eventItem.id}>
+                  <b aria-hidden="true">{getEventIcon(eventItem.type, eventItem)}</b>
+                  <div>
+                    <strong>{getEventLabel(eventItem.type, eventItem)} · {eventItem.minuteLabel || eventItem.minute || "-"}'</strong>
+                    <span>{getEventPlayerName(eventItem)}</span>
+                  </div>
+                  <small>{eventItem.teamId === match.homeTeamId ? getTeamInitials(match.homeTeamName) : getTeamInitials(match.awayTeamName)}</small>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">No hay eventos registrados en el acta.</p>
+          )}
+        </section>
+
+        <label className="referee-review-observations">Observaciones del acta
+          <textarea
+            disabled={reportLocked}
+            value={observations}
+            onChange={(event) => setObservations(event.target.value)}
+            placeholder="Agrega observaciones, incidentes o acuerdos antes de las firmas."
+          />
+          <small>Lo escrito aqui se guarda en el acta preliminar antes de firmar o publicar.</small>
+        </label>
+
+        <section className="referee-pin-panel referee-review-sign-panel">
+          <div className="referee-pin-panel-head">
+            <span>Firmas de capitanes</span>
+            <strong>{report ? getReportStatusLabel(report) : "Acta preliminar pendiente"}</strong>
+            <small>
+              {report
+                ? "Captura los PIN generados desde el panel delegado para autorizar el acta."
+                : "Cuando el reporte termine de generarse apareceran los campos de firma."}
+            </small>
+          </div>
+          {report && (
+            <>
+              <div className="referee-roster-status-row">
+                <span>{match.homeTeamName}: {reportState.homeSigned ? "firmada" : "pendiente"}</span>
+                <span>{match.awayTeamName}: {reportState.awaySigned ? "firmada" : "pendiente"}</span>
+              </div>
+              <div className="referee-pin-grid">
+                <label>PIN capitan local | {match.homeTeamName}
+                  <input
+                    disabled={reportState.homeSigned || reportLocked}
+                    inputMode="numeric"
+                    maxLength={8}
+                    value={homeCaptainPin}
+                    onChange={(event) => setHomeCaptainPin(normalizePin(event.target.value))}
+                    placeholder={reportState.homeSigned ? "Firmada" : "PIN local"}
+                  />
+                </label>
+                <label>PIN capitan visitante | {match.awayTeamName}
+                  <input
+                    disabled={reportState.awaySigned || reportLocked}
+                    inputMode="numeric"
+                    maxLength={8}
+                    value={awayCaptainPin}
+                    onChange={(event) => setAwayCaptainPin(normalizePin(event.target.value))}
+                    placeholder={reportState.awaySigned ? "Firmada" : "PIN visitante"}
+                  />
+                </label>
+              </div>
+              <div className="inline-actions referee-review-actions">
+                <button type="button" onClick={savePreliminaryReportReview} disabled={saving || reportLocked}>
+                  Guardar revision
+                </button>
+                <button type="button" onClick={() => signPreliminaryReport("home")} disabled={saving || reportState.homeSigned || reportLocked}>
+                  Firmar local
+                </button>
+                <button type="button" onClick={() => signPreliminaryReport("away")} disabled={saving || reportState.awaySigned || reportLocked}>
+                  Firmar visitante
+                </button>
+                <button className="primary" type="button" onClick={finalizePreliminaryReport} disabled={saving || !reportState.readyToFinalize || reportLocked}>
+                  Publicar acta
+                </button>
+              </div>
+              {!reportLocked && (
+                <details className="referee-signature-issue-panel">
+                  <summary>Problema con firma</summary>
+                  <div>
+                    {SIGNATURE_ISSUE_REASONS.map((reason) => (
+                      <button key={reason.id} type="button" onClick={() => reportSignatureIssue(reason)} disabled={saving}>
+                        {reason.label}
+                      </button>
+                    ))}
+                  </div>
+                  <small>Guarda el acta sin publicar y deja la incidencia visible para administracion.</small>
+                </details>
+              )}
+            </>
+          )}
+        </section>
+
+        {message && <p className={message.startsWith("No se") || message.startsWith("Revisa") || message.startsWith("Toda") || message.startsWith("Captura") ? "auth-error" : "auth-ok"}>{message}</p>}
+      </form>
+    );
+  }
+
   const previousEvents = events.slice(0, -1);
   const latestEvent = events[events.length - 1] || null;
+  const recentEvents = events.slice(-3).reverse();
+  const selectedEventTeamName = selectedEventTeam === match.homeTeamId ? match.homeTeamName : match.awayTeamName;
+  const postMatchWorkflowStatuses = ["match_finished", "pending_captain_review", "both_signed", "finalized_pending_sync"];
+  const isPostMatchReview = captureMode === "live" && sheetMode === "played" && (
+    Boolean(reportState?.report) ||
+    liveTimer.timerStatus === LIVE_TIMER_STATUSES.FINISHED ||
+    postMatchWorkflowStatuses.includes(match.sessionStatus || "") ||
+    postMatchWorkflowStatuses.includes(match.workflowStatus || "")
+  );
+  const isLiveCapture = captureMode === "live" && sheetMode === "played" && !isPostMatchReview;
+  const extraTimeGoalSummary = getExtraTimeGoalSummary(events);
+  const liveCanCloseCurrentPeriod = liveTimer.timerStatus !== LIVE_TIMER_STATUSES.FINISHED && (liveRunning || liveTimer.timerStatus === LIVE_TIMER_STATUSES.PAUSED);
+
+  if (isPostMatchReview) return renderPostMatchReview();
 
   return (
-    <form className={`referee-sheet-form ${batterySaver ? "referee-low-power" : ""}`} onSubmit={submitSheet}>
+    <form className={`referee-sheet-form ${isLiveCapture ? "referee-live-capture-mode" : ""} ${batterySaver ? "referee-low-power" : ""}`} onSubmit={submitSheet}>
       <div className="referee-acta-title">
         <button type="button" onClick={onCancel} disabled={saving}>Volver a partidos</button>
         <div>
@@ -1290,7 +2314,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
             <span>Panel del arbitro</span>
           </div>
           <strong>{match.homeTeamName} vs {match.awayTeamName}</strong>
-          <small>{match.competitionName || "Categoria"} | {formatDate(match.date)} | {match.time || "Hora por definir"} | {match.venue || "Cancha por definir"}</small>
+          <small>{captureMode === "live" ? "Acta digital en vivo" : "Captura manual"} | {match.competitionName || "Categoria"} | {formatDate(match.date)} | {match.time || "Hora por definir"} | {match.venue || "Cancha por definir"}</small>
         </div>
       </div>
 
@@ -1301,6 +2325,108 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
         <span>4. Publica acta</span>
       </div>
 
+      {isLiveCapture && eventComposer && renderEventComposer()}
+
+      {isLiveCapture && !eventComposer && (
+        <section className="referee-live-arena" aria-label="Modo partido en vivo">
+          <img className="referee-live-logo" alt="" src={ligatecLogo} aria-hidden="true" />
+          <div className="referee-live-arena-top">
+            <button type="button" onClick={onCancel} aria-label="Volver">‹</button>
+            <div>
+              <span>{match.competitionName || "Partido"} · {getMatchDayLabel(match)}</span>
+              <strong>{liveStarted ? getLivePeriodName() : "Antes del inicio"}</strong>
+            </div>
+            <button className="referee-live-save" type="button" onClick={saveDraft} disabled={saving}>
+              <span aria-hidden="true">✓</span>
+              Guardar
+            </button>
+          </div>
+
+          <div className="referee-live-signal">
+            <span className={navigator.onLine ? "online" : "offline"}>{navigator.onLine ? "En linea" : "Sin conexion"}</span>
+            <span>{pendingOperationCount ? `${pendingOperationCount} ${pendingOperationCount === 1 ? "pendiente" : "pendientes"}` : liveStorageStatus}</span>
+          </div>
+
+          <div className="referee-live-scoreboard">
+            <button
+              className={`referee-live-team-card ${selectedEventTeam === match.homeTeamId ? "active" : ""}`}
+              type="button"
+              onClick={() => setSelectedEventTeam(match.homeTeamId)}
+              aria-pressed={selectedEventTeam === match.homeTeamId}
+            >
+              <RefereeTeamMark name={match.homeTeamName} />
+              <strong>{match.homeTeamName}</strong>
+              <small>Local</small>
+            </button>
+            <div className="referee-live-center">
+              <span>{getLiveFlowStepLabel()}</span>
+              <b>{liveStarted ? getLiveClockLabel() : formatClock(0)}</b>
+              <strong>{homeGoals || 0} - {awayGoals || 0}</strong>
+            </div>
+            <button
+              className={`referee-live-team-card ${selectedEventTeam === match.awayTeamId ? "active" : ""}`}
+              type="button"
+              onClick={() => setSelectedEventTeam(match.awayTeamId)}
+              aria-pressed={selectedEventTeam === match.awayTeamId}
+            >
+              <RefereeTeamMark name={match.awayTeamName} tone="away" />
+              <strong>{match.awayTeamName}</strong>
+              <small>Visitante</small>
+            </button>
+          </div>
+
+          {!liveStarted && (
+            <button className="referee-live-start" type="button" onClick={startLiveMatch} disabled={saving}>
+              Iniciar partido
+            </button>
+          )}
+
+          {liveStarted && (
+            <div className="referee-live-primary-controls">
+              {liveRunning && <button type="button" onClick={pauseLiveClock}>Pausar reloj</button>}
+              {liveTimer.timerStatus === LIVE_TIMER_STATUSES.PAUSED && <button className="primary" type="button" onClick={resumeLiveClock}>Reanudar</button>}
+              {liveCanCloseCurrentPeriod && livePeriod === 1 && <button className="primary" type="button" onClick={finishFirstHalf}>Finalizar 1T</button>}
+              {!liveRunning && livePeriod === 1 && liveTimer.timerStatus === LIVE_TIMER_STATUSES.HALFTIME && <button className="primary" type="button" onClick={startSecondHalf}>Iniciar 2T</button>}
+              {liveCanCloseCurrentPeriod && livePeriod === 2 && extraTimeEnabled && <button className="primary" type="button" onClick={finishRegularTime}>Finalizar regular</button>}
+              {liveCanCloseCurrentPeriod && livePeriod === 2 && !extraTimeEnabled && <button className="primary" type="button" onClick={finishLiveMatch}>Finalizar partido</button>}
+              {!liveRunning && livePeriod === 2 && liveTimer.timerStatus === LIVE_TIMER_STATUSES.HALFTIME && extraTimeEnabled && <button className="primary" type="button" onClick={startExtraTime}>Iniciar 1TE</button>}
+              {!liveRunning && livePeriod === 2 && liveTimer.timerStatus === LIVE_TIMER_STATUSES.HALFTIME && <button type="button" onClick={finishLiveMatch}>Finalizar partido</button>}
+              {liveCanCloseCurrentPeriod && livePeriod === 3 && <button className="primary" type="button" onClick={finishFirstExtraTime}>Finalizar 1TE</button>}
+              {!liveRunning && livePeriod === 3 && liveTimer.timerStatus === LIVE_TIMER_STATUSES.HALFTIME && <button className="primary" type="button" onClick={startSecondExtraTime}>Iniciar 2TE</button>}
+              {liveCanCloseCurrentPeriod && livePeriod === 4 && <button className="primary" type="button" onClick={finishLiveMatch}>Finalizar partido</button>}
+            </div>
+          )}
+
+          <div className="referee-live-actions-head">
+            <span>Eventos para</span>
+            <strong>{selectedEventTeamName}</strong>
+          </div>
+          <div className="referee-live-actions" aria-label={`Eventos rapidos para ${selectedEventTeamName}`}>
+            <EventQuickButton className="event-goal" icon={getEventIcon("goal")} title="Gol" subtitle={selectedEventTeamName} onClick={() => openEventComposer("goal", selectedEventTeam)} />
+            <EventQuickButton className="event-yellow" icon={getEventIcon("yellow")} title="Tarjeta" subtitle="Amarilla" onClick={() => openEventComposer("yellow", selectedEventTeam)} />
+            <EventQuickButton className="event-own-goal" icon={getEventIcon("own_goal")} title="Autogol" subtitle={selectedEventTeamName} onClick={() => openEventComposer("own_goal", selectedEventTeam)} />
+            <EventQuickButton className="event-red" icon={getEventIcon("red")} title="Incidente" subtitle="Roja" onClick={() => openEventComposer("red", selectedEventTeam)} />
+          </div>
+
+          <section className="referee-recent-events">
+            <div>
+              <strong>Eventos recientes</strong>
+              <span>{events.length ? "Ver todos abajo" : "Sin eventos"}</span>
+            </div>
+            {recentEvents.map((eventItem) => (
+              <article key={eventItem.id}>
+                <b className={`referee-recent-event-icon event-kind-${eventItem.type}`}>{getEventIcon(eventItem.type, eventItem)}</b>
+                <em>{eventItem.minuteLabel || eventItem.minute || getLiveEventMinuteLabel()}'</em>
+                <span>{getEventLabel(eventItem.type, eventItem)}</span>
+                <strong>{getEventPlayerName(eventItem)}</strong>
+                <small>{eventItem.teamId === match.homeTeamId ? getTeamInitials(match.homeTeamName) : getTeamInitials(match.awayTeamName)}</small>
+              </article>
+            ))}
+          </section>
+        </section>
+      )}
+
+      {!isLiveCapture && (
       <div className="referee-sheet-head">
         <div className="referee-score-team home">
           <b className="referee-team-mark">{getTeamInitials(match.homeTeamName)}</b>
@@ -1318,7 +2444,9 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           <strong>{match.awayTeamName}</strong>
         </div>
       </div>
+      )}
 
+      {!isLiveCapture && (
       <div className="referee-sheet-controls">
         <label>Tipo de resultado
           <select value={sheetMode} onChange={(event) => applyDefault(event.target.value)}>
@@ -1336,8 +2464,9 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           </label>
         )}
       </div>
+      )}
 
-      {sheetMode === "played" && (
+      {sheetMode === "played" && captureMode === "live" && !isLiveCapture && (
         <section className={`referee-live-panel ${liveStarted ? "is-active" : ""}`} aria-label="Modo partido en vivo">
           <div className="referee-live-mode-card">
             <div>
@@ -1363,9 +2492,9 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
           </div>
           <div className="referee-live-head">
             <div>
-              <span>Modo en vivo opcional</span>
+              <span>Captura en vivo</span>
               <strong>{liveStarted ? `${getLivePeriodName()} en curso` : "Cronometro del partido"}</strong>
-              <small>Si lo activas, goles y tarjetas toman el minuto actual automaticamente.</small>
+              <small>El tiempo extra no inicia solo. Solo se habilita desde liguilla cuando el reglamento lo pide.</small>
             </div>
             <div className="referee-live-clock">
               <b>{liveStarted ? getLiveClockLabel() : formatClock(0)}</b>
@@ -1373,19 +2502,12 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
             </div>
           </div>
           <div className="referee-live-meta">
-            <label>Duracion por tiempo
+            <label>Tiempo reglamentario
               <select value={liveDuration} onChange={(event) => setLiveDuration(Number(event.target.value))} disabled={liveRunning}>
                 <option value={35}>35 min</option>
                 <option value={40}>40 min</option>
                 <option value={45}>45 min</option>
                 <option value={50}>50 min</option>
-              </select>
-            </label>
-            <label>Tiempo extra
-              <select value={extraTimeDuration} onChange={(event) => setExtraTimeDuration(Number(event.target.value))} disabled={liveRunning}>
-                <option value={10}>10 min</option>
-                <option value={15}>15 min</option>
-                <option value={20}>20 min</option>
               </select>
             </label>
             <div className="referee-live-added">
@@ -1415,55 +2537,84 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
         </section>
       )}
 
+      {sheetMode === "played" && !isLiveCapture && (
+        <div className="referee-team-selector" aria-label="Equipo para nuevo evento">
+          <span>Equipo</span>
+          <button
+            className={selectedEventTeam === match.homeTeamId ? "active" : ""}
+            type="button"
+            onClick={() => setSelectedEventTeam(match.homeTeamId)}
+          >
+            <RefereeTeamMark name={match.homeTeamName} />
+            <strong>{getTeamInitials(match.homeTeamName)}</strong>
+            <small>Local</small>
+          </button>
+          <button
+            className={selectedEventTeam === match.awayTeamId ? "active" : ""}
+            type="button"
+            onClick={() => setSelectedEventTeam(match.awayTeamId)}
+          >
+            <RefereeTeamMark name={match.awayTeamName} tone="away" />
+            <strong>{getTeamInitials(match.awayTeamName)}</strong>
+            <small>Visitante</small>
+          </button>
+        </div>
+      )}
+
       {sheetMode === "played" && (
         <details className="referee-advanced-panel">
           <summary>
             <strong>Opciones de liguilla</strong>
-            <span>Tiempo extra y penales solo cuando el reglamento lo requiera</span>
+            <span>Solo activalas en finales o partidos donde el reglamento lo indique.</span>
           </summary>
           <div className="referee-advanced-grid">
             <label className="event-toggle-field">
               <input checked={extraTimeEnabled} onChange={(event) => setExtraTimeEnabled(event.target.checked)} type="checkbox" />
-              Registrar tiempo extra
+              Habilitar tiempo extra
             </label>
             {extraTimeEnabled && (
               <>
-                <label>T.E. local
-                  <input min="0" type="number" value={extraTimeHomeGoals} onChange={(event) => setExtraTimeHomeGoals(event.target.value)} placeholder="0" />
+                <label>Duracion T.E.
+                  <select value={extraTimeDuration} onChange={(event) => setExtraTimeDuration(Number(event.target.value))} disabled={liveRunning}>
+                    <option value={10}>10 min</option>
+                    <option value={15}>15 min</option>
+                    <option value={20}>20 min</option>
+                  </select>
                 </label>
-                <label>T.E. visitante
-                  <input min="0" type="number" value={extraTimeAwayGoals} onChange={(event) => setExtraTimeAwayGoals(event.target.value)} placeholder="0" />
-                </label>
+                <div className="referee-derived-score">
+                  <span>Goles en tiempo extra</span>
+                  <strong>{extraTimeGoalSummary.home} - {extraTimeGoalSummary.away}</strong>
+                  <small>Se calcula con los eventos marcados como tiempo extra.</small>
+                </div>
               </>
             )}
             <label className="event-toggle-field">
               <input checked={penaltiesEnabled} onChange={(event) => setPenaltiesEnabled(event.target.checked)} type="checkbox" />
-              Registrar penales
+              Habilitar penales
             </label>
             {penaltiesEnabled && (
               <>
-                <label>Penales local
+                <label>Tanda local
                   <input min="0" type="number" value={penaltyHomeGoals} onChange={(event) => setPenaltyHomeGoals(event.target.value)} placeholder="0" />
                 </label>
-                <label>Penales visitante
+                <label>Tanda visitante
                   <input min="0" type="number" value={penaltyAwayGoals} onChange={(event) => setPenaltyAwayGoals(event.target.value)} placeholder="0" />
                 </label>
+                <p className="referee-advanced-note">La tanda se publica como desempate y no suma a goleadores.</p>
               </>
             )}
           </div>
         </details>
       )}
 
+      {!isLiveCapture && (
       <div className="referee-event-buttons" aria-label="Eventos rapidos del partido">
-        <EventQuickButton className="event-goal" icon={getEventIcon("goal")} title="Gol" subtitle="Local" onClick={() => addEvent("goal", match.homeTeamId)} />
-        <EventQuickButton className="event-goal" icon={getEventIcon("goal")} title="Gol" subtitle="Visitante" onClick={() => addEvent("goal", match.awayTeamId)} />
-        <EventQuickButton className="event-own-goal" icon={getEventIcon("own_goal")} title="Autogol" subtitle="A local" onClick={() => addEvent("own_goal", match.homeTeamId)} />
-        <EventQuickButton className="event-own-goal" icon={getEventIcon("own_goal")} title="Autogol" subtitle="A visitante" onClick={() => addEvent("own_goal", match.awayTeamId)} />
-        <EventQuickButton className="event-yellow" icon={getEventIcon("yellow")} title="Amarilla" subtitle="Local" onClick={() => addEvent("yellow", match.homeTeamId)} />
-        <EventQuickButton className="event-yellow" icon={getEventIcon("yellow")} title="Amarilla" subtitle="Visitante" onClick={() => addEvent("yellow", match.awayTeamId)} />
-        <EventQuickButton className="event-red" icon={getEventIcon("red")} title="Roja" subtitle="Local" onClick={() => addEvent("red", match.homeTeamId)} />
-        <EventQuickButton className="event-red" icon={getEventIcon("red")} title="Roja" subtitle="Visitante" onClick={() => addEvent("red", match.awayTeamId)} />
+        <EventQuickButton className="event-goal" icon={getEventIcon("goal")} title="Gol" subtitle={selectedEventTeam === match.homeTeamId ? "Local" : "Visitante"} onClick={() => addEvent("goal", selectedEventTeam)} />
+        <EventQuickButton className="event-yellow" icon={getEventIcon("yellow")} title="Tarjeta" subtitle="Amarilla" onClick={() => addEvent("yellow", selectedEventTeam)} />
+        <EventQuickButton className="event-own-goal" icon={getEventIcon("own_goal")} title="Autogol" subtitle={selectedEventTeam === match.homeTeamId ? "Local" : "Visitante"} onClick={() => addEvent("own_goal", selectedEventTeam)} />
+        <EventQuickButton className="event-red" icon={getEventIcon("red")} title="Incidente" subtitle="Roja" onClick={() => addEvent("red", selectedEventTeam)} />
       </div>
+      )}
 
       <div className="referee-event-list">
         {latestEvent && (
@@ -1582,7 +2733,7 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
       {message && <p className={message.startsWith("No se") || message.startsWith("Revisa") || message.startsWith("Toda") || message.startsWith("Captura") ? "auth-error" : "auth-ok"}>{message}</p>}
       <div className="inline-actions">
         <button type="button" onClick={saveDraft} disabled={saving}>Guardar temporalmente</button>
-        <button className="primary" type="submit" disabled={saving}>{saving ? "Publicando acta..." : "Publicar acta directa"}</button>
+        <button className="primary" type="submit" disabled={saving}>{saving ? "Finalizando acta..." : "Finalizar y publicar acta"}</button>
         <button type="button" onClick={onCancel} disabled={saving}>Cancelar</button>
       </div>
     </form>
@@ -1590,16 +2741,26 @@ function RefereeSheetForm({ authToken, match, onCancel, onSaved }) {
 }
 
 export function RefereePortal({ authToken, currentUser, onLogout }) {
-  const [payload, setPayload] = useState(null);
+  const initialPayload = useMemo(() => readRefereePortalCache(currentUser?.id), [currentUser?.id]);
+  const [payload, setPayload] = useState(initialPayload || null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialPayload);
   const [captureMatchId, setCaptureMatchId] = useState("");
-  const [activeView, setActiveView] = useState("pending");
+  const [captureStep, setCaptureStep] = useState("prepare");
+  const [selectedCaptureMode, setSelectedCaptureMode] = useState("live");
+  const [activeView, setActiveView] = useState("home");
+  const [matchFilter, setMatchFilter] = useState("upcoming");
   const [portalNotice, setPortalNotice] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const cachedPayload = readRefereePortalCache(currentUser?.id);
+    if (cachedPayload) {
+      setPayload(cachedPayload);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     fetchRefereePortal(authToken)
       .then((nextPayload) => {
         if (!cancelled) {
@@ -1610,9 +2771,9 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
       })
       .catch((portalError) => {
         if (cancelled) return;
-        const cachedPayload = readRefereePortalCache(currentUser?.id);
-        if (cachedPayload) {
-          setPayload(cachedPayload);
+        const fallbackPayload = cachedPayload || readRefereePortalCache(currentUser?.id);
+        if (fallbackPayload) {
+          setPayload(fallbackPayload);
           setPortalNotice("Sin conexion. Mostrando la ultima informacion guardada en este dispositivo.");
           setError("");
           return;
@@ -1648,7 +2809,7 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
   }, [payload]);
 
   if (loading) {
-    return <main className="page"><section className="panel"><p className="helper-text">Cargando partidos asignados...</p></section></main>;
+    return <RefereeLoadingShell />;
   }
 
   if (error) {
@@ -1658,20 +2819,68 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
   const referee = payload?.referee;
   const pendingMatches = payload?.pendingMatches || [];
   const captureMatch = pendingMatches.find((match) => match.id === captureMatchId);
-  const nextPendingMatch = pendingMatches[0] || null;
-  const openCapture = (matchId) => {
+  const operationalMatch = getOperationalRefereeMatch(pendingMatches);
+  const openCapture = (matchId, options = {}) => {
     setPortalNotice("");
+    const targetMatch = pendingMatches.find((match) => match.id === matchId);
+    const shouldResumeCapture = options.resume === true || (targetMatch ? isMatchInCapture(targetMatch) || isPreliminaryReportMatch(targetMatch) : false);
+    setSelectedCaptureMode(targetMatch?.captureMode || "live");
+    setCaptureStep(shouldResumeCapture ? "capture" : "prepare");
     setCaptureMatchId(matchId);
   };
+  const openView = (view) => {
+    setActiveView(view);
+    if (view === "matches") setMatchFilter("upcoming");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const closeCaptureFlow = () => {
+    setCaptureMatchId("");
+    setCaptureStep("prepare");
+    setActiveView("home");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const savedCount = pendingMatches.filter((match) => match.sessionStatus === "temporarily_saved").length;
+  const publishedCount = payload?.history?.length || 0;
+  const filteredMatches = pendingMatches.filter((match) => {
+    if (matchFilter === "all") return true;
+    if (matchFilter === "saved") return match.sessionStatus === "temporarily_saved";
+    if (matchFilter === "progress") return Boolean(match.sessionStatus && !["temporarily_saved", "match_finished"].includes(match.sessionStatus));
+    if (matchFilter === "signatures") return ["pending_captain_review", "both_signed", "finalized_pending_sync"].includes(match.workflowStatus || "") || match.sessionStatus === "match_finished";
+    return !match.sessionStatus || match.sessionStatus === "scheduled";
+  });
 
   if (captureMatch) {
+    if (captureStep === "prepare") {
+      return (
+        <RefereeMatchPreparation
+          match={captureMatch}
+          onBack={closeCaptureFlow}
+          onChooseMode={() => setCaptureStep("mode")}
+        />
+      );
+    }
+    if (captureStep === "mode") {
+      return (
+        <CaptureModeSelector
+          match={captureMatch}
+          onBack={() => setCaptureStep("prepare")}
+          onSelect={(mode) => {
+            const label = mode === "live" ? "acta digital en vivo" : "captura manual";
+            if (!window.confirm(`¿Comenzar ${label} para ${captureMatch.homeTeamName} vs ${captureMatch.awayTeamName}?`)) return;
+            setSelectedCaptureMode(mode);
+            setCaptureStep("capture");
+          }}
+        />
+      );
+    }
     return (
       <main className="page referee-portal-page referee-acta-page">
-        <section className="panel referee-section">
+        <section className="referee-phone-panel referee-capture-panel">
           <RefereeSheetForm
             authToken={authToken}
             match={captureMatch}
-            onCancel={() => setCaptureMatchId("")}
+            initialCaptureMode={selectedCaptureMode}
+            onCancel={closeCaptureFlow}
             onSaved={(nextPayload, options = {}) => {
               if (nextPayload) {
                 setPayload(nextPayload);
@@ -1682,7 +2891,7 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
                 return;
               }
               setCaptureMatchId("");
-              setActiveView("pending");
+              setActiveView(options.returnHome ? "home" : "matches");
               setPortalNotice(options.message || "Acta publicada. El partido se movio a historial y ya aparece en la parte publica.");
             }}
           />
@@ -1692,190 +2901,62 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
   }
 
   return (
-    <main className="page referee-portal-page portal-mobile-shell portal-board-shell" id="referee-home">
-      <div className="portal-board-layout referee-board">
-        <aside className="portal-side-rail referee">
-          <div className="portal-side-brand">
-            <img alt="LIGATEC" src={ligatecLogo} />
-            <span>Plataforma deportiva</span>
-          </div>
-          <div className="portal-side-title">
-            <span>Panel</span>
-            <h1>Arbitro</h1>
-            <p>Gestiona partidos asignados, captura en vivo, genera el acta y publica en la plataforma.</p>
-          </div>
-          <article className="portal-side-profile">
-            <span className="portal-avatar blue">{getTeamInitials(referee?.name || currentUser?.name || "AC")}</span>
-            <div>
-              <strong>{referee?.name || currentUser?.name || "Arbitro central"}</strong>
-              <small>Licencia: {referee?.license || "ACT-2025"}</small>
-            </div>
-            <b>Activo</b>
-          </article>
-          <nav className="portal-side-menu" aria-label="Menu arbitro">
-            <a href="#referee-home" className="active"><PortalNavIcon type="home" />Inicio</a>
-            <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="assignments" />Mis partidos</button>
-            <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="acts" />Actas pendientes</button>
-            <button type="button" onClick={() => setActiveView("history")}><PortalNavIcon type="history" />Historial de actas</button>
-            <a href="#referee-tools"><PortalNavIcon type="more" />Herramientas</a>
-          </nav>
-          <article className="portal-side-pin">
-            <strong>Modalidades de acta</strong>
-            <p>En vivo usa firma digital con PIN. Manual se captura con respaldo fisico y no obliga firma digital.</p>
-            <span>La publicacion sucede al finalizar el acta.</span>
-          </article>
-          <div className="portal-side-flow">
-            <strong>Flujo del arbitro</strong>
-            <span>Convocatorias</span>
-            <span>Inicio del partido</span>
-            <span>Captura de eventos</span>
-            <span>Firmas con PIN</span>
-            <span>Publicacion oficial</span>
-          </div>
-        </aside>
-        <div className="portal-screen-stack">
-      <section className="referee-portal-home">
-        <div className="portal-topline">
-          <span className="portal-brand">
-            <img alt="LIGATEC" src={ligatecLogo} />
-          </span>
-          <div className="portal-topline-actions">
-            <button className="portal-mini-link" type="button" onClick={onLogout}>Salir</button>
-            <button className="portal-icon-button" type="button" aria-label="Herramientas">
-              <PortalNavIcon type="more" />
-            </button>
-          </div>
-        </div>
-        <div className="portal-user-summary referee">
-          <span className="portal-avatar blue">{getTeamInitials(referee?.name || currentUser?.name || "AC")}</span>
-          <div>
-            <strong>{referee?.name || currentUser?.name || "Arbitro central"}</strong>
-            <small>Licencia: {referee?.license || "ACT-2025"}</small>
-          </div>
-        </div>
-
-        <div className="referee-hero-stats portal-stat-strip">
-          <span><strong>{pendingMatches.length}</strong> asignacion pendiente</span>
-          <span><strong>{payload?.history?.filter((match) => match.date === new Date().toISOString().slice(0, 10)).length || 0}</strong> actas hoy</span>
-          <span><strong>{payload?.history?.length || 0}</strong> historial</span>
-        </div>
-
-        {nextPendingMatch ? (
-          <article className="portal-next-match-card referee-next">
-            <div className="portal-card-head">
-              <strong>Proximo partido</strong>
-              <span className="portal-status-pill blue">{getMatchStatus(nextPendingMatch, false).label}</span>
-            </div>
-            <span className="portal-match-date">{formatDate(nextPendingMatch.date)} | {nextPendingMatch.time || "Hora por definir"}</span>
-            <div className="portal-match-teams">
-              <div>
-                <RefereeTeamMark name={nextPendingMatch.homeTeamName} />
-                <strong>{nextPendingMatch.homeTeamName}</strong>
-                <small>Local</small>
-              </div>
-              <b>VS</b>
-              <div>
-                <RefereeTeamMark name={nextPendingMatch.awayTeamName} tone="away" />
-                <strong>{nextPendingMatch.awayTeamName}</strong>
-                <small>Visitante</small>
-              </div>
-            </div>
-            <div className="portal-match-meta">
-              <span>{nextPendingMatch.refereeRole === "central" ? "Central" : "Asignado"}</span>
-              <span>{nextPendingMatch.competitionName || "Categoria"}</span>
-              <span>{nextPendingMatch.venue || "Cancha por definir"}</span>
-            </div>
-            {nextPendingMatch.canCapture && (
-              <button className="portal-primary-action blue" type="button" onClick={() => openCapture(nextPendingMatch.id)}>
-                Capturar acta
-              </button>
-            )}
-          </article>
-        ) : (
-          <article className="portal-next-match-card referee-next">
-            <div className="portal-card-head">
-              <strong>Proximo partido</strong>
-              <span className="portal-status-pill neutral">Sin asignacion</span>
-            </div>
-            <p className="helper-text">Cuando la liga te asigne un partido, aparecera aqui.</p>
-          </article>
-        )}
-
-        <div className="portal-quick-actions referee">
-          <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="assignments" /><span>Asignaciones</span></button>
-          <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="acts" /><span>Actas</span></button>
-          <button type="button" onClick={() => setActiveView("history")}><PortalNavIcon type="history" /><span>Historial</span></button>
-          <a href="#referee-tools"><PortalNavIcon type="stats" /><span>Estadisticas</span></a>
-        </div>
-
-        <div className="portal-info-grid referee">
-          <article className="portal-info-card">
-            <span>Acta digital en vivo</span>
-            <strong>Con firma digital</strong>
-            <small>Captura eventos con cronometro, solicita PIN a capitanes y publica al finalizar el acta.</small>
-          </article>
-          <article className="portal-info-card">
-            <span>Acta manual</span>
-            <strong>Sin firma obligatoria</strong>
-            <small>Usa el acta fisica como respaldo, captura el resultado y publica directo al sistema.</small>
-          </article>
-          <article className="portal-info-card">
-            <span>Sincronizacion</span>
-            <strong>Preparado sin conexion</strong>
-            <small>Los cambios en vivo se guardan localmente y se reintentan cuando vuelva la conexion.</small>
-          </article>
-        </div>
-
-        <div className="portal-flow-strip referee" aria-label="Flujo del arbitro">
-          <span><b>1</b> Convocatorias</span>
-          <span><b>2</b> Captura</span>
-          <span><b>3</b> Revision</span>
-          <span><b>4</b> Firmas</span>
-          <span><b>5</b> Publicacion</span>
-        </div>
-      </section>
+    <main className="page referee-portal-page portal-mobile-shell referee-mobile-app" id="referee-home">
+      <RefereeHeader
+        referee={referee}
+        currentUser={currentUser}
+        nextMatch={operationalMatch}
+        pendingCount={pendingMatches.length}
+        savedCount={savedCount}
+        onLogout={onLogout}
+      />
       {portalNotice && <p className="auth-ok referee-portal-notice">{portalNotice}</p>}
 
-      <section className="panel referee-section">
-        <div className="referee-view-tabs" role="tablist" aria-label="Vistas del arbitro">
-          <button
-            className={activeView === "history" ? "active" : ""}
-            type="button"
-            onClick={() => setActiveView("history")}
-          >
-            Historial
-            <span>{payload?.history?.length || 0}</span>
-          </button>
-          <button
-            className={activeView === "pending" ? "active" : ""}
-            type="button"
-            onClick={() => setActiveView("pending")}
-          >
-            Proximos partidos
-            <span>{pendingMatches.length}</span>
-          </button>
-        </div>
+      {activeView === "home" && (
+      <section className="referee-portal-home referee-view-screen">
+        <ConnectionStatusBar />
+        <NextMatchCard match={operationalMatch} onOpen={openCapture} />
+        <CompactSummary pendingCount={pendingMatches.length} savedCount={savedCount} publishedCount={publishedCount} />
       </section>
+      )}
 
-      {activeView === "pending" && (
-      <section className="panel referee-section">
+      {activeView === "matches" && (
+      <section className="panel referee-section referee-view-screen">
         <div className="section-heading">
-          <span>Proximos partidos</span>
-          <h2>{pendingMatches.length ? `${pendingMatches.length} pendiente(s)` : "Sin partidos pendientes"}</h2>
+          <span>Partidos</span>
+          <h2>{filteredMatches.length ? `${filteredMatches.length} partido(s)` : "Sin partidos"}</h2>
         </div>
+        <MatchFilterChips activeFilter={matchFilter} onChange={setMatchFilter} />
         <div className="referee-match-list">
-          {pendingMatches.map((match) => (
+          {filteredMatches.map((match) => (
             <div className="referee-capture-wrap" key={match.id}>
               <MatchCard match={match} onCapture={openCapture} />
             </div>
           ))}
-          {!pendingMatches.length && <p className="empty">Cuando te asignen a partidos pendientes, apareceran aqui.</p>}
+          {!filteredMatches.length && <p className="empty">No hay partidos para este filtro.</p>}
+        </div>
+      </section>
+      )}
+
+      {activeView === "acts" && (
+      <section className="panel referee-section referee-view-screen">
+        <div className="section-heading">
+          <span>Actas</span>
+          <h2>Guardadas y pendientes</h2>
+        </div>
+        <div className="referee-match-list">
+          {pendingMatches.filter((match) => match.sessionStatus || match.sheetReviewStatus).map((match) => (
+            <div className="referee-capture-wrap" key={match.id}>
+              <MatchCard match={match} onCapture={openCapture} />
+            </div>
+          ))}
+          {!pendingMatches.some((match) => match.sessionStatus || match.sheetReviewStatus) && <p className="empty">No hay actas guardadas o pendientes de firma.</p>}
         </div>
       </section>
       )}
 
       {activeView === "history" && (
-      <section className="panel referee-section">
+      <section className="panel referee-section referee-view-screen">
         <div className="section-heading">
           <span>Historial</span>
           <h2>Partidos arbitrados</h2>
@@ -1888,16 +2969,16 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
                 <span>{group.count} partido(s)</span>
               </summary>
               <div className="referee-history-dates">
-                {group.dates.map(([date, matches]) => (
-                  <section className="referee-history-date" key={date}>
-                    <div className="referee-history-date-head">
-                      <strong>{date === "sin-fecha" ? "Sin fecha" : formatDate(date)}</strong>
+                {group.dates.map(([date, matches], dateIndex) => (
+                  <details className="referee-history-date" key={date} open={index === 0 && dateIndex === 0}>
+                    <summary className="referee-history-date-head">
+                      <strong><RefereeTinyIcon />{date === "sin-fecha" ? "Sin fecha" : formatDate(date)}</strong>
                       <span>{matches.length} acta(s)</span>
-                    </div>
+                    </summary>
                     <div className="referee-match-list compact-history">
                       {matches.map((match) => <MatchCard history key={match.id} match={match} />)}
                     </div>
-                  </section>
+                  </details>
                 ))}
               </div>
             </details>
@@ -1906,21 +2987,23 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
         </div>
       </section>
       )}
-      <section className="panel referee-section referee-tools-panel" id="referee-tools">
+
+      {activeView === "more" && (
+      <section className="panel referee-section referee-tools-panel referee-view-screen" id="referee-tools">
         <div className="section-heading">
-          <span>Herramientas</span>
-          <h2>Accesos del arbitro</h2>
+          <span>Mas</span>
+          <h2>Ayuda y contingencias</h2>
         </div>
         <div className="referee-tool-grid">
-          <button type="button" onClick={() => setActiveView("pending")}>
+          <button type="button" onClick={() => openView("matches")}>
             <PortalNavIcon type="acts" />
             <span><strong>Nueva acta manual</strong><small>Crea acta sin capturar en vivo</small></span>
           </button>
-          <button type="button" onClick={() => setActiveView("pending")}>
+          <button type="button" onClick={() => openView("acts")}>
             <PortalNavIcon type="assignments" />
             <span><strong>Actas guardadas</strong><small>Continua actas en progreso</small></span>
           </button>
-          <button type="button" onClick={() => setActiveView("history")}>
+          <button type="button" onClick={() => openView("history")}>
             <PortalNavIcon type="history" />
             <span><strong>Historial publicado</strong><small>Consulta actas cerradas</small></span>
           </button>
@@ -1943,14 +3026,14 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
           </article>
         </div>
       </section>
-        </div>
-      </div>
+      )}
+
       <nav className="portal-bottom-nav referee" aria-label="Navegacion arbitro">
-        <a href="#referee-home" className="active"><PortalNavIcon type="home" /><span>Inicio</span></a>
-        <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="assignments" /><span>Asignaciones</span></button>
-        <button type="button" onClick={() => setActiveView("pending")}><PortalNavIcon type="acts" /><span>Actas</span></button>
-        <button type="button" onClick={() => setActiveView("history")}><PortalNavIcon type="history" /><span>Historial</span></button>
-        <a href="#referee-tools"><PortalNavIcon type="more" /><span>Mas</span></a>
+        <button className={activeView === "home" ? "active" : ""} type="button" onClick={() => openView("home")}><PortalNavIcon type="home" /><span>Inicio</span></button>
+        <button className={activeView === "matches" ? "active" : ""} type="button" onClick={() => openView("matches")}><PortalNavIcon type="assignments" /><span>Partidos</span></button>
+        <button className={activeView === "acts" ? "active" : ""} type="button" onClick={() => openView("acts")}><PortalNavIcon type="acts" /><span>Actas</span></button>
+        <button className={activeView === "history" ? "active" : ""} type="button" onClick={() => openView("history")}><PortalNavIcon type="history" /><span>Historial</span></button>
+        <button className={activeView === "more" ? "active" : ""} type="button" onClick={() => openView("more")}><PortalNavIcon type="more" /><span>Mas</span></button>
       </nav>
     </main>
   );

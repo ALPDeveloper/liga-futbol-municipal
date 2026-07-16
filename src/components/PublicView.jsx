@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import alpLogo from "../../assets/alp-logo.png";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 import {
@@ -31,12 +31,13 @@ function getPublicCompetitionStorageKey(leagueId) {
 }
 
 function loadLastCompetitionId(league) {
+  const publicCompetitions = getPublicCompetitions(league);
   try {
     const params = new URLSearchParams(window.location.search);
     const urlCompetitionId = params.get("torneo") || params.get("competition") || params.get("categoria") || "";
-    if (league.competitions?.some((competition) => competition.id === urlCompetitionId)) return urlCompetitionId;
+    if (publicCompetitions.some((competition) => competition.id === urlCompetitionId)) return urlCompetitionId;
     const competitionId = localStorage.getItem(getPublicCompetitionStorageKey(league.id)) || "";
-    return league.competitions?.some((competition) => competition.id === competitionId) ? competitionId : "";
+    return publicCompetitions.some((competition) => competition.id === competitionId) ? competitionId : "";
   } catch {
     return "";
   }
@@ -58,7 +59,7 @@ function getCompetitionAccent(competitions, competitionId) {
 }
 
 function getPublicCompetitions(league) {
-  return (league.competitions || []).filter((competition) => competition.status !== "archived");
+  return (league.competitions || []).filter((competition) => !["archived", "hidden"].includes(competition.status));
 }
 
 function getArchivedPublicCompetitions(league) {
@@ -66,7 +67,7 @@ function getArchivedPublicCompetitions(league) {
 }
 
 function hasTournamentSelector(league) {
-  return (league.competitions || []).length > 1;
+  return getPublicCompetitions(league).length > 1;
 }
 
 function getSeasonValue(competition, league) {
@@ -89,6 +90,32 @@ function updatePublicCompetitionUrl(league, competition, options = {}) {
   } catch {
     // Si el navegador no permite modificar la URL, la seleccion local sigue funcionando.
   }
+}
+
+function clearPublicHash() {
+  try {
+    if (!window.location.hash) return;
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    window.dispatchEvent(new Event("hashchange"));
+  } catch {
+    // El hash es solo navegacion local; si no se puede limpiar, el contenido sigue disponible.
+  }
+}
+
+function forcePublicScrollTop() {
+  if (typeof window === "undefined") return;
+  const scrollTop = () => {
+    clearPublicHash();
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  };
+  scrollTop();
+  window.requestAnimationFrame(scrollTop);
+  window.setTimeout(scrollTop, 80);
+  window.setTimeout(scrollTop, 240);
+  window.setTimeout(scrollTop, 700);
+  window.setTimeout(scrollTop, 1400);
 }
 
 export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate, onEntryModeChange }) {
@@ -115,7 +142,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const standings = calculateStandings(regularLeague);
   const stats = calculatePlayerStats(activeLeague);
   const leagueWideStats = useMemo(() => calculatePlayerStats(league), [league]);
-  const scheduledMatches = sortPublicMatches(regularLeague.matches.filter((match) => match.status === "scheduled"));
+  const scheduledMatches = sortPublicMatches(regularLeague.matches.filter(isPublicScheduledMatch));
   const nextMatches = scheduledMatches.slice(0, 4);
   const latestResults = sortRecentMatches(finishedMatches(regularLeague)).slice(0, 3);
   const featuredMatch = getFeaturedPublicMatch(regularLeague, standings);
@@ -216,27 +243,16 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       updateUrl = true
     } = options;
     const nextCompetition = getCompetition(league, competitionId);
+    if (clearHash) clearPublicHash();
     setSelectedCompetitionId(competitionId);
     setCompetitionSheetOpen(false);
     setPublicSearch("");
     setSelectedPlayerId("");
     if (nextCompetition?.season) setSelectedSeason(nextCompetition.season);
     if (closeGate) setShowCompetitionGate(false);
-    if (clearHash && window.location.hash) {
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-      window.dispatchEvent(new Event("hashchange"));
-    }
     if (updateUrl) updatePublicCompetitionUrl(league, nextCompetition, { preserveHash: !clearHash });
-    if (clearHash && window.location.hash) {
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-      window.dispatchEvent(new Event("hashchange"));
-    }
-    if (scrollTop) {
-      window.requestAnimationFrame(() => {
-        document.getElementById("inicio")?.scrollIntoView({ block: "start" });
-        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-      });
-    }
+    if (clearHash) clearPublicHash();
+    if (scrollTop) forcePublicScrollTop();
   }
 
   function handlePublicSearchResult(result) {
@@ -259,15 +275,26 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   }, []);
 
   useEffect(() => {
-    const defaultCompetitionId = getDefaultCompetitionId(league);
+    if (showCompetitionGate) forcePublicScrollTop();
+  }, [showIntro, showCompetitionGate]);
+
+  useLayoutEffect(() => {
+    if (!showCompetitionGate) return;
+    clearPublicHash();
+    forcePublicScrollTop();
+  }, [league.id, showCompetitionGate]);
+
+  useEffect(() => {
+    const publicCompetitionIds = new Set(getPublicCompetitions(league).map((competition) => competition.id));
+    const defaultCompetitionId = getPublicCompetitions(league)[0]?.id || getDefaultCompetitionId(league);
     const rememberedCompetitionId = loadLastCompetitionId(league);
-    const hasSelectedCompetition = league.competitions?.some((competition) => competition.id === selectedCompetitionId);
+    const hasSelectedCompetition = publicCompetitionIds.has(selectedCompetitionId);
     const nextCompetitionId = hasSelectedCompetition ? selectedCompetitionId : rememberedCompetitionId || defaultCompetitionId;
     if (nextCompetitionId && selectedCompetitionId !== nextCompetitionId) setSelectedCompetitionId(nextCompetitionId);
   }, [league, selectedCompetitionId]);
 
   useEffect(() => {
-    if (!showCompetitionGate && league.competitions?.some((competition) => competition.id === selectedCompetitionId)) {
+    if (!showCompetitionGate && getPublicCompetitions(league).some((competition) => competition.id === selectedCompetitionId)) {
       saveLastCompetitionId(league.id, selectedCompetitionId);
     }
   }, [league.id, league.competitions, selectedCompetitionId, showCompetitionGate]);
@@ -277,26 +304,20 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
     setShowCompetitionGate(shouldShowGate);
     if (shouldShowGate) {
-      if (window.location.hash) {
-        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-        window.dispatchEvent(new Event("hashchange"));
-      }
-      window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+      clearPublicHash();
+      forcePublicScrollTop();
     }
   }, [league.id]);
 
   useEffect(() => {
     if (!showCompetitionGate || !window.location.hash) return;
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+    clearPublicHash();
+    forcePublicScrollTop();
   }, [league.id, showCompetitionGate]);
 
   useEffect(() => {
     if (showCompetitionGate || window.location.hash) return;
-    window.requestAnimationFrame(() => {
-      document.getElementById("inicio")?.scrollIntoView({ block: "start" });
-      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-    });
+    forcePublicScrollTop();
   }, [league.id, selectedCompetitionId, showCompetitionGate]);
 
   useEffect(() => {
@@ -450,10 +471,12 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             </div>
           </section>
 
-          <section className="panel" id="liguilla">
-            <SectionHeading eyebrow="Fase final" title="Liguilla" />
-            <PlayoffList league={activeLeague} matches={playoffs} />
-          </section>
+          {!!playoffs.length && (
+            <section className="panel" id="liguilla">
+              <SectionHeading eyebrow="Fase final" title="Liguilla" />
+              <PlayoffList league={activeLeague} matches={playoffs} />
+            </section>
+          )}
 
           <section className="panel" id="equipos">
             <SectionHeading eyebrow="Clubes" title="Perfil de equipo" />
@@ -596,7 +619,7 @@ function getCompetitionOverview(league, competitionId) {
     teamCount: scoped.teams.length,
     playerCount: scoped.players.length,
     matchCount: scoped.matches.length,
-    scheduledCount: scoped.matches.filter((match) => match.status === "scheduled").length,
+    scheduledCount: scoped.matches.filter(isPublicScheduledMatch).length,
     round: competition?.activeRound || getCurrentDisplayRound(scoped.matches) || "-"
   };
 }
@@ -627,6 +650,10 @@ function TournamentEntryGate({ archivedCompetitions = [], league, competitions, 
   const locationTitle = league.city || "Liga";
   const locationSubtitle = league.state || "Michoacan, Mexico";
   const accentSource = [...competitions, ...archivedCompetitions];
+
+  useLayoutEffect(() => {
+    forcePublicScrollTop();
+  }, [league.id]);
 
   return (
     <section className="tournament-entry-gate" aria-label="Seleccionar torneo">
@@ -848,7 +875,7 @@ function buildPublicSpotlights(league) {
 
   const topTeams = standings.slice(0, 2).map((row) => row.team.id);
   const featuredMatch = league.matches.find((match) => (
-    match.status === "scheduled" &&
+    isPublicScheduledMatch(match) &&
     topTeams.includes(match.homeTeamId) &&
     topTeams.includes(match.awayTeamId)
   ));
@@ -1008,77 +1035,87 @@ function shareWhatsAppItem({ text, url }) {
   window.open(`https://wa.me/?text=${message}`, "_blank", "noopener,noreferrer");
 }
 
-function getLeaguePublicUrl(league) {
+function getLeaguePublicUrl(league, competition = null) {
   const leagueId = league?.id ? encodeURIComponent(league.id) : "";
   if (!leagueId) return typeof window !== "undefined" ? window.location.href : "";
-  if (typeof window === "undefined") return `/liga/${leagueId}`;
-  return `${window.location.origin}/liga/${leagueId}`;
+  const activeCompetition = competition || getCompetition(league, league.currentCompetitionId);
+  const basePath = `/liga/${leagueId}`;
+  if (typeof window === "undefined") {
+    if (!activeCompetition?.id) return basePath;
+    return `${basePath}?temporada=${encodeURIComponent(getSeasonId(getSeasonValue(activeCompetition, league)))}&torneo=${encodeURIComponent(activeCompetition.id)}`;
+  }
+  const url = new URL(basePath, window.location.origin);
+  if (activeCompetition?.id) {
+    url.searchParams.set("temporada", getSeasonId(getSeasonValue(activeCompetition, league)));
+    url.searchParams.set("torneo", activeCompetition.id);
+  }
+  return url.toString();
 }
 
 async function shareStandingsCard({ league, competition, standings }) {
   const title = `Tabla de posiciones | ${league.name}`;
-  const url = getLeaguePublicUrl(league);
+  const url = getLeaguePublicUrl(league, competition);
   await shareGeneratedCard({
     fileName: "tabla-posiciones.png",
     imageBuilder: () => createStandingsShareImage({ league, competition, standings }),
     title,
-    text: url,
+    text: `${title}\nConsulta la tabla completa de ${league.name}:`,
     url
   });
 }
 
 async function shareRoundCard({ league, selectedRound, matches }) {
   const title = `Jornada ${selectedRound || ""} | ${league.name}`;
-  const url = getLeaguePublicUrl(league);
+  const url = getLeaguePublicUrl(league, getCompetition(league, league.currentCompetitionId));
   await shareGeneratedCard({
     fileName: `jornada-${selectedRound || "partidos"}.png`,
     imageBuilder: () => createRoundShareImage({ league, selectedRound, matches }),
     title,
-    text: url,
+    text: `${title}\nConsulta calendario, resultados y tabla de la liga:`,
     url
   });
 }
 
 async function shareScorersCard({ league, competition, scorers }) {
-  const url = getLeaguePublicUrl(league);
+  const url = getLeaguePublicUrl(league, competition);
   await shareGeneratedCard({
     fileName: "tabla-goleo.png",
     imageBuilder: () => createScorersShareImage({ league, competition, scorers: scorers.slice(0, 10) }),
     title: `Tabla de goleo | ${league.name}`,
-    text: url,
+    text: `Tabla de goleo | ${league.name}\nConsulta estadisticas completas de la liga:`,
     url
   });
 }
 
 async function shareSuspensionsCard({ league, competition, notices }) {
-  const url = getLeaguePublicUrl(league);
+  const url = getLeaguePublicUrl(league, competition);
   await shareGeneratedCard({
     fileName: "expulsados-regresos.png",
     imageBuilder: () => createSuspensionsShareImage({ league, competition, notices }),
     title: `Expulsados y regresos | ${league.name}`,
-    text: url,
+    text: `Expulsados y regresos | ${league.name}\nConsulta disciplina y resultados de la liga:`,
     url
   });
 }
 
 async function shareYellowCardsCard({ league, competition, rows }) {
-  const url = getLeaguePublicUrl(league);
+  const url = getLeaguePublicUrl(league, competition);
   await shareGeneratedCards({
     fileBaseName: "tarjetas-amarillas",
     imageBuilders: createYellowCardsShareImages({ league, competition, rows }),
     title: `Tarjetas amarillas | ${league.name}`,
-    text: url,
+    text: `Tarjetas amarillas | ${league.name}\nConsulta disciplina y resultados de la liga:`,
     url
   });
 }
 
 async function shareFeaturedMatchCard({ league, match }) {
-  const url = getLeaguePublicUrl(league);
+  const url = getLeaguePublicUrl(league, getCompetition(league, match?.competitionId || league.currentCompetitionId));
   await shareGeneratedCard({
     fileName: "partido-destacado.png",
     imageBuilder: () => createFeaturedMatchShareImage({ league, match }),
     title: `Partido destacado | ${league.name}`,
-    text: url,
+    text: `Partido destacado | ${league.name}\nConsulta la informacion completa de la liga:`,
     url
   });
 }
@@ -1108,10 +1145,12 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
   });
   const shareData = {
     files,
-    ...(title ? { title } : {})
+    ...(title ? { title } : {}),
+    ...(text ? { text } : {}),
+    ...(url ? { url } : {})
   };
 
-  if (canShareGeneratedFile({ files })) {
+  if (canShareGeneratedFile(shareData)) {
     try {
       await navigator.share(shareData);
       return;
@@ -1121,7 +1160,11 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
   }
 
   if (blobs.length === 1 && await copyImageBlobToClipboard(blobs[0])) {
-    window.alert("Imagen copiada. Abre WhatsApp y pegala en el chat para enviarla como imagen.");
+    const shareText = [text, url].filter(Boolean).join("\n");
+    window.alert(shareText
+      ? `Imagen copiada. Pega la imagen en WhatsApp y agrega este link en el texto:\n\n${url || shareText}`
+      : "Imagen copiada. Abre WhatsApp y pegala en el chat para enviarla como imagen."
+    );
     return;
   }
 
@@ -1132,8 +1175,8 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
     downloadBlob(blob, resolvedName);
   });
   window.alert(blobs.length === 1
-    ? "Tu navegador no permite adjuntar la imagen directamente. Se descargo el PNG para que puedas enviarlo por WhatsApp como imagen."
-    : `Tu navegador no permite adjuntar varias imagenes directamente. Se descargaron ${blobs.length} PNG para enviarlos por WhatsApp.`
+    ? `Tu navegador no permite adjuntar la imagen directamente. Se descargo el PNG para enviarlo como imagen.\n\nLink para compartir:\n${url || ""}`
+    : `Tu navegador no permite adjuntar varias imagenes directamente. Se descargaron ${blobs.length} PNG para enviarlos por WhatsApp.\n\nLink para compartir:\n${url || ""}`
   );
 }
 
@@ -1229,21 +1272,20 @@ async function createStandingsShareImage({ league, competition, standings }) {
   }
 
   insights.forEach(([label, teamName, value], index) => {
-    const cardWidth = 300;
-    const x = 60 + index * 330;
-    drawRoundedRect(context, x, 196, cardWidth, 104, 18, "rgba(4, 33, 28, 0.92)");
+    const cardWidth = 304;
+    const cardHeight = 116;
+    const x = 60 + index * 328;
+    drawRoundedRect(context, x, 190, cardWidth, cardHeight, 18, "rgba(4, 33, 28, 0.94)");
     context.strokeStyle = "rgba(43, 255, 135, 0.34)";
     context.lineWidth = 2;
     context.stroke();
-    drawRoundedRect(context, x, 196, 7, 104, 4, "#8cff45");
+    drawRoundedRect(context, x, 190, 7, cardHeight, 4, "#8cff45");
     context.fillStyle = label === "LIDER" ? "#8cff45" : "#f8fffb";
-    context.font = "900 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(label, x + 28, 216);
+    drawCanvasFittedText(context, label, x + 28, 214, cardWidth - 56, 18, 15, 950);
     context.fillStyle = "#ffffff";
-    drawCanvasFittedText(context, teamName.toLocaleUpperCase("es-MX"), x + 28, 244, 208, 22, 16, 900);
+    drawCanvasFittedText(context, teamName.toLocaleUpperCase("es-MX"), x + 28, 246, cardWidth - 56, 24, 17, 950);
     context.fillStyle = "#7be34d";
-    context.font = "950 31px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    context.fillText(value, x + 28, 270);
+    drawCanvasFittedText(context, value, x + 28, 282, cardWidth - 56, 34, 24, 1000);
   });
 
   const boardY = 338;
@@ -1633,13 +1675,10 @@ function drawShareFooter(context, width, height, league) {
   context.fillStyle = "#718078";
   context.font = "850 21px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   const footer = `${league.name} | ${league.city || ""}`.toLocaleUpperCase("es-MX");
-  context.fillText(footer, 60, height - 58);
-  const publicUrl = getLeaguePublicUrl(league);
-  if (publicUrl) {
-    context.fillStyle = "#21d99a";
-    context.font = "800 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    drawCanvasText(context, publicUrl, 60, height - 30, width - 120, 22, 1);
-  }
+  drawCanvasFittedText(context, footer, 60, height - 52, width - 420, 21, 15, 900);
+  context.fillStyle = "#0f6b4f";
+  context.font = "900 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.fillText("LIGATEC · PLATAFORMA DEPORTIVA", width - 390, height - 52);
 }
 
 function drawTeamBubble(context, team, x, y, size) {
@@ -1807,7 +1846,7 @@ function drawCanvasFittedText(context, text, x, y, maxWidth, startSize, minSize,
 }
 
 function getFeaturedPublicMatch(league, standings) {
-  const scheduled = sortPublicMatchesByRound(league.matches.filter((match) => match.status === "scheduled"));
+  const scheduled = sortPublicMatchesByRound(league.matches.filter(isPublicScheduledMatch));
   if (scheduled.length) {
     const targetRound = getNextScheduledRound(scheduled);
     const roundMatches = scheduled.filter((match) => Number(match.round || 0) === targetRound);
@@ -2126,7 +2165,7 @@ function ShareActionButton({ className = "", label, onClick }) {
 
 function PublicHomeDashboard({ league, latestResults, nextMatches, standings, currentRound, stats }) {
   const finishedCount = finishedMatches(league).length;
-  const programmedCount = league.matches.filter((match) => match.status === "scheduled").length;
+  const programmedCount = league.matches.filter(isPublicScheduledMatch).length;
   const leader = standings[0];
   const topScorer = [...stats].sort((a, b) => b.goals - a.goals || a.player.name.localeCompare(b.player.name))[0];
   const quickLinks = [
@@ -2216,11 +2255,11 @@ function MiniMatchRow({ league, match }) {
 }
 
 function PublicPulseBar({ league, roundMatches, standings }) {
-  const scheduledMatches = sortPublicMatches(league.matches.filter((match) => match.status === "scheduled"));
+  const scheduledMatches = sortPublicMatches(league.matches.filter(isPublicScheduledMatch));
   const nextMatch = scheduledMatches[0] || null;
   const todayValue = getLocalDateValue(new Date());
   const todayMatches = scheduledMatches.filter((match) => match.date === todayValue);
-  const roundPending = roundMatches.filter((match) => match.status === "scheduled").length;
+  const roundPending = roundMatches.filter(isPublicScheduledMatch).length;
   const roundFinished = roundMatches.filter((match) => match.status === "finished" || match.status === "walkover").length;
   const leader = standings[0];
 
@@ -2286,7 +2325,7 @@ function TeamProfile({ league, activeLeague, standings, stats, onSelectPlayer, s
   const teamMatches = activeLeague.matches
     .filter((match) => match.homeTeamId === selectedTeam.id || match.awayTeamId === selectedTeam.id)
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || Number(b.round || 0) - Number(a.round || 0));
-  const nextMatch = [...teamMatches].reverse().find((match) => match.status === "scheduled");
+  const nextMatch = [...teamMatches].reverse().find(isPublicScheduledMatch);
   const lastMatch = teamMatches.find((match) => match.status === "finished" || match.status === "walkover");
   const staff = [
     selectedTeam.coach ? { name: selectedTeam.coach, role: "Entrenador" } : null,
@@ -2458,7 +2497,7 @@ function PlayerPublicCard({ league, seasonLeague = league, player, stats, onSele
   const teamMatches = league.matches
     .filter((match) => match.homeTeamId === (activePlayerTeam?.id || player.teamId) || match.awayTeamId === (activePlayerTeam?.id || player.teamId))
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.time).localeCompare(String(a.time)));
-  const nextMatch = [...teamMatches].reverse().find((match) => match.status === "scheduled");
+  const nextMatch = [...teamMatches].reverse().find(isPublicScheduledMatch);
   const lastMatch = teamMatches.find((match) => match.status === "finished" || match.status === "walkover");
   const recentMatches = teamMatches.filter((match) => match.status === "finished" || match.status === "walkover").slice(0, 3);
   const playerEvents = getPlayerEvents(league, player.id);
@@ -3024,12 +3063,36 @@ function TournamentBottomSheet({ children, onClose, subtitle, title }) {
 
 function PlayoffList({ league, matches }) {
   if (!matches.length) return <p className="empty">Aun no hay partidos de liguilla programados en este torneo.</p>;
+  const sortedMatches = [...matches].sort((a, b) => (
+    String(a.playoffRound || "").localeCompare(String(b.playoffRound || "")) ||
+    String(a.playoffLeg || "").localeCompare(String(b.playoffLeg || "")) ||
+    String(a.date || "").localeCompare(String(b.date || "")) ||
+    String(a.time || "").localeCompare(String(b.time || ""))
+  ));
+  const groups = sortedMatches.reduce((items, match) => {
+    const label = [match.playoffRound || "Liguilla", match.playoffLeg].filter(Boolean).join(" | ");
+    const last = items[items.length - 1];
+    if (last?.label === label) {
+      last.matches.push(match);
+    } else {
+      items.push({ label, matches: [match] });
+    }
+    return items;
+  }, []);
 
   return (
     <div className="playoff-list">
-      {matches
-        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)))
-        .map((match) => <PlayoffCard key={match.id} league={league} match={match} />)}
+      {groups.map((group) => (
+        <section className="playoff-phase-group" key={group.label}>
+          <div className="round-summary playoff-round-summary">
+            <strong>{group.label}</strong>
+            <span>{group.matches.length} partido(s)</span>
+          </div>
+          <div className="match-list">
+            {group.matches.map((match) => <MatchCard key={match.id} league={league} match={match} />)}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -3041,35 +3104,12 @@ function hasMatchScoreValue(value) {
 function getMatchTiebreakerRows(match) {
   const rows = [];
   if (hasMatchScoreValue(match.extraTimeHomeGoals) && hasMatchScoreValue(match.extraTimeAwayGoals)) {
-    rows.push({ label: "T.E.", value: `${match.extraTimeHomeGoals} - ${match.extraTimeAwayGoals}` });
+    rows.push({ label: "Tiempo extra", value: `${match.extraTimeHomeGoals} - ${match.extraTimeAwayGoals}` });
   }
   if (hasMatchScoreValue(match.penaltyHomeGoals) && hasMatchScoreValue(match.penaltyAwayGoals)) {
     rows.push({ label: "Penales", value: `${match.penaltyHomeGoals} - ${match.penaltyAwayGoals}` });
   }
   return rows;
-}
-
-function PlayoffCard({ league, match }) {
-  const home = getTeam(league, match.homeTeamId);
-  const away = getTeam(league, match.awayTeamId);
-  const result = match.status === "finished" || match.status === "walkover" ? `${match.homeGoals} - ${match.awayGoals}` : match.time || "Por definir";
-  const hasAggregate = match.aggregateHome !== null && match.aggregateHome !== undefined && match.aggregateAway !== null && match.aggregateAway !== undefined;
-  const tiebreakerRows = getMatchTiebreakerRows(match);
-
-  return (
-    <article className="playoff-card">
-      <div>
-        <span>{match.playoffRound || "Liguilla"}{match.playoffLeg ? ` | ${match.playoffLeg}` : ""}</span>
-        <strong>{home?.name || "Local"} vs {away?.name || "Visitante"}</strong>
-        <small>{formatDate(match.date)} | {match.venue || "Cancha por definir"}</small>
-      </div>
-      <div className="playoff-score">
-        <strong>{result}</strong>
-        {hasAggregate && <span>Global {match.aggregateHome} - {match.aggregateAway}</span>}
-        {tiebreakerRows.map((row) => <span key={row.label}>{row.label} {row.value}</span>)}
-      </div>
-    </article>
-  );
 }
 
 function RoundSelector({ rounds, selectedRound, onSelectRound }) {
@@ -3265,6 +3305,9 @@ function StandingsInsights({ rows }) {
 function getMatchStatusLabel(match) {
   const labels = {
     scheduled: "Programado",
+    rescheduled: "Reprogramado",
+    advanced: "Adelantado",
+    postponed: "Pospuesto",
     live: "En juego",
     in_progress: "En juego",
     finished: "Finalizado",
@@ -3273,6 +3316,10 @@ function getMatchStatusLabel(match) {
   };
   if (match.status === "finished" && !(match.events || []).length) return "Pendiente de acta";
   return labels[match.status] || "Programado";
+}
+
+function isPublicScheduledMatch(match) {
+  return ["scheduled", "rescheduled", "advanced"].includes(match?.status || "scheduled");
 }
 
 function getMatchDateParts(value) {
@@ -3289,8 +3336,10 @@ function getMatchDateParts(value) {
 
 function MatchCard({ league, match }) {
   const isFinished = match.status === "finished" || match.status === "walkover";
+  const isPostponed = match.status === "postponed";
+  const isScheduleChanged = ["postponed", "rescheduled", "advanced"].includes(match.status || "");
   const timeLabel = match.time ? `${match.time} hrs` : "Hora por definir";
-  const timeOrScore = isFinished ? `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}` : "VS";
+  const timeOrScore = isFinished ? `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}` : isPostponed ? "POSP." : "VS";
   const dateParts = getMatchDateParts(match.date);
   const competition = getCompetition(league, match.competitionId);
   const homeTeam = getTeam(league, match.homeTeamId);
@@ -3302,7 +3351,7 @@ function MatchCard({ league, match }) {
   const matchContext = [match.playoffLeg, hasAggregate ? `Global ${match.aggregateHome}-${match.aggregateAway}` : ""].filter(Boolean);
 
   return (
-    <details className={`match-card ${isFinished ? "is-finished" : "is-scheduled"}`}>
+    <details className={`match-card ${isFinished ? "is-finished" : "is-scheduled"} ${isScheduleChanged ? "has-schedule-note" : ""} ${match.status ? `status-${match.status}` : ""}`}>
       <summary>
         <div className="match-card-date" aria-label={match.date ? formatDate(match.date) : "Fecha por definir"}>
           <MatchMetaIcon type="calendar" />
@@ -3322,7 +3371,7 @@ function MatchCard({ league, match }) {
             </div>
             <div className="match-card-center">
               <strong>{timeOrScore}</strong>
-              <small>{statusLabel}</small>
+              {!isScheduleChanged && <small>{statusLabel}</small>}
               {isFinished && tiebreakerRows.length > 0 && (
                 <small>{tiebreakerRows.map((row) => `${row.label} ${row.value}`).join(" | ")}</small>
               )}
@@ -3342,19 +3391,28 @@ function MatchCard({ league, match }) {
           ) : (
             <>
               <MatchMetaIcon type="time" />
-              <strong>Programado</strong>
+              <strong>{isScheduleChanged ? "Aviso" : statusLabel}</strong>
             </>
           )}
           <span>{isPlayoff ? match.playoffRound || "Liguilla" : `J${match.round || "-"}`}</span>
         </div>
-        <div className="match-card-mobile-meta">
-          <span className={`status ${match.status}`}>{statusLabel}</span>
-          {isFinished ? (
-            <span className="match-touch-hint"><MatchMetaIcon type="ball" />Ver goles</span>
-          ) : (
-            <span><MatchMetaIcon type="time" />{statusLabel}</span>
-          )}
-        </div>
+        {!isScheduleChanged && (
+          <div className="match-card-mobile-meta">
+            <span className={`status ${match.status}`}>{statusLabel}</span>
+            {isFinished ? (
+              <span className="match-touch-hint"><MatchMetaIcon type="ball" />Ver goles</span>
+            ) : (
+              <span><MatchMetaIcon type="time" />{statusLabel}</span>
+            )}
+          </div>
+        )}
+        {isScheduleChanged && (
+          <p className="match-schedule-note">
+            <MatchMetaIcon type="time" />
+            <span>{statusLabel}</span>
+            {match.scheduleNote || (match.status === "postponed" ? "Pendiente de nueva fecha." : match.status === "advanced" ? "Partido adelantado por la liga." : "Partido reprogramado por la liga.")}
+          </p>
+        )}
       </summary>
       <div className="match-details">
         <div className="match-expanded-head">
@@ -3505,6 +3563,21 @@ function isSecondHalfMinute(event) {
   return !/^45\s*\+/.test(label) && minute !== null && minute > 45;
 }
 
+function isExtraTimeEvent(event) {
+  if (String(event.period || "") === "extra_time") return true;
+  const minute = parseEventMinute(event);
+  return minute !== null && minute > 90;
+}
+
+function getEventPhase(event) {
+  return isExtraTimeEvent(event) ? "extra_time" : "regular";
+}
+
+function getEventPhaseLabel(phase) {
+  if (phase === "extra_time") return "Tiempo extra";
+  return "Tiempo regular";
+}
+
 function sortMatchEvents(events) {
   const indexedEvents = events
     .filter((event) => ["goal", "own_goal", "yellow", "red"].includes(event.type))
@@ -3531,11 +3604,23 @@ function MatchEventTimeline({ league, match, events, homeTeam, awayTeam }) {
   const hasFirstHalf = events.some((event) => hasEventMinute(event) && isFirstHalfMinute(event));
   const hasSecondHalf = events.some((event) => hasEventMinute(event) && isSecondHalfMinute(event));
   const showHalfTime = hasFirstHalf && hasSecondHalf;
+  const showEventPhases = events.some((event) => getEventPhase(event) === "extra_time");
   const rows = [];
   let halfTimeInserted = false;
+  let activePhase = "";
 
   for (const [index, event] of events.entries()) {
-    if (showHalfTime && !halfTimeInserted && hasEventMinute(event) && isSecondHalfMinute(event)) {
+    const eventPhase = getEventPhase(event);
+    if (showEventPhases && eventPhase !== activePhase) {
+      activePhase = eventPhase;
+      rows.push(
+        <div className={`match-timeline-half phase-${eventPhase}`} key={`phase-${eventPhase}`}>
+          <span aria-hidden="true">{eventPhase === "extra_time" ? "+" : "◷"}</span>
+          <strong>{getEventPhaseLabel(eventPhase)}</strong>
+        </div>
+      );
+    }
+    if (eventPhase === "regular" && showHalfTime && !halfTimeInserted && hasEventMinute(event) && isSecondHalfMinute(event)) {
       halfTimeInserted = true;
       rows.push(
         <div className="match-timeline-half" key="half-time">

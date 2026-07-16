@@ -441,7 +441,7 @@ export async function initializeData() {
     await initializePostgresDatabase();
     return;
   }
-  initializeDatabase();
+  await initializeDatabase();
 }
 
 export async function getStoreData() {
@@ -1493,6 +1493,35 @@ export async function getLatestMatchReportForMatchData(matchId) {
   `).get(matchId));
 }
 
+export async function updateMatchReportPayloadData({ reportId, payload = {}, homeGoals = null, awayGoals = null }) {
+  const now = new Date().toISOString();
+  const payloadJson = JSON.stringify(payload || {});
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE match_reports
+      SET payload_json = $1::jsonb,
+          home_goals = COALESCE($2, home_goals),
+          away_goals = COALESCE($3, away_goals),
+          updated_at = $4,
+          version = version + 1
+      WHERE id = $5
+    `, [payloadJson, homeGoals, awayGoals, now, reportId]);
+    const rows = await pgQuery("SELECT * FROM match_reports WHERE id = $1", [reportId]);
+    return normalizeMatchReportRow(rows[0]);
+  }
+
+  db.prepare(`
+    UPDATE match_reports
+    SET payload_json = ?,
+        home_goals = COALESCE(?, home_goals),
+        away_goals = COALESCE(?, away_goals),
+        updated_at = ?,
+        version = version + 1
+    WHERE id = ?
+  `).run(payloadJson, homeGoals, awayGoals, now, reportId);
+  return normalizeMatchReportRow(db.prepare("SELECT * FROM match_reports WHERE id = ?").get(reportId));
+}
+
 export async function listMatchReportSignaturesData(reportId) {
   if (!reportId) return [];
   if (isPostgres()) {
@@ -1708,16 +1737,17 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
     for (const event of events) {
       await pgQuery(`
         INSERT INTO match_events (
-          match_id, type, player_id, team_id, minute, minute_label,
+          match_id, type, player_id, team_id, period, minute, minute_label,
           suspension_matches, suspension_indefinite, disciplinary_pending, reason,
           is_official, sync_status, version
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, 'synced', 1)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, 'synced', 1)
       `, [
         match.id,
         event.type,
         event.playerId || null,
         event.teamId || null,
+        event.period || "",
         event.minute ?? null,
         event.minuteLabel || "",
         event.suspensionMatches ?? null,
@@ -1778,16 +1808,17 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
     for (const event of events) {
       db.prepare(`
         INSERT INTO match_events (
-          match_id, type, player_id, team_id, minute, minute_label,
+          match_id, type, player_id, team_id, period, minute, minute_label,
           suspension_matches, suspension_indefinite, disciplinary_pending, reason,
           is_official, sync_status, version
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced', 1)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced', 1)
       `).run(
         match.id,
         event.type,
         event.playerId || null,
         event.teamId || null,
+        event.period || "",
         event.minute ?? null,
         event.minuteLabel || "",
         event.suspensionMatches ?? null,

@@ -3,7 +3,6 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { seedData } from "../src/data/seedData.js";
 import { defaultCompetitionForLeague, normalizeStore } from "../src/lib/domain.js";
 import { hashPassword } from "./password.js";
 import { ROOT_DIR } from "./env.js";
@@ -20,11 +19,16 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 export const db = new Database(DB_PATH);
 db.pragma("foreign_keys = ON");
 
-export function initializeDatabase() {
+async function loadDemoSeedStore() {
+  const { seedData } = await import("../src/data/seedData.js");
+  return normalizeStore(seedData);
+}
+
+export async function initializeDatabase() {
   db.exec(fs.readFileSync(SCHEMA_PATH, "utf8"));
   runMigrations();
   const count = db.prepare("SELECT COUNT(*) AS total FROM leagues").get().total;
-  if (count === 0 && runtimeConfig.seedDemoData) importStore(normalizeStore(seedData));
+  if (count === 0 && runtimeConfig.seedDemoData) importStore(await loadDemoSeedStore());
   seedUsers();
 }
 
@@ -52,6 +56,9 @@ function runMigrations() {
   }
   if (!leagueColumns.includes("current_competition_id")) {
     db.prepare("ALTER TABLE leagues ADD COLUMN current_competition_id TEXT").run();
+  }
+  if (!leagueColumns.includes("public_visibility")) {
+    db.prepare("ALTER TABLE leagues ADD COLUMN public_visibility TEXT NOT NULL DEFAULT 'visible'").run();
   }
 
   const ruleColumns = db.prepare("PRAGMA table_info(league_rules)").all().map((column) => column.name);
@@ -871,6 +878,7 @@ export function getStore() {
       currentCompetitionId: leagueRow.current_competition_id,
       competitions,
       status: leagueRow.status,
+      publicVisibility: leagueRow.public_visibility || "visible",
       plan: leagueRow.plan,
       ownerEmail: leagueRow.owner_email,
       renewalDate: leagueRow.renewal_date,
@@ -914,7 +922,7 @@ export function getStore() {
   });
 
   return normalizeStore({
-    currentLeagueId: leagues[0]?.id || seedData.currentLeagueId,
+    currentLeagueId: leagues[0]?.id || "",
     leagues
   });
 }
@@ -986,8 +994,8 @@ export function importStore(store) {
 
     for (const league of normalized.leagues) {
       db.prepare(`
-        INSERT INTO leagues (id, name, city, season, current_competition_id, status, plan, owner_email, renewal_date, ad_banner, membership_notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO leagues (id, name, city, season, current_competition_id, status, public_visibility, plan, owner_email, renewal_date, ad_banner, membership_notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         league.id,
         league.name,
@@ -995,6 +1003,7 @@ export function importStore(store) {
         league.season,
         league.currentCompetitionId,
         league.status,
+        league.publicVisibility || "visible",
         league.plan,
         league.ownerEmail,
         league.renewalDate,

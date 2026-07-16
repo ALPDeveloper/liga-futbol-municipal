@@ -65,6 +65,7 @@ IMAGE_UPLOAD_MAX_BYTES=1800000
 SUPABASE_STORAGE_BUCKET=ligatec-images
 SHOW_RECOVERY_CODE_IN_RESPONSE=false
 SEED_DEMO_USERS=false
+SEED_DEMO_DATA=false
 VITE_API_BASE_URL=/api
 PUBLIC_CACHE_SECONDS=5
 BACKUP_STORAGE_BUCKET=ligatec-backups
@@ -83,7 +84,7 @@ npm ci --include=dev && npm run build
 Start command:
 
 ```bash
-npm start
+npm run start:api
 ```
 
 Health check:

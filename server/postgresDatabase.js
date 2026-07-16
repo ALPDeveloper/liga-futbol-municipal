@@ -1,6 +1,5 @@
 import "./env.js";
 import { Pool } from "pg";
-import { seedData } from "../src/data/seedData.js";
 import { defaultCompetitionForLeague, normalizeStore } from "../src/lib/domain.js";
 import { hashPassword } from "./password.js";
 import { runtimeConfig } from "./runtimeConfig.js";
@@ -19,6 +18,11 @@ function requirePool() {
     throw new Error("DATABASE_URL es requerido para usar Postgres/Supabase.");
   }
   return postgresPool;
+}
+
+async function loadDemoSeedStore() {
+  const { seedData } = await import("../src/data/seedData.js");
+  return normalizeStore(seedData);
 }
 
 function toDateValue(value) {
@@ -56,7 +60,7 @@ export async function initializePostgresDatabase() {
   `);
   await runPostgresMigrations(pool);
   const result = await pool.query("SELECT COUNT(*)::int AS total FROM leagues");
-  if (result.rows[0].total === 0 && runtimeConfig.seedDemoData) await importPostgresStore(normalizeStore(seedData));
+  if (result.rows[0].total === 0 && runtimeConfig.seedDemoData) await importPostgresStore(await loadDemoSeedStore());
   await seedPostgresUsers();
 }
 
@@ -80,6 +84,7 @@ async function runPostgresMigrations(pool) {
     )
   `);
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE IF EXISTS leagues ADD COLUMN IF NOT EXISTS public_visibility TEXT NOT NULL DEFAULT 'visible'");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS assistant_coach TEXT");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS address TEXT");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS logo_url TEXT");
@@ -798,6 +803,7 @@ export async function getPostgresStore() {
       currentCompetitionId: leagueRow.current_competition_id,
       competitions,
       status: leagueRow.status,
+      publicVisibility: leagueRow.public_visibility || "visible",
       plan: leagueRow.plan,
       ownerEmail: leagueRow.owner_email,
       renewalDate: rowDate(leagueRow, "renewal_date"),
@@ -841,7 +847,7 @@ export async function getPostgresStore() {
   }));
 
   return normalizeStore({
-    currentLeagueId: currentLeagueSetting || leagues[0]?.id || seedData.currentLeagueId,
+    currentLeagueId: currentLeagueSetting || leagues[0]?.id || "",
     leagues
   });
 }
@@ -968,8 +974,8 @@ export async function importPostgresStore(store) {
 
     for (const league of normalized.leagues) {
       await query(client, `
-        INSERT INTO leagues (id, name, city, season, current_competition_id, status, plan, owner_email, renewal_date, ad_banner, membership_notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::date, $10, $11)
+        INSERT INTO leagues (id, name, city, season, current_competition_id, status, public_visibility, plan, owner_email, renewal_date, ad_banner, membership_notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, '')::date, $11, $12)
       `, [
         league.id,
         league.name,
@@ -977,6 +983,7 @@ export async function importPostgresStore(store) {
         league.season,
         league.currentCompetitionId,
         league.status,
+        league.publicVisibility || "visible",
         league.plan,
         league.ownerEmail,
         league.renewalDate || "",

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS leagues (
   season TEXT NOT NULL,
   current_competition_id TEXT,
   status TEXT NOT NULL DEFAULT 'active',
+  public_visibility TEXT NOT NULL DEFAULT 'visible',
   plan TEXT,
   owner_email TEXT,
   renewal_date TEXT,

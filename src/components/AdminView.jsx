@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_IDENTITY } from "../data/seedData.js";
+import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
 import { createBackup, downloadBackup, fetchBackups, verifyBackup } from "../lib/backupApi.js";
 import { MAX_IMAGE_DATA_URL_LENGTH, calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, scopeLeagueToCompetition } from "../lib/domain.js";
@@ -11,6 +11,7 @@ import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamD
 import { createReferee, deleteReferee, fetchFinalizedMatchReports, fetchReferees, fetchRefereeMatchSheets, publishFinalizedMatchReport, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
 import { updateMatchSheetEventItem } from "../lib/matchSheet.js";
+import alpLogo from "../../assets/alp-logo.png";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 
 const PLAYOFF_PHASE_OPTIONS = [
@@ -25,6 +26,63 @@ const PLAYER_POSITION_OPTIONS = ["Arquero", "Defensor", "Mediocampista", "Delant
 const ALLOWED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const IMAGE_UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp";
 const MAX_UPLOAD_SIZE_MB = Math.round((MAX_IMAGE_DATA_URL_LENGTH / 1024 / 1024) * 10) / 10;
+const ADMIN_MATCH_REPORT_STATUSES = "finalized,pending_captain_review,correction_requested,both_signed";
+const ADMIN_SHEET_STEPS = [
+  { id: "match", number: 1, label: "Partido", hint: "Seleccionar" },
+  { id: "score", number: 2, label: "Marcador", hint: "Resultado" },
+  { id: "events", number: 3, label: "Eventos", hint: "Registro" },
+  { id: "notes", number: 4, label: "Obs.", hint: "Acta" },
+  { id: "finish", number: 5, label: "Finalizar", hint: "Publicar" }
+];
+
+function needsAdminMatchReportAttention(report) {
+  return report?.status === "finalized" || report?.payload?.signatureIssue?.status === "pending_admin_attention";
+}
+
+function AdminIcon({ type = "home" }) {
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true"
+  };
+  const paths = {
+    home: <><path d="M3 11.5 12 4l9 7.5" /><path d="M5 10.5V20h5v-5h4v5h5v-9.5" /></>,
+    platform: <><path d="M4 5h16v10H4z" /><path d="M8 19h8" /><path d="M12 15v4" /><path d="M8 9h.01" /><path d="M12 9h.01" /><path d="M16 9h.01" /></>,
+    leagues: <><path d="M4 6h16" /><path d="M6 6v14" /><path d="M18 6v14" /><path d="M9 10h6" /><path d="M9 14h6" /><path d="M4 20h16" /></>,
+    operation: <><path d="M4 7h16" /><path d="M4 12h10" /><path d="M4 17h7" /><path d="m16 15 2 2 4-5" /></>,
+    users: <><circle cx="8" cy="8" r="3" /><path d="M2.5 20a5.5 5.5 0 0 1 11 0" /><circle cx="17" cy="9" r="2.5" /><path d="M15 15.5a5 5 0 0 1 6.5 4.5" /></>,
+    teams: <><path d="M4 8h16v10H4z" /><path d="M8 8V5h8v3" /><path d="M9 13h6" /></>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4" /><path d="M8 3v4" /><path d="M3 11h18" /></>,
+    commission: <><path d="M12 3 2.5 20h19z" /><path d="M12 9v4" /><path d="M12 17h.01" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2.1 2.1 0 1 1-2.98 2.98l-.04-.04A1.8 1.8 0 0 0 15 19.4a1.8 1.8 0 0 0-1 .6 1.8 1.8 0 0 0-.5 1.3V21a2.1 2.1 0 1 1-4.2 0v-.06A1.8 1.8 0 0 0 8 19.4a1.8 1.8 0 0 0-1.78.56l-.04.04A2.1 2.1 0 1 1 3.2 17l.04-.04A1.8 1.8 0 0 0 3.6 15a1.8 1.8 0 0 0-1.6-1H2a2.1 2.1 0 1 1 0-4.2h.06A1.8 1.8 0 0 0 3.6 8a1.8 1.8 0 0 0-.36-1.98L3.2 6A2.1 2.1 0 1 1 6.18 3.02l.04.04A1.8 1.8 0 0 0 8 3.6 1.8 1.8 0 0 0 9.3 2H9.3a2.1 2.1 0 1 1 4.2 0v.06A1.8 1.8 0 0 0 15 3.6a1.8 1.8 0 0 0 1.78-.56l.04-.04A2.1 2.1 0 1 1 19.8 6l-.04.04A1.8 1.8 0 0 0 19.4 8c.28.6.86 1 1.6 1h.01a2.1 2.1 0 1 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15Z" /></>,
+    announcements: <><path d="M4 13h3l9 5V6L7 11H4z" /><path d="M18 9a4 4 0 0 1 0 6" /></>,
+    capture: <><circle cx="12" cy="12" r="7" /><path d="M12 8v8" /><path d="M8 12h8" /></>,
+    matches: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4" /><path d="M16 3v4" /><path d="M4 10h16" /><path d="m8 15 2 2 5-5" /></>,
+    sheet: <><path d="M7 3h8l4 4v14H7z" /><path d="M15 3v5h5" /><path d="m9 15 2 2 5-6" /></>,
+    delegates: <><circle cx="12" cy="7" r="3" /><path d="M5 21a7 7 0 0 1 14 0" /><path d="M9 14h6" /></>,
+    referees: <><path d="M6 4v16" /><path d="M6 5h11l-2 4 2 4H6" /></>,
+    squads: <><circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" /><path d="M3 20a5 5 0 0 1 10 0" /><path d="M11 20a5 5 0 0 1 10 0" /></>,
+    affiliations: <><path d="M7 7h10" /><path d="m14 4 3 3-3 3" /><path d="M17 17H7" /><path d="m10 14-3 3 3 3" /></>,
+    venues: <><path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z" /><circle cx="12" cy="9" r="2.5" /></>,
+    tournaments: <><path d="M8 21h8" /><path d="M12 17v4" /><path d="M7 4h10v4a5 5 0 0 1-10 0z" /><path d="M7 6H4a3 3 0 0 0 3 3" /><path d="M17 6h3a3 3 0 0 1-3 3" /><path d="M9 12h6" /></>,
+    advertising: <><path d="M4 7h12l4 5-4 5H4z" /><path d="M8 10h5" /><path d="M8 14h7" /></>,
+    audit: <><path d="M5 4h14v16H5z" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h2" /><path d="m14 16 1.5 1.5L19 14" /></>,
+    backups: <><path d="M6 5h12v14H6z" /><path d="M9 5V3h6v2" /><path d="M9 11h6" /><path d="M9 15h4" /></>,
+    discipline: <><rect x="5" y="4" width="14" height="16" rx="2" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h3" /></>,
+    sanctions: <><path d="M12 3 3 8v5c0 5 4 8 9 9 5-1 9-4 9-9V8z" /><path d="M12 8v5" /><path d="M12 17h.01" /></>,
+    injuries: <><path d="M12 5v14" /><path d="M5 12h14" /><rect x="4" y="4" width="16" height="16" rx="4" /></>,
+    rules: <><path d="M6 3h9l3 3v15H6z" /><path d="M15 3v4h4" /><path d="M9 12h6" /><path d="M9 16h6" /></>,
+    identity: <><path d="M12 3 4 7v10l8 4 8-4V7z" /><path d="M12 3v18" /><path d="m4 7 8 4 8-4" /><path d="M8 14h3" /><path d="M13 14h3" /></>,
+    player: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    match: <><circle cx="12" cy="12" r="8" /><path d="M12 4v16" /><path d="M4 12h16" /></>,
+    playoffs: <><path d="m12 3 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8-4.2-4.1 5.9-.9z" /></>
+  };
+  return <svg {...common}>{paths[type] || paths.home}</svg>;
+}
 
 function getPlayoffPhaseValueByTeams(teams) {
   return PLAYOFF_PHASE_OPTIONS.find((phase) => phase.teams === Number(teams))?.value || "quarterfinal";
@@ -102,22 +160,40 @@ export function AdminView({
 }) {
   const activeRole = selectedAccess?.role || currentUser?.role;
   return (
-    <main className="page">
-      <section className="admin-shell">
-        <div className="admin-sidebar">
-          <span className="eyebrow">Panel administrativo</span>
-          <h1>Operacion</h1>
-          {currentUser && (
-            <p className="admin-user-note">
-              {activeRole === "super_admin" ? "Control total de plataforma" : `Editando ${league.name}`}
-            </p>
-          )}
-          <button className={adminPanel === "league" ? "active" : ""} onClick={() => onSetAdminPanel("league")}>Admin de liga</button>
-          {canUseSuperAdmin && (
-            <button className={adminPanel === "super" ? "active" : ""} onClick={() => onSetAdminPanel("super")}>Super admin</button>
-          )}
-          <button className={adminPanel === "model" ? "active" : ""} onClick={() => onSetAdminPanel("model")}>Modelo futuro</button>
-        </div>
+    <main className="page admin-console-page">
+      <section className={`admin-shell admin-shell-app ${adminPanel === "super" ? "super-admin-only-shell" : ""}`}>
+        {adminPanel !== "super" && (
+          <div className="admin-sidebar admin-app-switcher">
+            <div className="admin-app-switcher-head">
+              <img alt="LIGATEC" src={ligatecLogo} />
+              <div>
+                <span className="eyebrow">Panel administrativo</span>
+                <h1>Operacion</h1>
+              </div>
+            </div>
+            {currentUser && (
+              <p className="admin-user-note">
+                {activeRole === "super_admin" ? "Control total de plataforma" : `Editando ${league.name}`}
+              </p>
+            )}
+            <div className="admin-app-switcher-nav">
+              <button className={adminPanel === "league" ? "active" : ""} onClick={() => onSetAdminPanel("league")}>
+                <span><AdminIcon type="home" /></span>
+                Admin de liga
+              </button>
+              {canUseSuperAdmin && (
+                <button className={adminPanel === "super" ? "active" : ""} onClick={() => onSetAdminPanel("super")}>
+                  <span>◆</span>
+                  Super admin
+                </button>
+              )}
+              <button className={adminPanel === "model" ? "active" : ""} onClick={() => onSetAdminPanel("model")}>
+                <span>◌</span>
+                Modelo futuro
+              </button>
+            </div>
+          </div>
+        )}
         <div className="admin-content">
           {adminPanel === "league" && (
             <LeagueAdmin
@@ -164,6 +240,7 @@ export function AdminView({
               onUpdatePlayer={onUpdatePlayer}
               onUpdatePlayerInjury={onUpdatePlayerInjury}
               onUpdateTeam={onUpdateTeam}
+              onOpenSuperAdmin={canUseSuperAdmin ? () => onSetAdminPanel("super") : undefined}
               onMergeDuplicatePlayer={onMergeDuplicatePlayer}
               onUpdateTeamAffiliationPlayerNumber={onUpdateTeamAffiliationPlayerNumber}
               onUpdateVenue={onUpdateVenue}
@@ -175,6 +252,7 @@ export function AdminView({
               onAddSponsor={onAddSponsor}
               onDeleteLeague={onDeleteLeague}
               onDeleteSponsor={onDeleteSponsor}
+              onOpenLeagueAdmin={() => onSetAdminPanel("league")}
               onResetDemo={onResetDemo}
               onToggleLeague={onToggleLeague}
               onUpdateLeagueMembership={onUpdateLeagueMembership}
@@ -235,6 +313,7 @@ function LeagueAdmin({
   onUpdatePlayer,
   onUpdatePlayerInjury,
   onUpdateTeam,
+  onOpenSuperAdmin,
   onMergeDuplicatePlayer,
   onUpdateTeamAffiliationPlayerNumber,
   onUpdateVenue,
@@ -244,7 +323,7 @@ function LeagueAdmin({
   const currentCompetitionId = getDefaultCompetitionId(league);
   const currentCompetition = getCompetition(league, currentCompetitionId);
   const currentCompetitionLeague = scopeLeagueToCompetition(league, currentCompetitionId);
-  const [activeSection, setActiveSection] = useState("capture");
+  const [activeSection, setActiveSection] = useState("home");
   const [identityNotice, setIdentityNotice] = useState("");
   const activeRole = selectedAccess?.role || currentUser?.role;
   const accessPermissions = new Set(Array.isArray(selectedAccess?.permissions) ? selectedAccess.permissions : []);
@@ -256,49 +335,118 @@ function LeagueAdmin({
       requiredPermissions.some((permission) => accessPermissions.has(permission)))
   );
   const sections = [
-    { id: "capture", label: "Captura", permissions: ["matches", "teams", "players"] },
-    { id: "tournaments", label: "Torneos", permissions: ["settings"] },
-    { id: "squads", label: "Plantillas", permissions: ["players", "teams", "read_only"] },
-    { id: "delegates", label: "Delegados", permissions: ["delegates"] },
-    { id: "referees", label: "Arbitros", permissions: ["referees"] },
-    { id: "venues", label: "Canchas", permissions: ["settings", "calendar"] },
-    { id: "announcements", label: "Avisos", permissions: ["settings"] },
-    { id: "lists", label: "Listados", permissions: ["matches", "teams", "players", "read_only"] },
-    { id: "sheet", label: "Actas", permissions: ["match_sheets"] },
-    { id: "affiliations", label: "Afiliaciones", permissions: ["players", "teams"] },
-    { id: "discipline", label: "Disciplina", permissions: ["discipline"] },
-    { id: "sanctions", label: "Sanciones", permissions: ["discipline"] },
-    { id: "injuries", label: "Lesiones", permissions: ["players", "discipline"] },
-    { id: "rules", label: "Reglas", permissions: ["settings"] },
-    { id: "identity", label: "Identidad", permissions: ["settings"] }
+    { id: "capture", label: "Captura", shortLabel: "Captura", icon: "capture", group: "Operacion", permissions: ["matches", "teams", "players"], description: "Alta rapida de equipos, jugadores, partidos y calendarios.", metric: `${currentCompetitionLeague.matches.filter((match) => match.status !== "finished" && match.status !== "walkover").length} activos` },
+    { id: "lists", label: "Partidos y datos", shortLabel: "Partidos", icon: "matches", group: "Operacion", permissions: ["matches", "teams", "players", "read_only"], description: "Edita calendario, marcadores, equipos y jugadores existentes.", metric: `${currentCompetitionLeague.matches.length} partidos` },
+    { id: "sheet", label: "Actas", shortLabel: "Actas", icon: "sheet", group: "Operacion", permissions: ["match_sheets"], description: "Captura actas administrativas y publica resultados oficiales.", metric: `${currentCompetitionLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover").length} capturadas` },
+    { id: "delegates", label: "Delegados", shortLabel: "Delegados", icon: "delegates", group: "Usuarios", permissions: ["delegates"], description: "Gestiona accesos de delegados y permisos de plantilla.", metric: "Equipos" },
+    { id: "referees", label: "Arbitros", shortLabel: "Arbitros", icon: "referees", group: "Usuarios", permissions: ["referees"], description: "Crea arbitros, asignaciones y seguimiento de actas digitales.", metric: league.city || "Municipio" },
+    { id: "squads", label: "Plantillas", shortLabel: "Plantillas", icon: "squads", group: "Equipos", permissions: ["players", "teams", "read_only"], description: "Consulta plantillas por equipo en una vista limpia.", metric: `${currentCompetitionLeague.players.length} jugadores` },
+    { id: "affiliations", label: "Afiliaciones", shortLabel: "Afiliaciones", icon: "affiliations", group: "Equipos", permissions: ["players", "teams"], description: "Relaciona equipos, fusiona duplicados y controla afiliados.", metric: `${league.teamAffiliations?.length || 0} activas` },
+    { id: "venues", label: "Canchas", shortLabel: "Canchas", icon: "venues", group: "Calendario", permissions: ["settings", "calendar"], description: "Administra sedes y disponibilidad para programación.", metric: `${league.venues?.length || 0} canchas` },
+    { id: "tournaments", label: "Torneos", shortLabel: "Torneos", icon: "tournaments", group: "Configuracion", permissions: ["settings"], description: "Controla categorias, temporadas e historicos.", metric: `${league.competitions?.length || 0} torneos` },
+    { id: "announcements", label: "Avisos", shortLabel: "Avisos", icon: "announcements", group: "Comunicacion", permissions: ["settings"], description: "Publica comunicados visibles para usuarios y publico.", metric: `${league.announcements?.length || 0} avisos` },
+    { id: "discipline", label: "Disciplina", shortLabel: "Disciplina", icon: "discipline", group: "Comision", permissions: ["discipline"], description: "Controla amarillas, acumulaciones y ajustes disciplinarios.", metric: "Amarillas" },
+    { id: "sanctions", label: "Sanciones", shortLabel: "Sanciones", icon: "sanctions", group: "Comision", permissions: ["discipline"], description: "Resuelve rojas, sanciones extraordinarias y comision.", metric: `${league.sanctions?.length || 0} casos` },
+    { id: "injuries", label: "Lesiones", shortLabel: "Lesiones", icon: "injuries", group: "Comision", permissions: ["players", "discipline"], description: "Registra lesiones, cirugias y apoyos requeridos.", metric: `${league.injuries?.length || 0} registros` },
+    { id: "rules", label: "Reglas", shortLabel: "Reglas", icon: "rules", group: "Configuracion", permissions: ["settings"], description: "Define defaults, tarjetas, liguilla y criterios deportivos.", metric: "Reglamento" },
+    { id: "identity", label: "Identidad", shortLabel: "Identidad", icon: "identity", group: "Configuracion", permissions: ["settings"], description: "Ajusta marca, colores, textos y portada publica.", metric: "Publica" }
   ];
   const visibleSections = sections.filter((section) => (
     canUseSection(section.permissions) &&
     (activeRole !== "admin_limited" || limitedSectionIds.has(section.id))
   ));
 
+  const sectionGroups = visibleSections.reduce((groups, section) => {
+    const group = section.group || "Otros";
+    if (!groups[group]) groups[group] = [];
+    groups[group].push(section);
+    return groups;
+  }, {});
+  const workspaceDefinitions = [
+    { id: "operation", group: "Operacion", label: "Operacion diaria", shortLabel: "Operacion", icon: "operation", description: "Partidos, capturas y actas oficiales.", accent: "green" },
+    { id: "users", group: "Usuarios", label: "Usuarios y accesos", shortLabel: "Usuarios", icon: "users", description: "Delegados, arbitros y permisos operativos.", accent: "blue" },
+    { id: "teams", group: "Equipos", label: "Equipos y plantillas", shortLabel: "Equipos", icon: "teams", description: "Plantillas, afiliaciones y control de jugadores.", accent: "green" },
+    { id: "calendar", group: "Calendario", label: "Calendario y sedes", shortLabel: "Calendario", icon: "calendar", description: "Canchas, fechas y programacion.", accent: "blue" },
+    { id: "commission", group: "Comision", label: "Comision disciplinaria", shortLabel: "Comision", icon: "commission", description: "Tarjetas, sanciones, lesiones y resoluciones.", accent: "gold" },
+    { id: "settings", group: "Configuracion", label: "Configuracion", shortLabel: "Config.", icon: "settings", description: "Torneos, reglamento e identidad publica.", accent: "green" },
+    { id: "communication", group: "Comunicacion", label: "Comunicacion", shortLabel: "Avisos", icon: "announcements", description: "Avisos y mensajes para usuarios.", accent: "blue" }
+  ];
+  const visibleWorkspaces = workspaceDefinitions
+    .map((workspace) => ({ ...workspace, sections: sectionGroups[workspace.group] || [] }))
+    .filter((workspace) => workspace.sections.length);
+  const getWorkspaceScreenId = (workspaceId) => `workspace:${workspaceId}`;
+  const activeWorkspace = visibleWorkspaces.find((workspace) => getWorkspaceScreenId(workspace.id) === activeSection) || null;
+  const activeSectionMeta = visibleSections.find((section) => section.id === activeSection) || null;
+  const isModuleScreen = Boolean(activeSectionMeta);
+  const activeSectionWorkspace = activeSectionMeta ? visibleWorkspaces.find((workspace) => workspace.group === activeSectionMeta.group) : null;
+  const parentSectionId = activeSectionWorkspace ? getWorkspaceScreenId(activeSectionWorkspace.id) : "home";
+  const featuredSections = ["capture", "lists", "sheet", "delegates"]
+    .map((sectionId) => visibleSections.find((section) => section.id === sectionId))
+    .filter(Boolean);
+
   useEffect(() => {
-    if (visibleSections.length && !visibleSections.some((section) => section.id === activeSection)) {
-      setActiveSection(visibleSections[0].id);
+    const isHome = activeSection === "home";
+    const isKnownModule = visibleSections.some((section) => section.id === activeSection);
+    const isKnownWorkspace = visibleWorkspaces.some((workspace) => getWorkspaceScreenId(workspace.id) === activeSection);
+    if (!isHome && visibleSections.length && !isKnownModule && !isKnownWorkspace) {
+      setActiveSection("home");
     }
-  }, [activeSection, visibleSections]);
+  }, [activeSection, visibleSections, visibleWorkspaces]);
+
+  const activeScheduledMatches = currentCompetitionLeague.matches.filter((match) => isActiveScheduleStatus(match.status));
+  const finishedMatches = currentCompetitionLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover");
+  const pendingSheets = currentCompetitionLeague.matches.filter((match) => (
+    match.status === "finished" || match.status === "walkover"
+  ) && !match.sheetPublished).length;
+  const hiddenCompetitionCount = (league.competitions || []).filter((competition) => competition.publicVisibility === "hidden" || competition.hidden).length;
+  const activeAnnouncements = (league.announcements || []).filter((announcement) => announcement.status === "active").length;
 
   return (
-    <>
-      <section className="panel admin-home-panel">
-        <div className="admin-league-head">
+    <section className="admin-league-app">
+      <header className="admin-league-top">
+        <img className="admin-league-alp-watermark" alt="" src={alpLogo} aria-hidden="true" />
+        <div className="admin-league-title">
+          {activeSection !== "home" && (
+            <button className="admin-back-button" type="button" onClick={() => setActiveSection(parentSectionId)} aria-label="Regresar">←</button>
+          )}
           <div>
-            <span className="eyebrow">Admin de liga</span>
-            <h2>{league.name}</h2>
-          </div>
-          <div className="admin-metrics" aria-label="Resumen administrativo">
-            <span><strong>{currentCompetitionLeague.teams.length}</strong> Equipos</span>
-            <span><strong>{currentCompetitionLeague.players.length}</strong> Jugadores</span>
-            <span><strong>{currentCompetitionLeague.matches.length}</strong> Partidos</span>
-            <span><strong>{league.competitions?.length || 0}</strong> Torneos</span>
+            <span>{activeSection === "home" ? "Admin de liga" : activeWorkspace?.label || activeSectionMeta?.group || "Modulo"}</span>
+            <h2>{activeSection === "home" ? league.name : activeWorkspace?.shortLabel || activeSectionMeta?.label}</h2>
+            <small>{activeWorkspace?.description || activeSectionMeta?.description || `${currentCompetition?.name || "TORNEO"} · ${currentCompetition?.season || league.season}`}</small>
           </div>
         </div>
-        <p className="helper-text">Categoria actual: {currentCompetition?.name || "TORNEO"} | {currentCompetition?.season || league.season}. Equipos y jugadores se administran separados por categoria.</p>
+        {activeRole === "super_admin" && onOpenSuperAdmin && (
+          <button className="admin-super-return-button" type="button" onClick={onOpenSuperAdmin}>
+            <AdminIcon type="platform" />
+            Super Admin
+          </button>
+        )}
+        <div className="admin-league-status">
+          <span>{league.status === "active" ? "Liga activa" : getMatchStatusLabel(league.status)}</span>
+          <strong>{currentCompetitionLeague.teams.length} equipos</strong>
+        </div>
+      </header>
+
+      <nav className="admin-league-nav admin-workspace-nav" aria-label="Areas del panel admin">
+        <button className={activeSection === "home" ? "active" : ""} type="button" onClick={() => setActiveSection("home")}>
+          <span><AdminIcon type="home" /></span>
+          Inicio
+        </button>
+        {visibleWorkspaces.map((workspace) => (
+          <button
+            className={activeSection === getWorkspaceScreenId(workspace.id) || activeSectionMeta?.group === workspace.group ? "active" : ""}
+            key={workspace.id}
+            type="button"
+            onClick={() => setActiveSection(getWorkspaceScreenId(workspace.id))}
+          >
+            <span><AdminIcon type={workspace.icon} /></span>
+            {workspace.shortLabel}
+          </button>
+        ))}
+      </nav>
+
+      {activeSection === "home" && (
+        <section className="admin-league-home">
         {activeRole === "admin_limited" && !visibleSections.length && (
           <p className="auth-error">
             Este acceso tiene permisos registrados, pero aun no tiene un modulo habilitado en esta version. Solicita al super admin ajustar los permisos.
@@ -310,184 +458,264 @@ function LeagueAdmin({
             <span>Estas operando {league.name}. Verifica que esta sea la liga correcta antes de guardar cambios.</span>
           </div>
         )}
-        <div className="admin-section-tabs" aria-label="Secciones de captura">
-          {visibleSections.map((section) => (
-            <button
-              className={activeSection === section.id ? "active" : ""}
-              key={section.id}
-              type="button"
-              onClick={() => setActiveSection(section.id)}
-            >
-              {section.label}
-            </button>
-          ))}
-        </div>
-      </section>
 
-      {activeSection === "capture" && (
-        <CapturePanel
-          authToken={authToken}
-          league={league}
-          onGenerateSchedule={onGenerateSchedule}
-          onGeneratePlayoffBracket={onGeneratePlayoffBracket}
-          onAddMatch={onAddMatch}
-          onAddPlayer={onAddPlayer}
-          onAddTeam={onAddTeam}
-          allowedModes={activeRole === "admin_limited" ? (accessPermissions.has("matches") ? ["match"] : []) : null}
-        />
-      )}
+          <article className="admin-operation-card">
+            <img className="admin-operation-watermark" alt="" src={ligatecLogo} aria-hidden="true" />
+            <div className="admin-operation-head">
+              <span>Centro operativo</span>
+              <strong>{league.name}</strong>
+              <small>{currentCompetition?.name || "TORNEO"} · {currentCompetition?.season || league.season}</small>
+            </div>
+            <div className="admin-operation-overview" aria-label="Resumen operativo de la liga">
+              <div>
+                <span><AdminIcon type="teams" /></span>
+                <strong>{currentCompetitionLeague.teams.length}</strong>
+                <small>Equipos activos</small>
+              </div>
+              <div>
+                <span><AdminIcon type="player" /></span>
+                <strong>{currentCompetitionLeague.players.length}</strong>
+                <small>Jugadores registrados</small>
+              </div>
+              <div>
+                <span><AdminIcon type="matches" /></span>
+                <strong>{activeScheduledMatches.length}</strong>
+                <small>Partidos programados</small>
+              </div>
+              <div className={pendingSheets ? "needs-attention" : ""}>
+                <span><AdminIcon type="sheet" /></span>
+                <strong>{pendingSheets}</strong>
+                <small>Actas por publicar</small>
+              </div>
+            </div>
+            <div className="admin-operation-insights">
+              <span><AdminIcon type="announcements" /> {activeAnnouncements} aviso(s) activo(s)</span>
+              <span><AdminIcon type="tournaments" /> {(league.competitions || []).length} torneo(s) creados</span>
+              <span><AdminIcon type="identity" /> {hiddenCompetitionCount} oculto(s) al publico</span>
+            </div>
+            <div className="admin-operation-actions">
+              {visibleSections.filter((section) => ["capture", "lists", "sheet"].includes(section.id)).map((section) => (
+                <button key={section.id} type="button" onClick={() => setActiveSection(section.id)}>
+                  <span><AdminIcon type={section.icon} /></span>
+                  {section.shortLabel}
+                </button>
+              ))}
+            </div>
+          </article>
 
-      {activeSection === "tournaments" && (
-        <TournamentsPanel
-          league={league}
-          onAddCompetition={onAddCompetition}
-          onUpdateCompetition={onUpdateCompetition}
-        />
-      )}
+          <div className="admin-league-summary" aria-label="Resumen administrativo">
+            <article><span>Equipos</span><strong>{currentCompetitionLeague.teams.length}</strong></article>
+            <article><span>Jugadores</span><strong>{currentCompetitionLeague.players.length}</strong></article>
+            <article><span>Programados</span><strong>{activeScheduledMatches.length}</strong></article>
+            <article><span>Finalizados</span><strong>{finishedMatches.length}</strong></article>
+          </div>
 
-      {activeSection === "squads" && <SquadsPanel league={league} />}
+          <div className="admin-home-action-grid">
+            {featuredSections.map((section) => (
+              <button key={section.id} type="button" onClick={() => setActiveSection(section.id)}>
+                <span><AdminIcon type={section.icon} /></span>
+                <strong>{section.shortLabel}</strong>
+                <small>{section.description}</small>
+              </button>
+            ))}
+          </div>
 
-      {activeSection === "delegates" && (
-        <TeamDelegatesPanel
-          authToken={authToken}
-          league={league}
-        />
-      )}
-
-      {activeSection === "referees" && (
-        <RefereesPanel
-          authToken={authToken}
-          applyApiStore={applyApiStore}
-          league={league}
-        />
-      )}
-
-      {activeSection === "venues" && (
-        <VenuesPanel
-          league={league}
-          onAddVenue={onAddVenue}
-          onDeleteVenue={onDeleteVenue}
-          onUpdateVenue={onUpdateVenue}
-        />
-      )}
-
-      {activeSection === "announcements" && (
-        <AnnouncementsPanel
-          league={league}
-          onAddAnnouncement={onAddAnnouncement}
-          onDeleteAnnouncement={onDeleteAnnouncement}
-          onUpdateAnnouncement={onUpdateAnnouncement}
-        />
-      )}
-
-      {activeSection === "lists" && (
-        <ManagementBoard
-          authToken={authToken}
-          league={league}
-          onDeleteMatch={onDeleteMatch}
-          onDeletePlayoffMatches={onDeletePlayoffMatches}
-          onDeletePlayer={onDeletePlayer}
-          onDeleteTeam={onDeleteTeam}
-          onUpdateMatch={onUpdateMatch}
-          onUpdatePlayer={onUpdatePlayer}
-          onUpdateTeam={onUpdateTeam}
-          allowedLists={activeRole === "admin_limited" ? (accessPermissions.has("matches") ? ["matches"] : []) : null}
-          canEditMatchResults={activeRole !== "admin_limited" || accessPermissions.has("match_sheets")}
-        />
-      )}
-
-      {activeSection === "sheet" && (
-        <section className="panel">
-          <SectionHeading eyebrow="Acta" title="Acta de partido" />
-          <MatchSheet league={league} onSaveMatchSheet={onSaveMatchSheet} />
+          <div className="admin-workspace-grid" aria-label="Areas administrativas">
+            {visibleWorkspaces.map((workspace) => (
+              <button className={`admin-workspace-card ${workspace.accent}`} key={workspace.id} type="button" onClick={() => setActiveSection(getWorkspaceScreenId(workspace.id))}>
+                <span><AdminIcon type={workspace.icon} /></span>
+                <strong>{workspace.label}</strong>
+                <small>{workspace.description}</small>
+                <em>{workspace.sections.length} funcion(es)</em>
+              </button>
+            ))}
+          </div>
         </section>
       )}
 
-      {activeSection === "affiliations" && (
-        <AffiliationsPanel
-          league={league}
-          onAddTeamAffiliation={onAddTeamAffiliation}
-          onDeleteTeamAffiliation={onDeleteTeamAffiliation}
-          onMergeDuplicatePlayer={onMergeDuplicatePlayer}
-          onUpdateTeamAffiliationPlayerNumber={onUpdateTeamAffiliationPlayerNumber}
-        />
-      )}
-
-      {activeSection === "discipline" && (
-        <DisciplineControlPanel
-          league={league}
-          onAddDisciplineAdjustment={onAddDisciplineAdjustment}
-          onAddDisciplineLink={onAddDisciplineLink}
-          onAddDisciplineReset={onAddDisciplineReset}
-          onDeleteDisciplineAdjustment={onDeleteDisciplineAdjustment}
-          onDeleteDisciplineLink={onDeleteDisciplineLink}
-          onDeleteDisciplineReset={onDeleteDisciplineReset}
-        />
-      )}
-
-      {activeSection === "sanctions" && (
-        <SanctionsPanel
-          league={league}
-          onAddPlayerSanction={onAddPlayerSanction}
-          onDeletePlayerSanction={onDeletePlayerSanction}
-          onResolveMatchDiscipline={onResolveMatchDiscipline}
-        />
-      )}
-
-      {activeSection === "injuries" && (
-        <InjuriesPanel
-          league={league}
-          onAddPlayerInjury={onAddPlayerInjury}
-          onDeletePlayerInjury={onDeletePlayerInjury}
-          onUpdatePlayerInjury={onUpdatePlayerInjury}
-        />
-      )}
-
-      {activeSection === "rules" && (
-        <RulesPanel
-          league={league}
-          onAddAppearanceAdjustment={onAddAppearanceAdjustment}
-          onDeleteAppearanceAdjustment={onDeleteAppearanceAdjustment}
-          onSaveRules={onSaveRules}
-        />
-      )}
-
-      {activeSection === "identity" && (
-        <section className="panel">
-          <SectionHeading eyebrow="Configuracion" title="Identidad publica de la liga" />
-          {identityNotice && <p className="auth-ok">{identityNotice}</p>}
-          <form
-            className="identity-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!window.confirm("¿Guardar los cambios de identidad publica de la liga?")) return;
-              onSaveIdentity(getFormPayload(event.currentTarget));
-              setIdentityNotice("Identidad publica guardada correctamente.");
-            }}
-          >
-            <label>Nombre de la liga<input name="name" required defaultValue={league.name} /></label>
-            <label>Municipio o zona<input name="city" required defaultValue={league.city} /></label>
-            <label>Temporada<input name="season" required defaultValue={league.season} /></label>
-            <label>Distintivo local<input name="nickname" defaultValue={identity.nickname} placeholder="Ej. Pueblo de las 3 campanas" /></label>
-            <label>Actividades o rasgos<input name="activities" defaultValue={identity.activities} placeholder="Ej. Aguacate, pan" /></label>
-            <label>Patrocinador / anuncio<input name="adBanner" defaultValue={league.adBanner} /></label>
-            <label>Color principal<input name="primaryColor" type="color" defaultValue={identity.primaryColor} /></label>
-            <label>Color secundario<input name="secondaryColor" type="color" defaultValue={identity.secondaryColor} /></label>
-            <label>Color acento<input name="accentColor" type="color" defaultValue={identity.accentColor} /></label>
-            <label className="wide-field">Texto publico<textarea name="publicIntro" defaultValue={identity.publicIntro} /></label>
-            <label className="wide-field">Destacados manuales<textarea name="highlights" defaultValue={(league.highlights || []).join("\n")} placeholder="Un destacado por linea" /></label>
-            <button className="primary" type="submit">Guardar identidad</button>
-          </form>
+      {activeWorkspace && (
+        <section className="admin-workspace-screen">
+          <div className="admin-function-grid">
+            {activeWorkspace.sections.map((section) => (
+              <button className="admin-function-card" key={section.id} type="button" onClick={() => setActiveSection(section.id)}>
+                <span><AdminIcon type={section.icon} /></span>
+                <strong>{section.label}</strong>
+                <small>{section.description}</small>
+                <em>{section.metric}</em>
+              </button>
+            ))}
+          </div>
         </section>
       )}
-    </>
+
+      {isModuleScreen && (
+        <section className="admin-module-screen">
+          <div className="admin-section-tabs compact" aria-label="Cambiar modulo">
+            {(visibleWorkspaces.find((item) => item.group === activeSectionMeta?.group)?.sections || visibleSections).map((section) => (
+              <button
+                className={activeSection === section.id ? "active" : ""}
+                key={section.id}
+                type="button"
+                onClick={() => setActiveSection(section.id)}
+              >
+                <span><AdminIcon type={section.icon} /></span>
+                {section.shortLabel}
+              </button>
+            ))}
+          </div>
+
+          <div className="admin-module-content">
+            {activeSection === "capture" && (
+              <CapturePanel
+                authToken={authToken}
+                league={league}
+                onGenerateSchedule={onGenerateSchedule}
+                onGeneratePlayoffBracket={onGeneratePlayoffBracket}
+                onAddMatch={onAddMatch}
+                onAddPlayer={onAddPlayer}
+                onAddTeam={onAddTeam}
+                allowedModes={activeRole === "admin_limited" ? (accessPermissions.has("matches") ? ["match"] : []) : null}
+              />
+            )}
+
+            {activeSection === "tournaments" && (
+              <TournamentsPanel
+                league={league}
+                onAddCompetition={onAddCompetition}
+                onUpdateCompetition={onUpdateCompetition}
+              />
+            )}
+
+            {activeSection === "squads" && <SquadsPanel league={league} />}
+
+            {activeSection === "delegates" && (
+              <TeamDelegatesPanel
+                authToken={authToken}
+                league={league}
+              />
+            )}
+
+            {activeSection === "referees" && (
+              <RefereesPanel
+                authToken={authToken}
+                applyApiStore={applyApiStore}
+                league={league}
+              />
+            )}
+
+            {activeSection === "venues" && (
+              <VenuesPanel
+                league={league}
+                onAddVenue={onAddVenue}
+                onDeleteVenue={onDeleteVenue}
+                onUpdateVenue={onUpdateVenue}
+              />
+            )}
+
+            {activeSection === "announcements" && (
+              <AnnouncementsPanel
+                league={league}
+                onAddAnnouncement={onAddAnnouncement}
+                onDeleteAnnouncement={onDeleteAnnouncement}
+                onUpdateAnnouncement={onUpdateAnnouncement}
+              />
+            )}
+
+            {activeSection === "lists" && (
+              <ManagementBoard
+                authToken={authToken}
+                league={league}
+                onDeleteMatch={onDeleteMatch}
+                onDeletePlayoffMatches={onDeletePlayoffMatches}
+                onDeletePlayer={onDeletePlayer}
+                onDeleteTeam={onDeleteTeam}
+                onUpdateMatch={onUpdateMatch}
+                onUpdatePlayer={onUpdatePlayer}
+                onUpdateTeam={onUpdateTeam}
+                allowedLists={activeRole === "admin_limited" ? (accessPermissions.has("matches") ? ["matches"] : []) : null}
+                canEditMatchResults={activeRole !== "admin_limited" || accessPermissions.has("match_sheets")}
+              />
+            )}
+
+            {activeSection === "sheet" && (
+              <section className="panel">
+                <SectionHeading eyebrow="Acta" title="Acta de partido" />
+                <MatchSheet league={league} onSaveMatchSheet={onSaveMatchSheet} />
+              </section>
+            )}
+
+            {activeSection === "affiliations" && (
+              <AffiliationsPanel
+                league={league}
+                onAddTeamAffiliation={onAddTeamAffiliation}
+                onDeleteTeamAffiliation={onDeleteTeamAffiliation}
+                onMergeDuplicatePlayer={onMergeDuplicatePlayer}
+                onUpdateTeamAffiliationPlayerNumber={onUpdateTeamAffiliationPlayerNumber}
+              />
+            )}
+
+            {activeSection === "discipline" && (
+              <DisciplineControlPanel
+                league={league}
+                onAddDisciplineAdjustment={onAddDisciplineAdjustment}
+                onAddDisciplineLink={onAddDisciplineLink}
+                onAddDisciplineReset={onAddDisciplineReset}
+                onDeleteDisciplineAdjustment={onDeleteDisciplineAdjustment}
+                onDeleteDisciplineLink={onDeleteDisciplineLink}
+                onDeleteDisciplineReset={onDeleteDisciplineReset}
+              />
+            )}
+
+            {activeSection === "sanctions" && (
+              <SanctionsPanel
+                league={league}
+                onAddPlayerSanction={onAddPlayerSanction}
+                onDeletePlayerSanction={onDeletePlayerSanction}
+                onResolveMatchDiscipline={onResolveMatchDiscipline}
+              />
+            )}
+
+            {activeSection === "injuries" && (
+              <InjuriesPanel
+                league={league}
+                onAddPlayerInjury={onAddPlayerInjury}
+                onDeletePlayerInjury={onDeletePlayerInjury}
+                onUpdatePlayerInjury={onUpdatePlayerInjury}
+              />
+            )}
+
+            {activeSection === "rules" && (
+              <RulesPanel
+                league={league}
+                onAddAppearanceAdjustment={onAddAppearanceAdjustment}
+                onDeleteAppearanceAdjustment={onDeleteAppearanceAdjustment}
+                onSaveRules={onSaveRules}
+              />
+            )}
+
+            {activeSection === "identity" && (
+              <IdentityPanel
+                identity={identity}
+                league={league}
+                notice={identityNotice}
+                onSaveIdentity={onSaveIdentity}
+                setIdentityNotice={setIdentityNotice}
+              />
+            )}
+          </div>
+        </section>
+      )}
+    </section>
   );
 }
 
 function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
   const activeCompetitions = (league.competitions || []).filter((competition) => competition.status !== "archived");
+  const publicCompetitions = (league.competitions || []).filter((competition) => !["archived", "hidden"].includes(competition.status));
+  const hiddenCompetitions = (league.competitions || []).filter((competition) => competition.status === "hidden");
   const archivedCompetitions = (league.competitions || []).filter((competition) => competition.status === "archived");
   const [tournamentNotice, setTournamentNotice] = useState("");
+  const currentCompetition = getCompetition(league, getDefaultCompetitionId(league));
 
   function updateCompetitionWithNotice(competitionId, payload) {
     onUpdateCompetition(competitionId, payload);
@@ -495,12 +723,22 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
   }
 
   return (
-    <section className="panel">
+    <section className="panel admin-data-panel config-admin-panel tournaments-admin-panel">
       <SectionHeading eyebrow="Temporadas" title="Torneos de la liga" />
       {tournamentNotice && <p className="auth-ok">{tournamentNotice}</p>}
-      <p className="helper-text">Cada torneo/categoria tiene sus propios equipos, jugadores, calendario, tabla y actas. Usa nombres como LIGA PRIMERA, LIGA SEGUNDA, JUVENIL o FEMENIL.</p>
-      <p className="helper-text">Usa Publicado en portada para torneos activos visibles en el selector principal. Mueve torneos terminados a Historico archivado para conservar tabla, calendario, goleo y actas sin saturar la portada publica.</p>
-      <p className="helper-text">Torneos publicados: {activeCompetitions.length}. Puedes tener distintas temporadas activas al mismo tiempo, por ejemplo Primera Fuerza Apertura 2026 y Fut 7 Clausura 2026.</p>
+      <div className="admin-data-hero config-hero">
+        <div>
+          <span>Control de categorias</span>
+          <strong>{publicCompetitions.length} visible(s)</strong>
+          <small>{currentCompetition?.name || "Sin torneo principal"} es el torneo principal actual. {hiddenCompetitions.length} oculto(s).</small>
+        </div>
+        <b>{archivedCompetitions.length} historico(s)</b>
+      </div>
+      <div className="config-compact-guide">
+        <span><strong>Publicado:</strong> visible en portada, paneles y selectores publicos.</span>
+        <span><strong>Oculto:</strong> existe y opera en admin, pero no aparece al publico.</span>
+        <span><strong>Historico:</strong> conserva tabla, calendario, goleo y actas sin saturar la operacion diaria.</span>
+      </div>
       <form className="tournament-form" onSubmit={(event) => {
         event.preventDefault();
         if (!window.confirm("¿Confirmas crear este torneo/categoria?")) return;
@@ -508,6 +746,7 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
         setTournamentNotice("Torneo creado correctamente.");
         event.currentTarget.reset();
       }}>
+        <h3>Nuevo torneo o categoria</h3>
         <label>Nombre
           <input name="name" required placeholder="Ej. Copa Tingüindín 2026" />
         </label>
@@ -521,19 +760,81 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
         <label>Estado
           <select name="status" defaultValue="active">
             <option value="active">Publicado en portada</option>
+            <option value="hidden">Oculto del publico</option>
             <option value="archived">Historico archivado</option>
           </select>
         </label>
         <button className="primary" type="submit">Crear torneo</button>
       </form>
 
-      <TournamentList title="Torneos publicados en portada" competitions={activeCompetitions} league={league} onUpdateCompetition={updateCompetitionWithNotice} />
+      <TournamentList title="Torneos operativos" competitions={activeCompetitions} league={league} onUpdateCompetition={updateCompetitionWithNotice} />
       {!!archivedCompetitions.length && (
-        <details className="archive-box">
+        <details className="archive-box config-details">
           <summary>Historico archivado ({archivedCompetitions.length})</summary>
           <TournamentList title="" competitions={archivedCompetitions} league={league} onUpdateCompetition={updateCompetitionWithNotice} />
         </details>
       )}
+    </section>
+  );
+}
+
+function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNotice }) {
+  const highlightsCount = (league.highlights || []).length;
+  return (
+    <section className="panel admin-data-panel config-admin-panel identity-admin-panel">
+      <SectionHeading eyebrow="Configuracion" title="Identidad publica de la liga" />
+      {notice && <p className="auth-ok">{notice}</p>}
+      <div className="identity-dashboard">
+        <div className="identity-preview-card" style={{
+          "--identity-primary": identity.primaryColor,
+          "--identity-secondary": identity.secondaryColor,
+          "--identity-accent": identity.accentColor
+        }}>
+          <span>Vista publica</span>
+          <strong>{league.name}</strong>
+          <small>{league.city} · {league.season}</small>
+          <b>{identity.nickname || "Distintivo local pendiente"}</b>
+        </div>
+        <div className="identity-metrics">
+          <span><strong>{highlightsCount}</strong> destacados</span>
+          <span><strong>{identity.activities ? "Si" : "No"}</strong> rasgos</span>
+          <span><strong>{league.adBanner ? "Si" : "No"}</strong> anuncio</span>
+        </div>
+      </div>
+      <form
+        className="identity-form config-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!window.confirm("¿Guardar los cambios de identidad publica de la liga?")) return;
+          onSaveIdentity(getFormPayload(event.currentTarget));
+          setIdentityNotice("Identidad publica guardada correctamente.");
+        }}
+      >
+        <div className="config-form-section">
+          <h3>Datos principales</h3>
+          <label>Nombre de la liga<input name="name" required defaultValue={league.name} /></label>
+          <label>Municipio o zona<input name="city" required defaultValue={league.city} /></label>
+          <label>Temporada<input name="season" required defaultValue={league.season} /></label>
+        </div>
+        <div className="config-form-section">
+          <h3>Marca local</h3>
+          <label>Distintivo local<input name="nickname" defaultValue={identity.nickname} placeholder="Ej. Pueblo de las 3 campanas" /></label>
+          <label>Actividades o rasgos<input name="activities" defaultValue={identity.activities} placeholder="Ej. Aguacate, pan" /></label>
+          <label>Patrocinador / anuncio<input name="adBanner" defaultValue={league.adBanner} /></label>
+        </div>
+        <div className="config-form-section color-section">
+          <h3>Colores</h3>
+          <label>Principal<input name="primaryColor" type="color" defaultValue={identity.primaryColor} /></label>
+          <label>Secundario<input name="secondaryColor" type="color" defaultValue={identity.secondaryColor} /></label>
+          <label>Acento<input name="accentColor" type="color" defaultValue={identity.accentColor} /></label>
+        </div>
+        <div className="config-form-section wide-config-section">
+          <h3>Contenido publico</h3>
+          <label>Texto publico<textarea name="publicIntro" defaultValue={identity.publicIntro} /></label>
+          <label>Destacados manuales<textarea name="highlights" defaultValue={(league.highlights || []).join("\n")} placeholder="Un destacado por linea" /></label>
+        </div>
+        <button className="primary" type="submit">Guardar identidad</button>
+      </form>
     </section>
   );
 }
@@ -545,11 +846,35 @@ function SquadsPanel({ league }) {
     [activeLeague.teams]
   );
   const [selectedTeamId, setSelectedTeamId] = useState(sortedTeams[0]?.id || "");
+  const [squadQuery, setSquadQuery] = useState("");
+  const [positionFilter, setPositionFilter] = useState("all");
   const selectedTeam = sortedTeams.find((team) => team.id === selectedTeamId) || sortedTeams[0] || null;
   const squadPlayers = useMemo(() => {
     if (!selectedTeam) return [];
-    return getEligiblePlayersForTeam(league, selectedTeam.id);
-  }, [league, selectedTeam]);
+    const query = normalizeAdminSearchTerm(squadQuery);
+    return getEligiblePlayersForTeam(league, selectedTeam.id)
+      .filter((player) => {
+        const affiliation = getPlayerAffiliationForTeam(league, player.id, selectedTeam.id);
+        const originTeam = getTeam(league, player.teamId);
+        const playerNumber = getPlayerNumberForTeam(league, player.id, selectedTeam.id) || "";
+        const position = getPlayerPositionOptionValue(player.position);
+        if (positionFilter !== "all" && position !== positionFilter) return false;
+        if (!query) return true;
+        return normalizeAdminSearchTerm(`${playerNumber} ${player.name} ${position} ${originTeam?.name || ""} ${affiliation ? "afiliado" : ""}`).includes(query);
+      })
+      .sort((a, b) => (
+        Number(getPlayerNumberForTeam(league, a.id, selectedTeam.id) || 99999) -
+        Number(getPlayerNumberForTeam(league, b.id, selectedTeam.id) || 99999) ||
+        String(a.name || "").localeCompare(String(b.name || ""))
+      ));
+  }, [league, positionFilter, selectedTeam, squadQuery]);
+  const allTeamPlayers = useMemo(() => (
+    selectedTeam ? getEligiblePlayersForTeam(league, selectedTeam.id) : []
+  ), [league, selectedTeam]);
+  const positionSummary = PLAYER_POSITION_OPTIONS.map((position) => ({
+    position,
+    count: allTeamPlayers.filter((player) => getPlayerPositionOptionValue(player.position) === position).length
+  }));
 
   useEffect(() => {
     if (!sortedTeams.length) {
@@ -562,16 +887,34 @@ function SquadsPanel({ league }) {
   }, [selectedTeamId, sortedTeams]);
 
   return (
-    <section className="panel">
+    <section className="panel admin-data-panel squad-admin-panel">
       <SectionHeading eyebrow="Equipos" title="Plantillas por equipo" />
       {!sortedTeams.length ? (
         <p className="empty">Aun no hay equipos registrados.</p>
       ) : (
         <>
-          <div className="squad-toolbar">
+          <div className="admin-data-hero squad-hero">
+            <div>
+              <span>Plantilla activa</span>
+              <strong>{selectedTeam.name}</strong>
+              <small>{selectedTeam.coach ? `Entrenador: ${selectedTeam.coach}` : "Entrenador sin registrar"}</small>
+            </div>
+            <b className={selectedTeam.status === "withdrawn" ? "danger" : ""}>{selectedTeam.status === "withdrawn" ? "Baja" : "Activo"}</b>
+          </div>
+
+          <div className="admin-filter-console squad-toolbar">
             <label>Equipo
               <select value={selectedTeam?.id || ""} onChange={(event) => setSelectedTeamId(event.target.value)}>
                 {sortedTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+            </label>
+            <label>Buscar jugador
+              <input type="search" value={squadQuery} onChange={(event) => setSquadQuery(event.target.value)} placeholder="Nombre, numero o equipo origen" />
+            </label>
+            <label>Posicion
+              <select value={positionFilter} onChange={(event) => setPositionFilter(event.target.value)}>
+                <option value="all">Todas</option>
+                {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
               </select>
             </label>
           </div>
@@ -581,35 +924,31 @@ function SquadsPanel({ league }) {
               <div>
                 <span className="eyebrow">Plantilla</span>
                 <h3>{selectedTeam.name}</h3>
-                <p>{selectedTeam.coach ? `ENTRENADOR: ${selectedTeam.coach}` : "ENTRENADOR SIN REGISTRAR"}</p>
+                <p>{squadPlayers.length} de {allTeamPlayers.length} jugador(es) visibles.</p>
               </div>
               <div className="squad-metrics">
-                <span><strong>{squadPlayers.length}</strong> Jugadores</span>
-                <span><strong>{selectedTeam.status === "withdrawn" ? "BAJA" : "ACTIVO"}</strong> Estado</span>
+                <span><strong>{allTeamPlayers.length}</strong> Total</span>
+                {positionSummary.map((item) => (
+                  <span key={item.position}><strong>{item.count}</strong> {item.position}</span>
+                ))}
               </div>
             </div>
 
-            <div className="squad-table" role="table" aria-label={`Plantilla ${selectedTeam.name}`}>
-              <div className="squad-row squad-header" role="row">
-                <span role="columnheader">#</span>
-                <span role="columnheader">Jugador</span>
-                <span role="columnheader">Posicion</span>
-                <span role="columnheader">Estado</span>
-              </div>
+            <div className="squad-player-grid" aria-label={`Plantilla ${selectedTeam.name}`}>
               {squadPlayers.map((player) => (
-                <div className="squad-row" key={player.id} role="row">
-                  <span role="cell">{getPlayerNumberForTeam(league, player.id, selectedTeam.id) || "-"}</span>
-                  <strong role="cell">
-                    {player.name}
+                <article className="squad-player-card" key={player.id}>
+                  <b>#{getPlayerNumberForTeam(league, player.id, selectedTeam.id) || "-"}</b>
+                  <div>
+                    <strong>{player.name}</strong>
+                    <span>{getPlayerPositionOptionValue(player.position)}</span>
                     {getPlayerAffiliationForTeam(league, player.id, selectedTeam.id) && (
-                      <small className="affiliate-badge">AFILIADO: {getTeam(league, player.teamId)?.name || "ORIGEN"}</small>
+                      <small className="affiliate-badge">Afiliado de {getTeam(league, player.teamId)?.name || "origen"}</small>
                     )}
-                  </strong>
-                  <span role="cell">{player.position || "JUGADOR"}</span>
-                  <span role="cell">{getPlayerAffiliationForTeam(league, player.id, selectedTeam.id) ? "AFILIADO" : player.status === "inactive" ? "INACTIVO" : "ACTIVO"}</span>
-                </div>
+                  </div>
+                  <em>{player.status === "inactive" ? "Inactivo" : "Activo"}</em>
+                </article>
               ))}
-              {!squadPlayers.length && <p className="empty">Este equipo aun no tiene jugadores registrados.</p>}
+              {!squadPlayers.length && <p className="empty">No hay jugadores que coincidan con esos filtros.</p>}
             </div>
           </div>
         </>
@@ -1152,7 +1491,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     const query = normalizeAdminSearchTerm(matchSearch);
     return [...competitionLeague.matches]
       .filter((match) => {
-        if (matchStatusFilter === "scheduled" && match.status !== "scheduled") return false;
+        if (matchStatusFilter === "scheduled" && !isActiveScheduleStatus(match.status)) return false;
         if (matchStatusFilter === "finished" && match.status !== "finished" && match.status !== "walkover") return false;
         if (selectedRoundFilter !== "all") {
           const targetRound = selectedRoundFilter === "next" ? displayRound : Number(selectedRoundFilter);
@@ -1171,19 +1510,19 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       ));
   }, [assignmentCoverageFilter, competitionLeague.matches, displayRound, league, matchSearch, matchStatusFilter, selectedRoundFilter]);
   const assignmentPendingCount = useMemo(
-    () => competitionLeague.matches.filter((match) => match.status === "scheduled" && !match.centralRefereeUserId).length,
+    () => competitionLeague.matches.filter((match) => isActiveScheduleStatus(match.status) && !match.centralRefereeUserId).length,
     [competitionLeague.matches]
   );
   const assignmentIncompleteCount = useMemo(
-    () => competitionLeague.matches.filter((match) => match.status === "scheduled" && !isMatchRefereeAssignmentComplete(match)).length,
+    () => competitionLeague.matches.filter((match) => isActiveScheduleStatus(match.status) && !isMatchRefereeAssignmentComplete(match)).length,
     [competitionLeague.matches]
   );
   const assignmentCompleteCount = useMemo(
-    () => competitionLeague.matches.filter((match) => match.status === "scheduled" && isMatchRefereeAssignmentComplete(match)).length,
+    () => competitionLeague.matches.filter((match) => isActiveScheduleStatus(match.status) && isMatchRefereeAssignmentComplete(match)).length,
     [competitionLeague.matches]
   );
   const scheduledMatches = useMemo(
-    () => competitionLeague.matches.filter((match) => match.status === "scheduled"),
+    () => competitionLeague.matches.filter((match) => isActiveScheduleStatus(match.status)),
     [competitionLeague.matches]
   );
   const nextScheduledMatch = useMemo(() => (
@@ -1215,6 +1554,8 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     assignmentCoverageFilter !== "all" ? { id: "coverage", label: getAssignmentCoverageLabel(assignmentCoverageFilter), clear: () => setAssignmentCoverageFilter("all") } : null,
     matchSearch ? { id: "search", label: matchSearch, clear: () => setMatchSearch("") } : null
   ].filter(Boolean);
+  const signatureIssueReports = finalizedReports.filter((report) => report.payload?.signatureIssue?.status === "pending_admin_attention");
+  const readyFinalizedReports = finalizedReports.filter((report) => report.status === "finalized");
   const actaAttentionCount = pendingSheets.length + finalizedReports.length;
 
   async function reloadReferees() {
@@ -1223,11 +1564,11 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       const [nextReferees, nextSheets, nextReports] = await Promise.all([
         fetchReferees(authToken, league.city),
         fetchRefereeMatchSheets(authToken, { leagueId: league.id, status: "pending_review" }),
-        fetchFinalizedMatchReports(authToken, { leagueId: league.id, status: "finalized" })
+        fetchFinalizedMatchReports(authToken, { leagueId: league.id, status: ADMIN_MATCH_REPORT_STATUSES })
       ]);
       setReferees(nextReferees);
       setPendingSheets(nextSheets);
-      setFinalizedReports(nextReports);
+      setFinalizedReports((nextReports || []).filter(needsAdminMatchReportAttention));
       setError("");
     } catch (loadError) {
       setError(loadError.message || "No se pudieron cargar los arbitros.");
@@ -1270,17 +1611,31 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
 
   async function publishFinalizedReport(report) {
     const match = report.match || league.matches.find((item) => item.id === report.matchId);
+    const signatureIssue = report.payload?.signatureIssue || null;
+    const publishByException = report.status !== "finalized" && signatureIssue?.status === "pending_admin_attention";
     const confirmed = window.confirm(
-      `¿Publicar esta acta finalizada como resultado oficial?\n\n${match?.homeTeamName || "LOCAL"} vs ${match?.awayTeamName || "VISITANTE"}\nMarcador: ${report.homeGoals ?? 0}-${report.awayGoals ?? 0}\n\nEsto actualizara la parte publica, tabla, goleo y disciplina.`
+      publishByException
+        ? `¿Publicar esta acta por excepcion administrativa?\n\n${match?.homeTeamName || "LOCAL"} vs ${match?.awayTeamName || "VISITANTE"}\nMarcador: ${report.homeGoals ?? 0}-${report.awayGoals ?? 0}\nIncidencia: ${signatureIssue.reasonLabel || "Problema con firma"}\n\nEsto publicara el resultado oficial aunque queden firmas digitales pendientes.`
+        : `¿Publicar esta acta finalizada como resultado oficial?\n\n${match?.homeTeamName || "LOCAL"} vs ${match?.awayTeamName || "VISITANTE"}\nMarcador: ${report.homeGoals ?? 0}-${report.awayGoals ?? 0}\n\nEsto actualizara la parte publica, tabla, goleo y disciplina.`
     );
     if (!confirmed) return;
+    const adminNote = publishByException
+      ? window.prompt(
+          "Agrega una nota administrativa para justificar la publicacion por excepcion.",
+          signatureIssue.reasonLabel || "Incidencia de firma validada por admin"
+        )
+      : "";
+    if (adminNote === null) return;
     const actionKey = `publish-report-${report.id}`;
     setBusyAction(actionKey);
     try {
-      const response = await publishFinalizedMatchReport(authToken, report.id);
-      setFinalizedReports(response.reports || []);
+      const response = await publishFinalizedMatchReport(authToken, report.id, {
+        overrideSignatureIssue: publishByException,
+        adminNote: adminNote || ""
+      });
+      setFinalizedReports((response.reports || []).filter(needsAdminMatchReportAttention));
       if (response.store) applyApiStore?.(response.store);
-      setNotice("Acta finalizada publicada como resultado oficial.");
+      setNotice(publishByException ? "Acta publicada por excepcion administrativa." : "Acta finalizada publicada como resultado oficial.");
       setError("");
     } catch (publishError) {
       setNotice("");
@@ -1678,9 +2033,9 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           </div>
           <div className="referee-metric-grid compact">
             <ArbitrationMetricCard label="Pendientes" tone="warning" value={pendingSheets.length} />
-            <ArbitrationMetricCard label="Finalizadas" tone="info" value={finalizedReports.length} />
+            <ArbitrationMetricCard label="Finalizadas" tone="info" value={readyFinalizedReports.length} />
             <ArbitrationMetricCard label="Publicadas" tone="ok" value={competitionLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover").length} />
-            <ArbitrationMetricCard label="Incidencia" tone="danger" value={0} />
+            <ArbitrationMetricCard label="Incidencia" tone="danger" value={signatureIssueReports.length} />
           </div>
           <RefereeSheetReviewPanel
             busyAction={busyAction}
@@ -1819,7 +2174,31 @@ function getMatchStatusLabel(status) {
   if (status === "finished") return "Finalizado";
   if (status === "walkover") return "Default";
   if (status === "suspended") return "Suspendido";
+  if (status === "postponed") return "Pospuesto";
+  if (status === "rescheduled") return "Reprogramado";
+  if (status === "advanced") return "Adelantado";
   return "Programado";
+}
+
+function isEditableScheduleStatus(status) {
+  return ["scheduled", "rescheduled", "advanced", "postponed"].includes(status || "scheduled");
+}
+
+function isActiveScheduleStatus(status) {
+  return ["scheduled", "rescheduled", "advanced"].includes(status || "scheduled");
+}
+
+function MatchStatusSelect({ defaultValue, ariaLabel, canEditMatchResults }) {
+  return (
+    <select name="status" defaultValue={defaultValue || "scheduled"} aria-label={ariaLabel}>
+      <option value="scheduled">Programado</option>
+      <option value="rescheduled">Reprogramado</option>
+      <option value="advanced">Adelantado</option>
+      <option value="postponed">Pospuesto</option>
+      {canEditMatchResults && <option value="finished">Finalizado</option>}
+      {canEditMatchResults && <option value="walkover">Default</option>}
+    </select>
+  );
 }
 
 function isRefereeAssignedToMatch(match, refereeId) {
@@ -2036,17 +2415,24 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
             const homeTeam = getTeam(league, match?.homeTeamId);
             const awayTeam = getTeam(league, match?.awayTeamId);
             const payload = report.payload || {};
+            const signatureIssue = payload.signatureIssue || null;
             const events = payload.events || [];
             const isPublishing = busyAction === `publish-report-${report.id}`;
+            const canPublishByException = report.status !== "finalized" && signatureIssue?.status === "pending_admin_attention";
             const signatureCount = (report.signatures || []).length;
             return (
-              <article className="referee-review-card referee-review-card--ready" key={report.id}>
+              <article className={`referee-review-card referee-review-card--ready ${signatureIssue ? "has-signature-issue" : ""}`} key={report.id}>
                 <div>
                   <strong>{match?.homeTeamName || homeTeam?.name || "LOCAL"} vs {match?.awayTeamName || awayTeam?.name || "VISITANTE"}</strong>
                   <small>
                     {match ? `Jornada ${match.round || "-"} | ${formatDate(match.date)} | ${match.venue || "CANCHA POR DEFINIR"}` : "Partido no encontrado"}
                   </small>
                   <small>{match?.competitionName || "Categoria"} | {report.captureMode === "live" ? `${signatureCount}/2 firmas digitales` : "Acta manual sin firmas digitales"}</small>
+                  {signatureIssue && (
+                    <small className="referee-review-issue">
+                      Incidencia de firma: {signatureIssue.reasonLabel || "Problema con firma"} | Local {signatureIssue.homeSigned ? "firmo" : "pendiente"} | Visitante {signatureIssue.awaySigned ? "firmo" : "pendiente"}
+                    </small>
+                  )}
                 </div>
                 <div className="referee-review-summary">
                   <span><strong>{report.homeGoals ?? payload.homeGoals ?? 0}-{report.awayGoals ?? payload.awayGoals ?? 0}</strong> marcador</span>
@@ -2071,9 +2457,15 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
                   </div>
                 </details>
                 <div className="inline-actions">
-                  <button className="primary" type="button" disabled={isPublishing} onClick={() => onPublishReport(report)}>
-                    {isPublishing ? "Publicando..." : "Publicar oficial"}
-                  </button>
+                  {report.status === "finalized" || canPublishByException ? (
+                    <button className="primary" type="button" disabled={isPublishing} onClick={() => onPublishReport(report)}>
+                      {isPublishing ? "Publicando..." : canPublishByException ? "Publicar por excepcion" : "Publicar oficial"}
+                    </button>
+                  ) : (
+                    <button type="button" disabled>
+                      Pendiente de firmas o validacion
+                    </button>
+                  )}
                 </div>
               </article>
             );
@@ -2393,13 +2785,23 @@ function VenuesPanel({ league, onAddVenue, onDeleteVenue, onUpdateVenue }) {
     setNotice("Cancha eliminada del catalogo correctamente.");
   }
 
+  const activeVenueCount = venues.filter((venue) => (venue.status || "active") === "active").length;
+
   return (
-    <section className="panel">
+    <section className="panel admin-data-panel venues-admin-panel">
       <SectionHeading eyebrow="Programacion" title="Canchas de la liga" />
-      <p className="helper-text">Estas canchas pertenecen solo a {league.name}. Al programar o editar partidos podras elegirlas automaticamente.</p>
+      <div className="admin-data-hero">
+        <div>
+          <span>Catalogo de sedes</span>
+          <strong>{venues.length} cancha(s) registradas</strong>
+          <small>Disponibles para programar, posponer o reprogramar partidos de {league.name}.</small>
+        </div>
+        <b>{activeVenueCount} activas</b>
+      </div>
       {notice && <p className="auth-ok">{notice}</p>}
 
       <form className="venue-form" onSubmit={submitVenue}>
+        <h3>Nueva cancha</h3>
         <label>Nombre de cancha<input name="name" required placeholder="Ej. Cancha Municipal" /></label>
         <label>Direccion o referencia<input name="address" placeholder="Ej. Unidad deportiva norte" /></label>
         <label>Estado
@@ -2412,9 +2814,17 @@ function VenuesPanel({ league, onAddVenue, onDeleteVenue, onUpdateVenue }) {
         <button className="primary" type="submit">Agregar cancha</button>
       </form>
 
+      <div className="venue-list-head">
+        <strong>Canchas registradas</strong>
+        <span>{venues.length ? "Edita datos, estado y referencias sin salir de esta pantalla." : "Aun no hay sedes para esta liga."}</span>
+      </div>
       <div className="venue-list">
         {venues.map((venue) => (
           <form className="venue-card" key={venue.id} onSubmit={(event) => updateExistingVenue(event, venue)}>
+            <div className="venue-card-title">
+              <b>{venue.name?.slice(0, 2).toUpperCase() || "CA"}</b>
+              <span>{(venue.status || "active") === "active" ? "Activa" : "Inactiva"}</span>
+            </div>
             <label>Cancha<input name="name" defaultValue={venue.name} required aria-label={`Cancha ${venue.name}`} /></label>
             <label>Direccion<input name="address" defaultValue={venue.address || ""} aria-label={`Direccion ${venue.name}`} /></label>
             <label>Estado
@@ -2436,10 +2846,27 @@ function VenuesPanel({ league, onAddVenue, onDeleteVenue, onUpdateVenue }) {
 
 function AnnouncementsPanel({ league, onAddAnnouncement, onDeleteAnnouncement, onUpdateAnnouncement }) {
   const [notice, setNotice] = useState("");
+  const [createAnnouncementOpen, setCreateAnnouncementOpen] = useState(false);
+  const [announcementQuery, setAnnouncementQuery] = useState("");
+  const [announcementStatusFilter, setAnnouncementStatusFilter] = useState("all");
+  const [visibleAnnouncementLimit, setVisibleAnnouncementLimit] = useState(8);
   const announcements = [...(league.announcements || [])].sort((a, b) => (
     String(b.date || "").localeCompare(String(a.date || "")) ||
     String(a.title || "").localeCompare(String(b.title || ""))
   ));
+  const announcementSummary = announcements.reduce((summary, announcement) => {
+    const status = announcement.status === "archived" ? "archived" : "active";
+    summary[status] += 1;
+    return summary;
+  }, { active: 0, archived: 0 });
+  const filteredAnnouncements = announcements.filter((announcement) => {
+    const status = announcement.status === "archived" ? "archived" : "active";
+    const matchesStatus = announcementStatusFilter === "all" || status === announcementStatusFilter;
+    const query = normalizeAdminSearchTerm(announcementQuery);
+    const matchesQuery = !query || normalizeAdminSearchTerm(`${announcement.title || ""} ${announcement.body || ""} ${announcement.date || ""}`).includes(query);
+    return matchesStatus && matchesQuery;
+  });
+  const visibleAnnouncements = filteredAnnouncements.slice(0, visibleAnnouncementLimit);
 
   function submitAnnouncement(event) {
     event.preventDefault();
@@ -2447,6 +2874,7 @@ function AnnouncementsPanel({ league, onAddAnnouncement, onDeleteAnnouncement, o
     onAddAnnouncement(getFormPayload(event.currentTarget));
     setNotice("Aviso guardado correctamente.");
     event.currentTarget.reset();
+    setCreateAnnouncementOpen(false);
   }
 
   function updateExistingAnnouncement(event, announcementId) {
@@ -2463,50 +2891,136 @@ function AnnouncementsPanel({ league, onAddAnnouncement, onDeleteAnnouncement, o
   }
 
   return (
-    <section className="panel">
+    <section className="panel announcements-admin-panel">
       <SectionHeading eyebrow="Comunicacion" title="Avisos publicos" />
-      <p className="helper-text">Los avisos activos apareceran en la pagina publica. Si no hay avisos activos, esa seccion no se muestra.</p>
-      <div className="module-guide">
-        <span>1. Titulo corto</span>
-        <span>2. Mensaje claro</span>
-        <span>3. Publicado o archivado</span>
+      <div className="announcement-command-center">
+        <article>
+          <span><AdminIcon type="announcements" /></span>
+          <strong>{announcementSummary.active}</strong>
+          <small>Publicados</small>
+        </article>
+        <article>
+          <span><AdminIcon type="backups" /></span>
+          <strong>{announcementSummary.archived}</strong>
+          <small>Archivados</small>
+        </article>
+        <article>
+          <span><AdminIcon type="identity" /></span>
+          <strong>{announcements.length}</strong>
+          <small>Total creados</small>
+        </article>
       </div>
+      <p className="helper-text">Los avisos activos apareceran en la pagina publica. Usa archivado para conservar historial sin mostrarlo al publico.</p>
       {notice && <p className="auth-ok">{notice}</p>}
 
-      <form className="announcement-form" onSubmit={submitAnnouncement}>
-        <label>Titulo<input name="title" required placeholder="Ej. Cambio de horario" /></label>
-        <label>Fecha<input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></label>
+      <button className="announcement-create-button" type="button" onClick={() => setCreateAnnouncementOpen(true)}>
+          <span><AdminIcon type="announcements" /></span>
+          <div>
+            <strong>Nuevo aviso</strong>
+            <small>Crear comunicado publico o archivado</small>
+          </div>
+          <em>Crear nuevo aviso</em>
+      </button>
+
+      {createAnnouncementOpen && (
+        <div className="announcement-modal" role="dialog" aria-modal="true" aria-label="Crear nuevo aviso">
+          <button className="announcement-modal-backdrop" type="button" aria-label="Cancelar nuevo aviso" onClick={() => setCreateAnnouncementOpen(false)} />
+          <section className="announcement-modal-sheet">
+            <div className="announcement-modal-head">
+              <span><AdminIcon type="announcements" /></span>
+              <div>
+                <strong>Crear nuevo aviso</strong>
+                <small>Comunicado publico o archivado.</small>
+              </div>
+              <button className="announcement-modal-close" type="button" aria-label="Cerrar nuevo aviso" onClick={() => setCreateAnnouncementOpen(false)}>&times;</button>
+            </div>
+            <form className="announcement-form announcement-modal-form" onSubmit={submitAnnouncement}>
+              <label>Titulo<input name="title" required placeholder="Ej. Cambio de horario" /></label>
+              <label>Fecha<input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></label>
+              <label>Estado
+                <select name="status" defaultValue="active">
+                  <option value="active">Publicado</option>
+                  <option value="archived">Archivado</option>
+                </select>
+              </label>
+              <label className="wide-field">Aviso
+                <textarea name="body" required placeholder="Escribe el aviso para equipos, jugadores o publico." />
+              </label>
+              <div className="announcement-modal-actions">
+                <button type="button" onClick={() => setCreateAnnouncementOpen(false)}>Cancelar</button>
+                <button className="primary" type="submit">Guardar aviso</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      <div className="announcement-toolbar">
+        <label>Buscar aviso
+          <input
+            type="search"
+            value={announcementQuery}
+            onChange={(event) => {
+              setAnnouncementQuery(event.target.value);
+              setVisibleAnnouncementLimit(8);
+            }}
+            placeholder="Titulo, fecha o mensaje"
+          />
+        </label>
         <label>Estado
-          <select name="status" defaultValue="active">
-            <option value="active">Publicado</option>
-            <option value="archived">Archivado</option>
+          <select
+            value={announcementStatusFilter}
+            onChange={(event) => {
+              setAnnouncementStatusFilter(event.target.value);
+              setVisibleAnnouncementLimit(8);
+            }}
+          >
+            <option value="all">Todos</option>
+            <option value="active">Publicados</option>
+            <option value="archived">Archivados</option>
           </select>
         </label>
-        <label className="wide-field">Aviso
-          <textarea name="body" required placeholder="Escribe el aviso para equipos, jugadores o publico." />
-        </label>
-        <button className="primary" type="submit">Guardar aviso</button>
-      </form>
+        <span>{filteredAnnouncements.length} resultado(s)</span>
+      </div>
 
       <div className="announcement-list">
-        {announcements.map((announcement) => (
-          <form
-            className="announcement-card"
-            key={announcement.id}
-            onSubmit={(event) => updateExistingAnnouncement(event, announcement.id)}
-          >
-            <input name="title" defaultValue={announcement.title} required aria-label={`Titulo ${announcement.title}`} />
-            <input name="date" type="date" defaultValue={announcement.date || ""} aria-label={`Fecha ${announcement.title}`} />
-            <select name="status" defaultValue={announcement.status || "active"} aria-label={`Estado ${announcement.title}`}>
-              <option value="active">Publicado</option>
-              <option value="archived">Archivado</option>
-            </select>
-            <textarea name="body" defaultValue={announcement.body} required aria-label={`Aviso ${announcement.title}`} />
-            <button className="primary" type="submit">Guardar cambios</button>
-            <button className="danger" type="button" onClick={() => deleteExistingAnnouncement(announcement)}>Eliminar</button>
-          </form>
+        {visibleAnnouncements.map((announcement) => (
+          <details className="announcement-card compact" key={announcement.id}>
+            <summary>
+              <span className={`announcement-status-dot ${announcement.status === "archived" ? "archived" : "active"}`} />
+              <div>
+                <strong>{announcement.title}</strong>
+                <small>{announcement.date ? formatDate(announcement.date) : "Sin fecha"} · {announcement.status === "archived" ? "Archivado" : "Publicado"}</small>
+                <p>{announcement.body || "Sin contenido"}</p>
+              </div>
+              <em>Editar</em>
+            </summary>
+            <form onSubmit={(event) => updateExistingAnnouncement(event, announcement.id)}>
+              <label>Titulo<input name="title" defaultValue={announcement.title} required aria-label={`Titulo ${announcement.title}`} /></label>
+              <label>Fecha<input name="date" type="date" defaultValue={announcement.date || ""} aria-label={`Fecha ${announcement.title}`} /></label>
+              <label>Estado
+                <select name="status" defaultValue={announcement.status || "active"} aria-label={`Estado ${announcement.title}`}>
+                  <option value="active">Publicado</option>
+                  <option value="archived">Archivado</option>
+                </select>
+              </label>
+              <label className="wide-field">Aviso
+                <textarea name="body" defaultValue={announcement.body} required aria-label={`Aviso ${announcement.title}`} />
+              </label>
+              <div className="announcement-card-actions">
+                <button className="primary" type="submit">Guardar cambios</button>
+                <button className="danger" type="button" onClick={() => deleteExistingAnnouncement(announcement)}>Eliminar</button>
+              </div>
+            </form>
+          </details>
         ))}
         {!announcements.length && <p className="empty">Aun no hay avisos registrados.</p>}
+        {announcements.length > 0 && !filteredAnnouncements.length && <p className="empty">No hay avisos con esos filtros.</p>}
+        {visibleAnnouncements.length < filteredAnnouncements.length && (
+          <button className="secondary announcement-load-more" type="button" onClick={() => setVisibleAnnouncementLimit((limit) => limit + 8)}>
+            Mostrar 8 mas
+          </button>
+        )}
       </div>
     </section>
   );
@@ -2560,33 +3074,47 @@ function TournamentList({ title, competitions, league, onUpdateCompetition }) {
     <div className="tournament-list">
       {title && <h3>{title}</h3>}
       {competitions.map((competition) => (
-        <form
-          className="tournament-card"
-          key={competition.id}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!window.confirm(`¿Guardar cambios del torneo ${competition.name}?`)) return;
-            onUpdateCompetition(competition.id, getTournamentFormPayload(event.currentTarget));
-          }}
-        >
-          <label>Nombre<input name="name" defaultValue={competition.name} required /></label>
-          <TournamentTypeFields defaultValue={competition.type} />
-          <label>Temporada<input name="season" defaultValue={competition.season} required /></label>
-          <label>J. activa<input name="activeRound" defaultValue={competition.activeRound || ""} type="number" min="1" placeholder="Auto" /></label>
-          <label>Inicio<input name="startsAt" defaultValue={competition.startsAt || ""} type="date" /></label>
-          <label>Fin<input name="endsAt" defaultValue={competition.endsAt || ""} type="date" /></label>
-          <label>Estado
-            <select name="status" defaultValue={competition.status}>
-              <option value="active">Publicado en portada</option>
-              <option value="archived">Historico archivado</option>
-            </select>
-          </label>
-          <label className="checkbox-field">
-            <input name="makeCurrent" type="checkbox" defaultChecked={league.currentCompetitionId === competition.id} />
-            Principal si esta publicado
-          </label>
-          <button className="primary" type="submit">Guardar</button>
-        </form>
+        <details className={`tournament-card-shell ${competition.status || "active"}`} key={competition.id}>
+          <summary className="tournament-card-head">
+            <b>{competition.name?.slice(0, 2).toUpperCase() || "TO"}</b>
+            <div>
+              <strong>{competition.name}</strong>
+              <span>{competition.season || league.season} · {competition.type || "Liga"}</span>
+            </div>
+            <span className="tournament-card-summary-stats">
+              <small>Jornada {competition.activeRound || "Auto"}</small>
+              <small>{competition.startsAt || "Sin inicio"} - {competition.endsAt || "Sin fin"}</small>
+            </span>
+            <em>{competition.status === "archived" ? "Historico" : competition.status === "hidden" ? "Oculto" : "Publicado"}</em>
+          </summary>
+          <form
+            className="tournament-card"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!window.confirm(`¿Guardar cambios del torneo ${competition.name}?`)) return;
+              onUpdateCompetition(competition.id, getTournamentFormPayload(event.currentTarget));
+            }}
+          >
+            <label>Nombre<input name="name" defaultValue={competition.name} required /></label>
+            <TournamentTypeFields defaultValue={competition.type} />
+            <label>Temporada<input name="season" defaultValue={competition.season} required /></label>
+            <label>J. activa<input name="activeRound" defaultValue={competition.activeRound || ""} type="number" min="1" placeholder="Auto" /></label>
+            <label>Inicio<input name="startsAt" defaultValue={competition.startsAt || ""} type="date" /></label>
+            <label>Fin<input name="endsAt" defaultValue={competition.endsAt || ""} type="date" /></label>
+            <label>Estado
+              <select name="status" defaultValue={competition.status}>
+                <option value="active">Publicado en portada</option>
+                <option value="hidden">Oculto del publico</option>
+                <option value="archived">Historico archivado</option>
+              </select>
+            </label>
+            <label className="checkbox-field">
+              <input name="makeCurrent" type="checkbox" defaultChecked={league.currentCompetitionId === competition.id} />
+              Principal si esta activo u oculto
+            </label>
+            <button className="primary" type="submit">Guardar</button>
+          </form>
+        </details>
       ))}
       {!competitions.length && <p className="empty">No hay torneos en esta seccion.</p>}
     </div>
@@ -2603,11 +3131,11 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
   const [selectedPlayerTeamId, setSelectedPlayerTeamId] = useState("");
   const [playerPhotoResetKey, setPlayerPhotoResetKey] = useState(0);
   const modes = [
-    { id: "team", label: "Equipo" },
-    { id: "player", label: "Jugador" },
-    { id: "match", label: "Partido" },
-    { id: "schedule", label: "Calendario" },
-    { id: "playoffs", label: "Liguilla" }
+    { id: "team", label: "Equipo", icon: "teams" },
+    { id: "player", label: "Jugador", icon: "player" },
+    { id: "match", label: "Partido", icon: "match" },
+    { id: "schedule", label: "Calendario", icon: "calendar" },
+    { id: "playoffs", label: "Liguilla", icon: "playoffs" }
   ].filter((mode) => !allowedModeSet || allowedModeSet.has(mode.id));
   const defaultCompetitionId = getDefaultCompetitionId(league);
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(defaultCompetitionId);
@@ -2711,6 +3239,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                 type="button"
                 onClick={() => setCaptureMode(mode.id)}
               >
+                <span><AdminIcon type={mode.icon} /></span>
                 {mode.label}
               </button>
             ))}
@@ -2817,14 +3346,23 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                 {matchStage === "playoff" && (
                   <p className="helper-text wide-field">La liguilla se programa manualmente y se muestra aparte de las jornadas regulares.</p>
                 )}
-                <label>Fecha<input name="date" type="date" required /></label>
-                <label>Hora<input name="time" type="time" required /></label>
-                <label>Cancha<VenueSelect league={league} required /></label>
+                <label>Fecha<input name="date" type="date" /></label>
+                <label>Hora<input name="time" type="time" /></label>
+                <label>Cancha<VenueSelect league={league} /></label>
                 <label>Local<TeamSelect league={activeCompetitionLeague} name="homeTeamId" /></label>
                 <label>Visitante<TeamSelect league={activeCompetitionLeague} name="awayTeamId" /></label>
                 <label>Global local<input name="aggregateHome" type="number" min="0" placeholder="Opcional" /></label>
                 <label>Global visitante<input name="aggregateAway" type="number" min="0" placeholder="Opcional" /></label>
+                <label>Estado
+                  <select name="status" defaultValue="scheduled">
+                    <option value="scheduled">Programado</option>
+                    <option value="postponed">Pospuesto sin fecha</option>
+                    <option value="rescheduled">Reprogramado</option>
+                    <option value="advanced">Adelantado</option>
+                  </select>
+                </label>
               </div>
+              <p className="helper-text wide-field">Puedes crear el rol completo aunque un juego quede sin fecha, hora o cancha. Si todavia no hay sede definida, guardalo como pospuesto y reprogramalo despues desde Partidos.</p>
               <button className="primary" type="submit" disabled={activeCompetitionLeague.teams.length < 2}>Crear partido</button>
             </form>
           )}
@@ -2932,11 +3470,19 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
   const [rulesNotice, setRulesNotice] = useState("");
 
   return (
-    <section className="panel">
+    <section className="panel admin-data-panel config-admin-panel rules-admin-panel">
       <SectionHeading eyebrow="Estatutos" title="Reglas deportivas de la liga" />
       {rulesNotice && <p className="auth-ok">{rulesNotice}</p>}
+      <div className="admin-data-hero config-hero">
+        <div>
+          <span>Reglamento operativo</span>
+          <strong>Default {walkoverLabel}</strong>
+          <small>{(rules.disciplineScope || "competition") === "league" ? "Disciplina compartida en toda la liga" : "Disciplina separada por categoria"}</small>
+        </div>
+        <b>{playoffPhaseLabel || `${playoffQualifiers || 0} clasificados`}</b>
+      </div>
       <form
-        className="rules-form"
+        className="rules-form config-form"
         onSubmit={(event) => {
           event.preventDefault();
           if (!window.confirm("¿Guardar estas reglas deportivas para la liga?")) return;
@@ -2944,42 +3490,51 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
           setRulesNotice("Reglas guardadas correctamente.");
         }}
       >
-        <label>Equipo dado de baja
-          <select name="withdrawalPolicy" defaultValue={rules.withdrawalPolicy || "award_walkover"}>
-            <option value="award_walkover">Rival gana por default</option>
-            <option value="rest_only">Rival descansa sin marcador automatico</option>
-          </select>
-        </label>
-        <label>Puntos por default
-          <input name="forfeitPoints" type="number" min="0" max="5" defaultValue={rules.forfeitPoints ?? 3} />
-        </label>
-        <label>Goles a favor
-          <input name="forfeitGoalsFor" type="number" min="0" max="20" defaultValue={rules.forfeitGoalsFor ?? 3} />
-        </label>
-        <label>Goles en contra
-          <input name="forfeitGoalsAgainst" type="number" min="0" max="20" defaultValue={rules.forfeitGoalsAgainst ?? 0} />
-        </label>
-        <label>Amarillas para suspension
-          <input name="yellowSuspensionLimit" type="number" min="1" max="10" defaultValue={rules.yellowSuspensionLimit ?? 3} />
-        </label>
-        <label>Acumulacion de amarillas
-          <select name="disciplineScope" defaultValue={rules.disciplineScope || "competition"}>
-            <option value="competition">Separada por categoria</option>
-            <option value="league">Compartida en toda la liga</option>
-          </select>
-        </label>
-        <label>Partidos por roja
-          <input name="defaultRedSuspensionMatches" type="number" min="1" max="12" defaultValue={rules.defaultRedSuspensionMatches ?? 1} />
-        </label>
-        <label>Equipos a liguilla
-          <input name="playoffQualifiers" type="number" min="0" max="64" defaultValue={playoffQualifiers} />
-        </label>
-        <label>Partidos minimos por jugador para liguilla
-          <input name="minimumPlayoffAppearances" type="number" min="0" max="64" defaultValue={minimumPlayoffAppearances} />
-        </label>
-        <label className="wide-field">Notas del reglamento
-          <textarea name="notes" defaultValue={rules.notes || ""} placeholder="Ej. Criterios de sancion, defaults, bajas o acuerdos de asamblea." />
-        </label>
+        <div className="config-form-section">
+          <h3>Defaults y bajas</h3>
+          <label>Equipo dado de baja
+            <select name="withdrawalPolicy" defaultValue={rules.withdrawalPolicy || "award_walkover"}>
+              <option value="award_walkover">Rival gana por default</option>
+              <option value="rest_only">Rival descansa sin marcador automatico</option>
+            </select>
+          </label>
+          <label>Puntos por default
+            <input name="forfeitPoints" type="number" min="0" max="5" defaultValue={rules.forfeitPoints ?? 3} />
+          </label>
+          <label>Goles a favor
+            <input name="forfeitGoalsFor" type="number" min="0" max="20" defaultValue={rules.forfeitGoalsFor ?? 3} />
+          </label>
+          <label>Goles en contra
+            <input name="forfeitGoalsAgainst" type="number" min="0" max="20" defaultValue={rules.forfeitGoalsAgainst ?? 0} />
+          </label>
+        </div>
+        <div className="config-form-section">
+          <h3>Disciplina</h3>
+          <label>Amarillas para suspension
+            <input name="yellowSuspensionLimit" type="number" min="1" max="10" defaultValue={rules.yellowSuspensionLimit ?? 3} />
+          </label>
+          <label>Acumulacion de amarillas
+            <select name="disciplineScope" defaultValue={rules.disciplineScope || "competition"}>
+              <option value="competition">Separada por categoria</option>
+              <option value="league">Compartida en toda la liga</option>
+            </select>
+          </label>
+          <label>Partidos por roja
+            <input name="defaultRedSuspensionMatches" type="number" min="1" max="12" defaultValue={rules.defaultRedSuspensionMatches ?? 1} />
+          </label>
+        </div>
+        <div className="config-form-section">
+          <h3>Liguilla</h3>
+          <label>Equipos a liguilla
+            <input name="playoffQualifiers" type="number" min="0" max="64" defaultValue={playoffQualifiers} />
+          </label>
+          <label>Partidos minimos por jugador
+            <input name="minimumPlayoffAppearances" type="number" min="0" max="64" defaultValue={minimumPlayoffAppearances} />
+          </label>
+          <label>Notas del reglamento
+            <textarea name="notes" defaultValue={rules.notes || ""} placeholder="Ej. Criterios de sancion, defaults, bajas o acuerdos de asamblea." />
+          </label>
+        </div>
         <div className="rules-preview">
           <strong>Resumen operativo</strong>
           <span>Default: {walkoverLabel}, {rules.forfeitPoints ?? 3} puntos.</span>
@@ -2990,11 +3545,14 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
         </div>
         <button className="primary" type="submit">Guardar reglas</button>
       </form>
-      <AppearanceAdjustmentsPanel
-        league={league}
-        onAddAppearanceAdjustment={onAddAppearanceAdjustment}
-        onDeleteAppearanceAdjustment={onDeleteAppearanceAdjustment}
-      />
+      <details className="config-details appearance-config-details">
+        <summary>Ajustes manuales de partidos jugados</summary>
+        <AppearanceAdjustmentsPanel
+          league={league}
+          onAddAppearanceAdjustment={onAddAppearanceAdjustment}
+          onDeleteAppearanceAdjustment={onDeleteAppearanceAdjustment}
+        />
+      </details>
     </section>
   );
 }
@@ -3145,16 +3703,49 @@ function ManagementBoard({
   const [activeList, setActiveList] = useState(allowedLists?.[0] || "teams");
   const [listNotice, setListNotice] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState("all");
+  const [listSearch, setListSearch] = useState("");
+  const [teamStatusFilter, setTeamStatusFilter] = useState("all");
+  const [playerPositionFilter, setPlayerPositionFilter] = useState("all");
+  const [matchListStatusFilter, setMatchListStatusFilter] = useState("active");
   const showingAllCompetitions = selectedCompetitionId === "all";
   const selectedCompetition = showingAllCompetitions ? null : getCompetition(league, selectedCompetitionId);
   const activeCompetitionLeague = useMemo(
     () => (showingAllCompetitions ? league : scopeLeagueToCompetition(league, selectedCompetitionId)),
     [league, selectedCompetitionId, showingAllCompetitions]
   );
-  const competitionMatches = useMemo(
-    () => activeCompetitionLeague.matches,
-    [activeCompetitionLeague.matches]
-  );
+  const filteredTeamsForList = useMemo(() => {
+    const query = normalizeAdminSearchTerm(listSearch);
+    return activeCompetitionLeague.teams.filter((team) => {
+      if (teamStatusFilter !== "all" && (team.status || "active") !== teamStatusFilter) return false;
+      if (!query) return true;
+      const competition = getCompetition(league, team.competitionId);
+      return normalizeAdminSearchTerm(`${team.name} ${team.coach || ""} ${team.assistantCoach || ""} ${team.address || ""} ${competition?.name || ""}`).includes(query);
+    });
+  }, [activeCompetitionLeague.teams, league, listSearch, teamStatusFilter]);
+  const filteredPlayersForList = useMemo(() => {
+    const query = normalizeAdminSearchTerm(listSearch);
+    return activeCompetitionLeague.players.filter((player) => {
+      const team = getTeam(league, player.teamId);
+      const position = getPlayerPositionOptionValue(player.position);
+      if (playerPositionFilter !== "all" && position !== playerPositionFilter) return false;
+      if (!query) return true;
+      return normalizeAdminSearchTerm(`${player.number || ""} ${player.name} ${position} ${team?.name || ""}`).includes(query);
+    });
+  }, [activeCompetitionLeague.players, league, listSearch, playerPositionFilter]);
+  const competitionMatches = useMemo(() => {
+    const query = normalizeAdminSearchTerm(listSearch);
+    return activeCompetitionLeague.matches.filter((match) => {
+      const status = match.status || "scheduled";
+      if (matchListStatusFilter === "active" && !isEditableScheduleStatus(status)) return false;
+      if (matchListStatusFilter === "pending_date" && (match.date || match.time || match.venue)) return false;
+      if (matchListStatusFilter !== "all" && matchListStatusFilter !== "active" && matchListStatusFilter !== "pending_date" && status !== matchListStatusFilter) return false;
+      if (!query) return true;
+      const homeTeam = getTeam(league, match.homeTeamId);
+      const awayTeam = getTeam(league, match.awayTeamId);
+      const competition = getCompetition(league, match.competitionId);
+      return normalizeAdminSearchTerm(`${homeTeam?.name || ""} ${awayTeam?.name || ""} ${match.venue || ""} jornada ${match.round || ""} ${match.date || ""} ${match.time || ""} ${competition?.name || ""}`).includes(query);
+    });
+  }, [activeCompetitionLeague.matches, league, listSearch, matchListStatusFilter]);
   const regularEditMatches = useMemo(
     () => competitionMatches.filter((match) => (match.stage || "regular") !== "playoff"),
     [competitionMatches]
@@ -3181,7 +3772,7 @@ function ManagementBoard({
     const teamById = new Map(activeCompetitionLeague.teams.map((team) => [team.id, team]));
     const grouped = new Map();
 
-    for (const player of [...activeCompetitionLeague.players].sort((a, b) => (
+    for (const player of [...filteredPlayersForList].sort((a, b) => (
       String(teamById.get(a.teamId)?.name || "").localeCompare(String(teamById.get(b.teamId)?.name || "")) ||
       Number(a.number ?? 99999) - Number(b.number ?? 99999) ||
       String(a.name || "").localeCompare(String(b.name || ""))
@@ -3199,7 +3790,7 @@ function ManagementBoard({
     }
 
     return [...grouped.values()];
-  }, [activeCompetitionLeague.players, activeCompetitionLeague.teams, league]);
+  }, [activeCompetitionLeague.teams, filteredPlayersForList, league]);
   const matchRounds = useMemo(() => {
     const rounds = new Map();
     for (const match of [...regularEditMatches].sort((a, b) => (
@@ -3343,7 +3934,7 @@ function ManagementBoard({
           ? "Mostrando equipos, jugadores y partidos de todas las categorias."
           : `Mostrando ${selectedCompetition?.name || "la categoria seleccionada"} | ${selectedCompetition?.season || league.season}.`}
       </p>
-      <div className="list-filter-bar">
+      <div className="admin-filter-console list-filter-bar">
         <label>Categoria
           <select value={selectedCompetitionId} onChange={(event) => {
             setSelectedCompetitionId(event.target.value);
@@ -3355,6 +3946,47 @@ function ManagementBoard({
             ))}
           </select>
         </label>
+        <label>Buscar
+          <input
+            type="search"
+            value={listSearch}
+            onChange={(event) => setListSearch(event.target.value)}
+            placeholder={activeList === "matches" ? "Equipo, jornada, cancha o fecha" : activeList === "players" ? "Nombre, numero o equipo" : "Equipo, entrenador o sede"}
+          />
+        </label>
+        {activeList === "teams" && (
+          <label>Estado
+            <select value={teamStatusFilter} onChange={(event) => setTeamStatusFilter(event.target.value)}>
+              <option value="all">Todos</option>
+              <option value="active">Activos</option>
+              <option value="withdrawn">Baja</option>
+            </select>
+          </label>
+        )}
+        {activeList === "players" && (
+          <label>Posicion
+            <select value={playerPositionFilter} onChange={(event) => setPlayerPositionFilter(event.target.value)}>
+              <option value="all">Todas</option>
+              {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
+            </select>
+          </label>
+        )}
+        {activeList === "matches" && (
+          <label>Estado
+            <select value={matchListStatusFilter} onChange={(event) => {
+              setMatchListStatusFilter(event.target.value);
+              setOpenRounds(new Set());
+            }}>
+              <option value="active">Programables</option>
+              <option value="pending_date">Sin fecha/cancha</option>
+              <option value="postponed">Pospuestos</option>
+              <option value="rescheduled">Reprogramados</option>
+              <option value="advanced">Adelantados</option>
+              <option value="finished">Finalizados</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+        )}
       </div>
       <div className="list-tabs" aria-label="Listados editables">
         {listTabs.map((tab) => (
@@ -3373,7 +4005,7 @@ function ManagementBoard({
         {activeList === "teams" && <div>
           <h3>Equipos</h3>
           <div className="editable-list">
-            {activeCompetitionLeague.teams.map((team) => (
+            {filteredTeamsForList.map((team) => (
               <form
                 className="editable-row"
                 key={team.id}
@@ -3408,6 +4040,7 @@ function ManagementBoard({
                 {showingAllCompetitions ? "Aun no hay equipos registrados en ninguna categoria." : "Aun no hay equipos registrados en esta categoria."}
               </p>
             )}
+            {activeCompetitionLeague.teams.length > 0 && !filteredTeamsForList.length && <p className="empty">No hay equipos con esos filtros.</p>}
           </div>
         </div>}
 
@@ -3457,6 +4090,7 @@ function ManagementBoard({
                 {showingAllCompetitions ? "Aun no hay jugadores registrados en ninguna categoria." : "Aun no hay jugadores registrados en esta categoria."}
               </p>
             )}
+            {activeCompetitionLeague.players.length > 0 && !filteredPlayersForList.length && <p className="empty">No hay jugadores con esos filtros.</p>}
           </div>
         </div>}
 
@@ -3512,29 +4146,24 @@ function ManagementBoard({
                       <option value="Ida">Ida</option>
                       <option value="Vuelta">Vuelta</option>
                     </select>
-                    <input name="date" defaultValue={match.date} aria-label={`Fecha ${match.id}`} type="date" required />
+                    <input name="date" defaultValue={match.date} aria-label={`Fecha ${match.id}`} type="date" />
                     <input name="time" defaultValue={match.time || ""} aria-label={`Hora ${match.id}`} type="time" />
                     <VenueSelect league={league} defaultValue={match.venue || ""} ariaLabel={`Cancha ${match.id}`} />
                     <TeamSelect league={getCompetitionLeague(match.competitionId)} name="homeTeamId" defaultValue={match.homeTeamId} />
                     {canEditMatchResults && <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />}
                     <TeamSelect league={getCompetitionLeague(match.competitionId)} name="awayTeamId" defaultValue={match.awayTeamId} />
                     {canEditMatchResults && <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />}
-                    {canEditMatchResults && (
-                      <select name="status" defaultValue={match.status || "scheduled"} aria-label={`Estado ${match.id}`}>
-                        <option value="scheduled">Programado</option>
-                        <option value="finished">Finalizado</option>
-                        <option value="walkover">Default</option>
-                      </select>
-                    )}
+                    <MatchStatusSelect canEditMatchResults={canEditMatchResults} defaultValue={match.status || "scheduled"} ariaLabel={`Estado ${match.id}`} />
+                    <input name="scheduleNote" defaultValue={match.scheduleNote || ""} aria-label={`Nota programacion ${match.id}`} placeholder="Motivo / nota" />
                     <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
                     <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
                     {canEditMatchResults && <input name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} aria-label={`Tiempo extra local ${match.id}`} type="number" min="0" placeholder="TE local" />}
                     {canEditMatchResults && <input name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} aria-label={`Tiempo extra visitante ${match.id}`} type="number" min="0" placeholder="TE visit." />}
                     {canEditMatchResults && <input name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} aria-label={`Penales local ${match.id}`} type="number" min="0" placeholder="Pen local" />}
                     {canEditMatchResults && <input name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} aria-label={`Penales visitante ${match.id}`} type="number" min="0" placeholder="Pen visit." />}
-                    <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : match.status === "walkover" ? "Default" : "Programado"}</span>
-                    <button className="primary" type="submit" disabled={!canEditMatchResults && match.status !== "scheduled"}>Guardar</button>
-                    <button className="danger" type="button" disabled={!canEditMatchResults && match.status !== "scheduled"} onClick={() => confirmDelete("este partido de liguilla", () => onDeleteMatch(match.id), "Partido de liguilla eliminado correctamente.")}>Eliminar</button>
+                    <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : getMatchStatusLabel(match.status)}</span>
+                    <button className="primary" type="submit" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)}>Guardar</button>
+                    <button className="danger" type="button" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)} onClick={() => confirmDelete("este partido de liguilla", () => onDeleteMatch(match.id), "Partido de liguilla eliminado correctamente.")}>Eliminar</button>
                   </form>
                 ))}
               </div>
@@ -3582,29 +4211,24 @@ function ManagementBoard({
                             <option value="Ida">Ida</option>
                             <option value="Vuelta">Vuelta</option>
                           </select>
-                          <input name="date" defaultValue={match.date} aria-label={`Fecha ${match.id}`} type="date" required />
+                          <input name="date" defaultValue={match.date} aria-label={`Fecha ${match.id}`} type="date" />
                           <input name="time" defaultValue={match.time || ""} aria-label={`Hora ${match.id}`} type="time" />
                           <VenueSelect league={league} defaultValue={match.venue || ""} ariaLabel={`Cancha ${match.id}`} />
                           <TeamSelect league={getCompetitionLeague(match.competitionId)} name="homeTeamId" defaultValue={match.homeTeamId} />
                           {canEditMatchResults && <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />}
                           <TeamSelect league={getCompetitionLeague(match.competitionId)} name="awayTeamId" defaultValue={match.awayTeamId} />
                           {canEditMatchResults && <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />}
-                          {canEditMatchResults && (
-                            <select name="status" defaultValue={match.status || "scheduled"} aria-label={`Estado ${match.id}`}>
-                              <option value="scheduled">Programado</option>
-                              <option value="finished">Finalizado</option>
-                              <option value="walkover">Default</option>
-                            </select>
-                          )}
+                          <MatchStatusSelect canEditMatchResults={canEditMatchResults} defaultValue={match.status || "scheduled"} ariaLabel={`Estado ${match.id}`} />
+                          <input name="scheduleNote" defaultValue={match.scheduleNote || ""} aria-label={`Nota programacion ${match.id}`} placeholder="Motivo / nota" />
                           <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
                           <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
                           {canEditMatchResults && <input name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} aria-label={`Tiempo extra local ${match.id}`} type="number" min="0" placeholder="TE local" />}
                           {canEditMatchResults && <input name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} aria-label={`Tiempo extra visitante ${match.id}`} type="number" min="0" placeholder="TE visit." />}
                           {canEditMatchResults && <input name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} aria-label={`Penales local ${match.id}`} type="number" min="0" placeholder="Pen local" />}
                           {canEditMatchResults && <input name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} aria-label={`Penales visitante ${match.id}`} type="number" min="0" placeholder="Pen visit." />}
-                          <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : match.status === "walkover" ? "Default" : "Programado"}</span>
-                          <button className="primary" type="submit" disabled={!canEditMatchResults && match.status !== "scheduled"}>Guardar</button>
-                          <button className="danger" type="button" disabled={!canEditMatchResults && match.status !== "scheduled"} onClick={() => confirmDelete("este partido", () => onDeleteMatch(match.id), "Partido eliminado correctamente.")}>Eliminar</button>
+                          <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : getMatchStatusLabel(match.status)}</span>
+                          <button className="primary" type="submit" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)}>Guardar</button>
+                          <button className="danger" type="button" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)} onClick={() => confirmDelete("este partido", () => onDeleteMatch(match.id), "Partido eliminado correctamente.")}>Eliminar</button>
                         </form>
                       ))}
                     </div>
@@ -3616,6 +4240,9 @@ function ManagementBoard({
               <p className="empty">
                 {showingAllCompetitions ? "Aun no hay partidos registrados en ninguna categoria." : "Aun no hay partidos registrados en esta categoria."}
               </p>
+            )}
+            {activeCompetitionLeague.matches.length > 0 && !competitionMatches.length && (
+              <p className="empty">No hay partidos que coincidan con los filtros actuales.</p>
             )}
           </div>
         </div>}
@@ -3630,7 +4257,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     () => scopeLeagueToCompetition(league, selectedCompetitionId),
     [league, selectedCompetitionId]
   );
-  const preferredMatch = competitionLeague.matches.find((match) => match.status === "scheduled") || competitionLeague.matches[0];
+  const preferredMatch = competitionLeague.matches.find((match) => isActiveScheduleStatus(match.status)) || competitionLeague.matches[0];
   const [matchId, setMatchId] = useState(preferredMatch?.id || "");
   const selectedMatch = useMemo(
     () => competitionLeague.matches.find((match) => match.id === matchId) || preferredMatch,
@@ -3660,7 +4287,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   const visibleRoundMatches = useMemo(() => (
     roundMatches.filter((match) => {
       if (matchStatusFilter === "all") return true;
-      if (matchStatusFilter === "scheduled") return match.status === "scheduled";
+      if (matchStatusFilter === "scheduled") return isActiveScheduleStatus(match.status);
       if (matchStatusFilter === "finished") return match.status === "finished" || match.status === "walkover";
       return true;
     })
@@ -3680,6 +4307,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   const [events, setEvents] = useState([]);
   const [validationMessage, setValidationMessage] = useState("");
   const [sheetNotice, setSheetNotice] = useState("");
+  const [sheetStep, setSheetStep] = useState("match");
 
   useEffect(() => {
     const defaultCompetitionId = getDefaultCompetitionId(league);
@@ -3724,25 +4352,27 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       setDefaultScore("3");
       setEvents([]);
       setValidationMessage("");
+      setSheetStep("match");
       return;
     }
 
-    setHomeGoals(selectedMatch.homeGoals ?? 0);
-    setAwayGoals(selectedMatch.awayGoals ?? 0);
-    setExtraTimeEnabled(selectedMatch.extraTimeHomeGoals !== null && selectedMatch.extraTimeHomeGoals !== undefined && selectedMatch.extraTimeAwayGoals !== null && selectedMatch.extraTimeAwayGoals !== undefined);
-    setPenaltiesEnabled(selectedMatch.penaltyHomeGoals !== null && selectedMatch.penaltyHomeGoals !== undefined && selectedMatch.penaltyAwayGoals !== null && selectedMatch.penaltyAwayGoals !== undefined);
-    setExtraTimeHomeGoals(selectedMatch.extraTimeHomeGoals ?? "");
-    setExtraTimeAwayGoals(selectedMatch.extraTimeAwayGoals ?? "");
-    setPenaltyHomeGoals(selectedMatch.penaltyHomeGoals ?? "");
-    setPenaltyAwayGoals(selectedMatch.penaltyAwayGoals ?? "");
-    setObservations(selectedMatch.observations || "");
+    const isSavedSheet = selectedMatch.status === "finished" || selectedMatch.status === "walkover";
+    setHomeGoals(isSavedSheet ? selectedMatch.homeGoals ?? 0 : 0);
+    setAwayGoals(isSavedSheet ? selectedMatch.awayGoals ?? 0 : 0);
+    setExtraTimeEnabled(isSavedSheet && selectedMatch.extraTimeHomeGoals !== null && selectedMatch.extraTimeHomeGoals !== undefined && selectedMatch.extraTimeAwayGoals !== null && selectedMatch.extraTimeAwayGoals !== undefined);
+    setPenaltiesEnabled(isSavedSheet && selectedMatch.penaltyHomeGoals !== null && selectedMatch.penaltyHomeGoals !== undefined && selectedMatch.penaltyAwayGoals !== null && selectedMatch.penaltyAwayGoals !== undefined);
+    setExtraTimeHomeGoals(isSavedSheet ? selectedMatch.extraTimeHomeGoals ?? "" : "");
+    setExtraTimeAwayGoals(isSavedSheet ? selectedMatch.extraTimeAwayGoals ?? "" : "");
+    setPenaltyHomeGoals(isSavedSheet ? selectedMatch.penaltyHomeGoals ?? "" : "");
+    setPenaltyAwayGoals(isSavedSheet ? selectedMatch.penaltyAwayGoals ?? "" : "");
+    setObservations(isSavedSheet ? selectedMatch.observations || "" : "");
     const isWalkover = selectedMatch.status === "walkover";
     const winner = Number(selectedMatch.homeGoals || 0) > Number(selectedMatch.awayGoals || 0) ? "home" : "away";
     const walkoverGoals = Math.max(Number(selectedMatch.homeGoals || 0), Number(selectedMatch.awayGoals || 0));
     setSheetMode(isWalkover ? `default_${walkoverGoals === 5 ? "5" : "3"}` : "played");
     setDefaultWinner(winner);
     setDefaultScore(walkoverGoals === 5 ? "5" : "3");
-    setEvents(selectedMatch.events.map((event, index) => ({
+    setEvents(isSavedSheet ? selectedMatch.events.map((event, index) => ({
       id: `${selectedMatch.id}-${index}-${event.type}-${event.playerId}`,
       type: event.type,
       lockedType: event.type,
@@ -3756,7 +4386,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       disciplinaryPending: Boolean(event.disciplinaryPending),
       reason: event.reason || "",
       playerQuery: ""
-    })));
+    })) : []);
     setValidationMessage("");
     setSheetNotice("");
   }, [selectedMatch]);
@@ -4087,12 +4717,69 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     );
   }
 
+  function renderFinalEventItem(eventItem, index) {
+    const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
+    const eventTeam = getTeam(league, eventTeamId);
+    const playerTeamId = eventItem.type === "own_goal" ? getOpponentTeamId(eventTeamId) : eventTeamId;
+    const player = getPlayer(league, eventItem.playerId);
+    const playerNumber = getPlayerNumberForTeam(league, eventItem.playerId, playerTeamId);
+    const eventSide = eventTeamId === selectedMatch.homeTeamId ? "home" : "away";
+
+    return (
+      <article className={`admin-sheet-final-event event-kind-${eventItem.type} event-side-${eventSide}`} key={`${eventItem.id}-final-${index}`}>
+        <b aria-hidden="true">{getMatchEventIcon(eventItem.type)}</b>
+        <div>
+          <strong>{getMatchEventLabel(eventItem.type)}</strong>
+          <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
+        </div>
+        <small>{eventItem.minute ? `${eventItem.minute}' · ` : ""}{eventTeam?.name || "Equipo"}</small>
+      </article>
+    );
+  }
+
   const previousEvents = events.slice(0, -1);
   const latestEvent = events[events.length - 1] || null;
+  const activeStepIndex = Math.max(0, ADMIN_SHEET_STEPS.findIndex((step) => step.id === sheetStep));
+  const selectedStageLabel = (selectedMatch.stage || "regular") === "playoff"
+    ? [selectedMatch.playoffRound || "Liguilla", selectedMatch.playoffLeg].filter(Boolean).join(" | ")
+    : `Jornada ${selectedMatch.round || "-"}`;
+  const yellowCardCount = cleanEvents.filter((item) => item.type === "yellow").length;
+  const redCardCount = cleanEvents.filter((item) => item.type === "red").length;
+  const eventTotalCount = cleanEvents.length;
+  const observationsReady = Boolean(String(observations || "").trim());
+  const currentStepMeta = ADMIN_SHEET_STEPS[activeStepIndex] || ADMIN_SHEET_STEPS[0];
+
+  function goToSheetStep(nextStepId) {
+    setValidationMessage("");
+    setSheetStep(nextStepId);
+  }
+
+  function moveSheetStep(direction) {
+    const nextIndex = Math.min(ADMIN_SHEET_STEPS.length - 1, Math.max(0, activeStepIndex + direction));
+    goToSheetStep(ADMIN_SHEET_STEPS[nextIndex].id);
+  }
+
+  function changeScore(side, delta) {
+    const setter = side === "home" ? setHomeGoals : setAwayGoals;
+    const currentValue = Number(side === "home" ? homeGoals : awayGoals || 0);
+    setter(String(Math.max(0, currentValue + delta)));
+  }
+
+  function renderTeamBadge(team, side) {
+    const initials = String(team?.name || side)
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase();
+
+    return <span className={`admin-sheet-team-badge ${side}`}>{initials || "EQ"}</span>;
+  }
 
   return (
     <form
-      className="match-sheet"
+      className="match-sheet admin-sheet-app"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
@@ -4136,206 +4823,367 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         }
       }}
     >
-      <div className="sheet-picker">
-        <label>Torneo
-          <CompetitionSelect
-            league={league}
-            name="sheetCompetitionId"
-            defaultValue={selectedCompetitionId}
-            value={selectedCompetitionId}
-            onChange={(event) => setSelectedCompetitionId(event.target.value)}
-          />
-        </label>
-        <label>Jornada
-          <select value={selectedRound} onChange={(event) => setSelectedRound(event.target.value)}>
-            {hasPlayoffMatches && <option value="playoff">Liguilla</option>}
-            {rounds.map((round) => <option key={round} value={round}>Jornada {round}</option>)}
-          </select>
-        </label>
-        <label>Estado
-          <select value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
-            <option value="scheduled">Por capturar</option>
-            <option value="finished">Capturados</option>
-            <option value="all">Todos</option>
-          </select>
-        </label>
-        <label className="sheet-match-select">Partido
-          <select value={selectedMatch.id} onChange={(event) => setMatchId(event.target.value)} disabled={!visibleRoundMatches.length}>
-            {visibleRoundMatches.map((match) => (
-              <option key={match.id} value={match.id}>
-                {getTeam(league, match.homeTeamId)?.name || "Local"} vs {getTeam(league, match.awayTeamId)?.name || "Visitante"} | {match.status === "finished" || match.status === "walkover" ? `${match.homeGoals}-${match.awayGoals}` : match.time || "POR DEFINIR"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="sheet-match-grid" aria-label="Partidos de la jornada">
-          {visibleRoundMatches.map((match) => (
+      <div className="admin-sheet-shell">
+        <header className="admin-sheet-hero">
+          <div className="admin-sheet-brand">
+            <img src={ligatecLogo} alt="" />
+            <div>
+              <span>Ligatec Admin</span>
+              <strong>Captura de acta</strong>
+            </div>
+          </div>
+          <div className="admin-sheet-step-chip">
+            <span>Paso {currentStepMeta.number}/5</span>
+            <strong>{currentStepMeta.label}</strong>
+          </div>
+        </header>
+
+        <div className="admin-sheet-scoreboard" aria-label="Resumen del partido seleccionado">
+          <div className="admin-sheet-club">
+            {renderTeamBadge(homeTeam, "home")}
+            <strong>{homeTeam?.name || "Local"}</strong>
+            <span>Local</span>
+          </div>
+          <div className="admin-sheet-result">
+            <span>{selectedStageLabel}</span>
+            <strong>{expectedHomeGoals} - {expectedAwayGoals}</strong>
+            <small>{sheetMode === "played" ? "Partido jugado" : `Default ${defaultScore}-0`}</small>
+          </div>
+          <div className="admin-sheet-club away">
+            {renderTeamBadge(awayTeam, "away")}
+            <strong>{awayTeam?.name || "Visitante"}</strong>
+            <span>Visitante</span>
+          </div>
+        </div>
+
+        <div className="admin-sheet-meta-row" aria-label="Datos del partido seleccionado">
+          <span>📅 {formatDate(selectedMatch.date)}</span>
+          <span>⏱ {selectedMatch.time || "Hora por definir"}</span>
+          <span>📍 {selectedMatch.venue || "Cancha por definir"}</span>
+        </div>
+
+        <nav className="admin-sheet-stepper" aria-label="Pasos de captura">
+          {ADMIN_SHEET_STEPS.map((step, index) => (
             <button
-              className={selectedMatch?.id === match.id ? "active" : ""}
-              key={match.id}
+              className={`${sheetStep === step.id ? "active" : ""} ${index < activeStepIndex ? "done" : ""}`}
+              key={step.id}
               type="button"
-              onClick={() => setMatchId(match.id)}
+              onClick={() => goToSheetStep(step.id)}
             >
-              <span>{(match.stage || "regular") === "playoff" ? [match.playoffRound || "Liguilla", match.playoffLeg].filter(Boolean).join(" | ") : `Jornada ${match.round}`}</span>
-              <strong>{getTeam(league, match.homeTeamId)?.name || "LOCAL"} VS {getTeam(league, match.awayTeamId)?.name || "VISITANTE"}</strong>
-              <span>{match.status === "finished" || match.status === "walkover" ? `${match.homeGoals}-${match.awayGoals}` : match.time || "POR DEFINIR"} | {match.venue || "CANCHA POR DEFINIR"}</span>
+              <span>{step.number}</span>
+              <strong>{step.label}</strong>
+              <small>{step.hint}</small>
             </button>
           ))}
-          {!visibleRoundMatches.length && <p className="empty">No hay partidos con ese filtro en esta jornada.</p>}
-        </div>
-      </div>
+        </nav>
 
-      <div className="sheet-head">
-        <div className="sheet-score">
-          <div className="sheet-team home">
-            <span>Local</span>
-            <strong>{homeTeam?.name || "Local"}</strong>
-          </div>
-          <div className="score-box">
-            <input value={homeGoals} onChange={(event) => setHomeGoals(event.target.value)} type="number" min="0" aria-label="Goles local" />
-            <span>-</span>
-            <input value={awayGoals} onChange={(event) => setAwayGoals(event.target.value)} type="number" min="0" aria-label="Goles visitante" />
-          </div>
-          <div className="sheet-team away">
-            <span>Visitante</span>
-            <strong>{awayTeam?.name || "Visitante"}</strong>
-          </div>
-        </div>
-        <div className="sheet-match-meta" aria-label="Datos del partido seleccionado">
-          <span>{(selectedMatch.stage || "regular") === "playoff" ? [selectedMatch.playoffRound || "Liguilla", selectedMatch.playoffLeg].filter(Boolean).join(" | ") : `Jornada ${selectedMatch.round || "-"}`}</span>
-          <time>{formatDate(selectedMatch.date)}</time>
-          <span>{selectedMatch.time || "Hora por definir"}</span>
-          <span>{selectedMatch.venue || "Cancha por definir"}</span>
-        </div>
-      </div>
+        {sheetStep === "match" && (
+          <section className="admin-sheet-screen admin-sheet-match-screen">
+            <div className="admin-sheet-screen-head">
+              <div>
+                <span>Seleccionar partido</span>
+                <strong>Lista de partidos de la jornada</strong>
+              </div>
+              <small>{visibleRoundMatches.length} disponible(s)</small>
+            </div>
+            <div className="sheet-picker admin-sheet-picker">
+              <label>Torneo
+                <CompetitionSelect
+                  league={league}
+                  name="sheetCompetitionId"
+                  defaultValue={selectedCompetitionId}
+                  value={selectedCompetitionId}
+                  onChange={(event) => setSelectedCompetitionId(event.target.value)}
+                />
+              </label>
+              <label>Jornada
+                <select value={selectedRound} onChange={(event) => setSelectedRound(event.target.value)}>
+                  {hasPlayoffMatches && <option value="playoff">Liguilla</option>}
+                  {rounds.map((round) => <option key={round} value={round}>Jornada {round}</option>)}
+                </select>
+              </label>
+              <label>Estado
+                <select value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
+                  <option value="scheduled">Por capturar</option>
+                  <option value="finished">Capturados</option>
+                  <option value="all">Todos</option>
+                </select>
+              </label>
+              <label className="sheet-match-select">Partido
+                <select
+                  value={selectedMatch.id}
+                  onChange={(event) => {
+                    setMatchId(event.target.value);
+                    setSheetStep("score");
+                  }}
+                  disabled={!visibleRoundMatches.length}
+                >
+                  {visibleRoundMatches.map((match) => (
+                    <option key={match.id} value={match.id}>
+                      {getTeam(league, match.homeTeamId)?.name || "Local"} vs {getTeam(league, match.awayTeamId)?.name || "Visitante"} | {match.status === "finished" || match.status === "walkover" ? `${match.homeGoals}-${match.awayGoals}` : match.time || "POR DEFINIR"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="admin-sheet-selection-brief">
+              <span><b>{selectedStageLabel}</b> Selecciona el partido que vas a operar.</span>
+              <span>El marcador inicia en 0-0 para actas nuevas y solo conserva datos si ya fue capturada.</span>
+            </div>
+            <div className="sheet-match-grid admin-sheet-match-grid" aria-label="Partidos de la jornada">
+              {visibleRoundMatches.map((match) => {
+                const cardHomeTeam = getTeam(league, match.homeTeamId);
+                const cardAwayTeam = getTeam(league, match.awayTeamId);
+                const isCaptured = match.status === "finished" || match.status === "walkover";
+                const cardStatusLabel = isCaptured ? `Acta ${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : getMatchStatusLabel(match.status);
+                return (
+                  <button
+                    className={selectedMatch?.id === match.id ? "active" : ""}
+                    key={match.id}
+                    type="button"
+                    onClick={() => {
+                      setMatchId(match.id);
+                      setSheetStep("score");
+                    }}
+                  >
+                    <span className="admin-sheet-match-card-head">
+                      <b>{(match.stage || "regular") === "playoff" ? [match.playoffRound || "Liguilla", match.playoffLeg].filter(Boolean).join(" | ") : `Jornada ${match.round}`}</b>
+                      <small>{cardStatusLabel}</small>
+                    </span>
+                    <strong className="admin-sheet-match-teams">
+                      <span>{cardHomeTeam?.name || "LOCAL"}</span>
+                      <em>VS</em>
+                      <span>{cardAwayTeam?.name || "VISITANTE"}</span>
+                    </strong>
+                    <span className="admin-sheet-match-meta">📅 {formatDate(match.date)} · ⏱ {match.time || "POR DEFINIR"}</span>
+                    <span className="admin-sheet-match-meta">📍 {match.venue || "Cancha por definir"}</span>
+                  </button>
+                );
+              })}
+              {!visibleRoundMatches.length && <p className="empty">No hay partidos con ese filtro en esta jornada.</p>}
+            </div>
+          </section>
+        )}
 
-      <div className="sheet-checklist">
-        <span>{isDefaultSheet ? `Goles reales local: ${homeGoalEvents}` : `Goles local: ${homeGoalEvents}/${expectedHomeGoals}`}</span>
-        <span>{isDefaultSheet ? `Goles reales visitante: ${awayGoalEvents}` : `Goles visitante: ${awayGoalEvents}/${expectedAwayGoals}`}</span>
-        <span>Tarjetas: {cleanEvents.filter((item) => item.type === "yellow").length} amarilla(s), {cleanEvents.filter((item) => item.type === "red").length} roja(s)</span>
-      </div>
-
-      <div className="sheet-default-controls" aria-label="Tipo de resultado del acta">
-        <label>Tipo de acta
-          <select value={sheetMode} onChange={(event) => applyDefaultScore(event.target.value)}>
-            <option value="played">Partido jugado</option>
-            <option value="default_3">Default 3-0</option>
-            <option value="default_5">Default 5-0</option>
-          </select>
-        </label>
-        <label>Ganador del default
-          <select value={defaultWinner} onChange={(event) => changeDefaultWinner(event.target.value)} disabled={!isDefaultSheet}>
-            <option value="home">{homeTeam?.name || "Local"}</option>
-            <option value="away">{awayTeam?.name || "Visitante"}</option>
-          </select>
-        </label>
-        <p>
-          {isDefaultSheet
-            ? `Se guardara como default administrativo ${defaultScore}-0 para la tabla. Los eventos capturados se suman solo a jugadores.`
-            : "Usa partido jugado cuando el marcador requiere goles, tarjetas y eventos normales."}
-        </p>
-      </div>
-
-      {sheetMode === "played" && (
-        <details className="sheet-advanced-panel">
-          <summary>
-            <strong>Opciones de liguilla</strong>
-            <span>Tiempo extra y penales solo cuando el partido lo requiera</span>
-          </summary>
-          <div className="sheet-advanced-grid">
-            <label className="event-toggle-field">
-              <input checked={extraTimeEnabled} onChange={(event) => setExtraTimeEnabled(event.target.checked)} type="checkbox" />
-              Registrar tiempo extra
-            </label>
-            {extraTimeEnabled && (
-              <>
-                <label>T.E. local
-                  <input min="0" type="number" value={extraTimeHomeGoals} onChange={(event) => setExtraTimeHomeGoals(event.target.value)} placeholder="0" />
-                </label>
-                <label>T.E. visitante
-                  <input min="0" type="number" value={extraTimeAwayGoals} onChange={(event) => setExtraTimeAwayGoals(event.target.value)} placeholder="0" />
-                </label>
-              </>
+        {sheetStep === "score" && (
+          <section className="admin-sheet-screen">
+            <div className="admin-sheet-screen-head">
+              <div>
+                <span>Detalle del partido</span>
+                <strong>Marcador oficial</strong>
+              </div>
+              <small>{isEditingSavedSheet ? "Edicion de acta" : "Nueva captura"}</small>
+            </div>
+            <div className="admin-sheet-score-edit">
+              <article>
+                <span>Local</span>
+                <strong>{homeTeam?.name || "Local"}</strong>
+                <div className="admin-score-stepper">
+                  <button type="button" onClick={() => changeScore("home", -1)}>−</button>
+                  <input value={homeGoals} onChange={(event) => setHomeGoals(event.target.value)} type="number" min="0" aria-label="Goles local" />
+                  <button type="button" onClick={() => changeScore("home", 1)}>+</button>
+                </div>
+              </article>
+              <article>
+                <span>Visitante</span>
+                <strong>{awayTeam?.name || "Visitante"}</strong>
+                <div className="admin-score-stepper">
+                  <button type="button" onClick={() => changeScore("away", -1)}>−</button>
+                  <input value={awayGoals} onChange={(event) => setAwayGoals(event.target.value)} type="number" min="0" aria-label="Goles visitante" />
+                  <button type="button" onClick={() => changeScore("away", 1)}>+</button>
+                </div>
+              </article>
+            </div>
+            {sheetMode === "played" && (
+              <details className="sheet-advanced-panel admin-sheet-advanced">
+                <summary>
+                  <strong>Opciones de liguilla</strong>
+                  <span>Solo cuando el reglamento lo indique</span>
+                </summary>
+                <div className="sheet-advanced-grid">
+                  <label className="event-toggle-field">
+                    <input checked={extraTimeEnabled} onChange={(event) => setExtraTimeEnabled(event.target.checked)} type="checkbox" />
+                    Registrar tiempo extra
+                  </label>
+                  {extraTimeEnabled && (
+                    <>
+                      <label>T.E. local
+                        <input min="0" type="number" value={extraTimeHomeGoals} onChange={(event) => setExtraTimeHomeGoals(event.target.value)} placeholder="0" />
+                      </label>
+                      <label>T.E. visitante
+                        <input min="0" type="number" value={extraTimeAwayGoals} onChange={(event) => setExtraTimeAwayGoals(event.target.value)} placeholder="0" />
+                      </label>
+                    </>
+                  )}
+                  <label className="event-toggle-field">
+                    <input checked={penaltiesEnabled} onChange={(event) => setPenaltiesEnabled(event.target.checked)} type="checkbox" />
+                    Registrar penales
+                  </label>
+                  {penaltiesEnabled && (
+                    <>
+                      <label>Penales local
+                        <input min="0" type="number" value={penaltyHomeGoals} onChange={(event) => setPenaltyHomeGoals(event.target.value)} placeholder="0" />
+                      </label>
+                      <label>Penales visitante
+                        <input min="0" type="number" value={penaltyAwayGoals} onChange={(event) => setPenaltyAwayGoals(event.target.value)} placeholder="0" />
+                      </label>
+                    </>
+                  )}
+                </div>
+              </details>
             )}
-            <label className="event-toggle-field">
-              <input checked={penaltiesEnabled} onChange={(event) => setPenaltiesEnabled(event.target.checked)} type="checkbox" />
-              Registrar penales
-            </label>
-            {penaltiesEnabled && (
-              <>
-                <label>Penales local
-                  <input min="0" type="number" value={penaltyHomeGoals} onChange={(event) => setPenaltyHomeGoals(event.target.value)} placeholder="0" />
-                </label>
-                <label>Penales visitante
-                  <input min="0" type="number" value={penaltyAwayGoals} onChange={(event) => setPenaltyAwayGoals(event.target.value)} placeholder="0" />
-                </label>
-              </>
-            )}
-          </div>
-        </details>
-      )}
+          </section>
+        )}
 
-      <label className="sheet-observations">
-        Observaciones del acta
-        <textarea
-          value={observations}
-          onChange={(event) => setObservations(event.target.value)}
-          placeholder="Registra hechos relevantes, incidencias, acuerdos arbitrales o notas internas del partido."
-        />
-      </label>
+        {sheetStep === "events" && (
+          <section className="admin-sheet-screen">
+            <div className="admin-sheet-screen-head">
+              <div>
+                <span>Eventos del partido</span>
+                <strong>Registro rapido</strong>
+              </div>
+              <small>{eventTotalCount} evento(s)</small>
+            </div>
+            <div className="event-toolbar admin-sheet-toolbar">
+              <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Agregar goles pendientes</button>
+            </div>
+            <div className="event-quick-panel" aria-label="Agregar eventos rapidos">
+              <div className="event-team-card">
+                <strong>{homeTeam?.name || "Local"}</strong>
+                <span>Eventos del local</span>
+                <div className="event-quick-buttons">
+                  <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
+                  <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
+                  <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
+                  <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
+                </div>
+              </div>
+              <div className="event-team-card away">
+                <strong>{awayTeam?.name || "Visitante"}</strong>
+                <span>Eventos del visitante</span>
+                <div className="event-quick-buttons">
+                  <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
+                  <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
+                  <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
+                  <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
+                </div>
+              </div>
+            </div>
+            <div className="event-list admin-sheet-event-list">
+              {latestEvent && (
+                <div className="sheet-latest-event">
+                  <span>Ultimo evento registrado</span>
+                  {renderEventRow(latestEvent, events.length - 1, true)}
+                </div>
+              )}
+              {previousEvents.length > 0 && (
+                <details className="sheet-previous-events">
+                  <summary>
+                    <strong>Eventos anteriores</strong>
+                    <span>{previousEvents.length} evento(s), tocar para revisar</span>
+                  </summary>
+                  <div className="sheet-previous-event-list">
+                    {previousEvents.map((eventItem, index) => renderEventRow(eventItem, index))}
+                  </div>
+                </details>
+              )}
+              {!events.length && <p className="empty">Agrega goles, tarjetas amarillas o rojas para completar el acta.</p>}
+            </div>
+          </section>
+        )}
+
+        {sheetStep === "notes" && (
+          <section className="admin-sheet-screen">
+            <div className="admin-sheet-screen-head">
+              <div>
+                <span>Observaciones</span>
+                <strong>Notas y tipo de acta</strong>
+              </div>
+              <small>{observationsReady ? "Con observaciones" : "Sin observaciones"}</small>
+            </div>
+            <label className="sheet-observations">
+              Observaciones del acta
+              <textarea
+                value={observations}
+                onChange={(event) => setObservations(event.target.value)}
+                placeholder="Registra hechos relevantes, incidencias, acuerdos arbitrales o notas internas del partido."
+              />
+            </label>
+            <div className="sheet-default-controls admin-sheet-type-controls" aria-label="Tipo de resultado del acta">
+              <label>Tipo de acta
+                <select value={sheetMode} onChange={(event) => applyDefaultScore(event.target.value)}>
+                  <option value="played">Partido jugado</option>
+                  <option value="default_3">Default 3-0</option>
+                  <option value="default_5">Default 5-0</option>
+                </select>
+              </label>
+              <label>Ganador del default
+                <select value={defaultWinner} onChange={(event) => changeDefaultWinner(event.target.value)} disabled={!isDefaultSheet}>
+                  <option value="home">{homeTeam?.name || "Local"}</option>
+                  <option value="away">{awayTeam?.name || "Visitante"}</option>
+                </select>
+              </label>
+              <p>
+                {isDefaultSheet
+                  ? `Se guardara como default administrativo ${defaultScore}-0 para la tabla. Los eventos capturados se suman solo a jugadores.`
+                  : "Usa partido jugado cuando el marcador requiere goles, tarjetas y eventos normales."}
+              </p>
+            </div>
+          </section>
+        )}
+
+        {sheetStep === "finish" && (
+          <section className="admin-sheet-screen">
+            <div className="admin-sheet-screen-head">
+              <div>
+                <span>Finalizar y publicar</span>
+                <strong>Resumen del acta</strong>
+              </div>
+              <small>{isEditingSavedSheet ? "Reemplazara captura" : "Lista para guardar"}</small>
+            </div>
+            <div className="admin-sheet-final-card">
+              <div className="admin-sheet-final-score">
+                {renderTeamBadge(homeTeam, "home")}
+                <strong>{expectedHomeGoals} - {expectedAwayGoals}</strong>
+                {renderTeamBadge(awayTeam, "away")}
+              </div>
+              <div className="admin-sheet-summary-grid">
+                <span>Goles local <strong>{isDefaultSheet ? homeGoalEvents : `${homeGoalEvents}/${expectedHomeGoals}`}</strong></span>
+                <span>Goles visitante <strong>{isDefaultSheet ? awayGoalEvents : `${awayGoalEvents}/${expectedAwayGoals}`}</strong></span>
+                <span>Amarillas <strong>{yellowCardCount}</strong></span>
+                <span>Rojas <strong>{redCardCount}</strong></span>
+                <span>Eventos registrados <strong>{eventTotalCount}</strong></span>
+                <span>Observaciones <strong>{observationsReady ? "Si" : "No"}</strong></span>
+              </div>
+              <div className="admin-sheet-final-note">
+                <strong>{sheetMode === "played" ? "Partido jugado" : `Default administrativo ${defaultScore}-0`}</strong>
+                <span>{observationsReady ? observations : "Sin observaciones capturadas."}</span>
+              </div>
+              <div className="admin-sheet-final-events">
+                <div>
+                  <strong>Eventos registrados</strong>
+                  <span>{cleanEvents.length} evento(s) en el acta</span>
+                </div>
+                {cleanEvents.length ? cleanEvents.map((eventItem, index) => renderFinalEventItem(eventItem, index)) : (
+                  <p className="empty">Sin eventos registrados.</p>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
       {validationMessage && <p className="sheet-alert">{validationMessage}</p>}
       {sheetNotice && <p className="auth-ok">{sheetNotice}</p>}
 
-      <div className="event-toolbar">
-        <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Agregar goles pendientes</button>
-      </div>
-
-      <div className="event-quick-panel" aria-label="Agregar eventos rapidos">
-        <div className="event-team-card">
-          <strong>{homeTeam?.name || "Local"}</strong>
-          <span>Eventos del local</span>
-          <div className="event-quick-buttons">
-            <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
-            <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
-            <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
-            <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
-          </div>
-        </div>
-        <div className="event-team-card away">
-          <strong>{awayTeam?.name || "Visitante"}</strong>
-          <span>Eventos del visitante</span>
-          <div className="event-quick-buttons">
-            <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
-            <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
-            <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
-            <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
-          </div>
+        <div className="admin-sheet-actions">
+          <button type="button" onClick={() => moveSheetStep(-1)} disabled={activeStepIndex === 0}>Anterior</button>
+          {sheetStep === "finish" ? (
+            <button className="primary" type="submit">Guardar y publicar acta</button>
+          ) : (
+            <button className="primary" type="button" onClick={() => moveSheetStep(1)}>Siguiente</button>
+          )}
         </div>
       </div>
-
-      <div className="event-list">
-        {latestEvent && (
-          <div className="sheet-latest-event">
-            <span>Ultimo evento registrado</span>
-            {renderEventRow(latestEvent, events.length - 1, true)}
-          </div>
-        )}
-        {previousEvents.length > 0 && (
-          <details className="sheet-previous-events">
-            <summary>
-              <strong>Eventos anteriores</strong>
-              <span>{previousEvents.length} evento(s), tocar para revisar</span>
-            </summary>
-            <div className="sheet-previous-event-list">
-              {previousEvents.map((eventItem, index) => renderEventRow(eventItem, index))}
-            </div>
-          </details>
-        )}
-        {!events.length && <p className="empty">Agrega goles, tarjetas amarillas o rojas para completar el acta.</p>}
-      </div>
-
-      <button className="primary" type="submit">Guardar acta</button>
     </form>
   );
 }
@@ -4716,6 +5564,26 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   const [sanctionNotice, setSanctionNotice] = useState("");
   const [sanctionIndefinite, setSanctionIndefinite] = useState(false);
   const [pendingResolutionType, setPendingResolutionType] = useState({});
+  const [sanctionQuery, setSanctionQuery] = useState("");
+  const [sanctionStatusFilter, setSanctionStatusFilter] = useState("active");
+  const visibleActiveSanctions = useMemo(() => {
+    const query = normalizeAdminSearchTerm(sanctionQuery);
+    return activeSanctions.filter((sanction) => {
+      const player = getPlayer(activeLeague, sanction.playerId);
+      const team = player ? getTeam(activeLeague, player.teamId) : null;
+      if (!query) return true;
+      return normalizeAdminSearchTerm(`${player?.name || ""} ${player?.number || ""} ${team?.name || ""} ${sanction.type || ""} ${sanction.reason || ""}`).includes(query);
+    });
+  }, [activeLeague, activeSanctions, sanctionQuery]);
+  const visibleClearedSanctions = useMemo(() => {
+    const query = normalizeAdminSearchTerm(sanctionQuery);
+    return clearedSanctions.filter((sanction) => {
+      const player = getPlayer(activeLeague, sanction.playerId);
+      const team = player ? getTeam(activeLeague, player.teamId) : null;
+      if (!query) return true;
+      return normalizeAdminSearchTerm(`${player?.name || ""} ${player?.number || ""} ${team?.name || ""} ${sanction.type || ""} ${sanction.reason || ""}`).includes(query);
+    });
+  }, [activeLeague, clearedSanctions, sanctionQuery]);
 
   function submitSanction(event) {
     event.preventDefault();
@@ -4754,22 +5622,14 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   }
 
   return (
-    <section className="panel">
+    <section className="panel admin-data-panel commission-panel">
       <SectionHeading eyebrow="Comision disciplinaria" title="Sanciones extraordinarias" />
       {sanctionNotice && <p className="auth-ok">{sanctionNotice}</p>}
       <form className="sanction-form" onSubmit={submitSanction}>
         <label>Torneo
           <CompetitionSelect league={league} name="competitionId" defaultValue={getDefaultCompetitionId(league)} />
         </label>
-        <label>Jugador
-          <select name="playerId" required>
-            {activeLeague.players.map((player) => (
-              <option key={player.id} value={player.id}>
-                #{player.number} {player.name} | {getTeam(activeLeague, player.teamId)?.name || "Sin equipo"}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SearchablePlayerSelect league={activeLeague} name="playerId" players={activeLeague.players} placeholder="Buscar jugador sancionado..." />
         <label>Tipo
           <select name="type" defaultValue="Agresion">
             <option value="Agresion">Agresion</option>
@@ -4813,7 +5673,20 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
         <button className="primary" type="submit" disabled={!activeLeague.players.length}>Agregar sancion</button>
       </form>
 
-      <div className="sanction-list">
+      <div className="admin-filter-console">
+        <label>Buscar sancion
+          <input type="search" value={sanctionQuery} onChange={(event) => setSanctionQuery(event.target.value)} placeholder="Jugador, equipo, motivo" />
+        </label>
+        <label>Vista
+          <select value={sanctionStatusFilter} onChange={(event) => setSanctionStatusFilter(event.target.value)}>
+            <option value="active">Activas</option>
+            <option value="pending">Rojas por dictaminar</option>
+            <option value="cleared">Liberados</option>
+          </select>
+        </label>
+      </div>
+
+      {sanctionStatusFilter === "pending" && <div className="sanction-list">
         <h3>Rojas pendientes de comision</h3>
         {pendingReviews.map((item) => {
           const resolutionType = pendingResolutionType[item.id] || "matches";
@@ -4852,11 +5725,11 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
           );
         })}
         {!pendingReviews.length && <p className="empty">No hay expulsiones pendientes o indefinidas por dictaminar.</p>}
-      </div>
+      </div>}
 
-      <div className="sanction-list">
+      {sanctionStatusFilter === "active" && <div className="sanction-list">
         <h3>Sanciones activas</h3>
-        {activeSanctions.map((sanction) => {
+        {visibleActiveSanctions.map((sanction) => {
           const player = getPlayer(activeLeague, sanction.playerId);
           const team = player ? getTeam(activeLeague, player.teamId) : null;
           const competition = getCompetition(league, sanction.competitionId);
@@ -4891,12 +5764,13 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
           );
         })}
         {!activeSanctions.length && <p className="empty">Aun no hay sanciones extraordinarias activas.</p>}
-      </div>
+        {activeSanctions.length > 0 && !visibleActiveSanctions.length && <p className="empty">No hay sanciones con esos filtros.</p>}
+      </div>}
 
-      {!!clearedSanctions.length && (
+      {sanctionStatusFilter === "cleared" && !!clearedSanctions.length && (
         <div className="sanction-list">
           <h3>Liberados por comision</h3>
-          {clearedSanctions.map((sanction) => {
+          {visibleClearedSanctions.map((sanction) => {
             const player = getPlayer(activeLeague, sanction.playerId);
             const team = player ? getTeam(activeLeague, player.teamId) : null;
             const competition = getCompetition(league, sanction.competitionId);
@@ -4914,8 +5788,10 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
               </article>
             );
           })}
+          {clearedSanctions.length > 0 && !visibleClearedSanctions.length && <p className="empty">No hay liberados con esos filtros.</p>}
         </div>
       )}
+      {sanctionStatusFilter === "cleared" && !clearedSanctions.length && <p className="empty">Aun no hay jugadores liberados por comision.</p>}
     </section>
   );
 }
@@ -4923,10 +5799,22 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
 function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpdatePlayerInjury }) {
   const activeLeague = scopeLeagueToCompetition(league, getDefaultCompetitionId(league));
   const [injuryNotice, setInjuryNotice] = useState("");
+  const [injuryQuery, setInjuryQuery] = useState("");
+  const [injuryStatusFilter, setInjuryStatusFilter] = useState("active");
   const injuries = [...(activeLeague.injuries || [])].sort((a, b) => (
     (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1) ||
     String(b.date || "").localeCompare(String(a.date || ""))
   ));
+  const visibleInjuries = useMemo(() => {
+    const query = normalizeAdminSearchTerm(injuryQuery);
+    return injuries.filter((injury) => {
+      const player = getPlayer(activeLeague, injury.playerId);
+      const team = player ? getTeam(activeLeague, player.teamId) : null;
+      if (injuryStatusFilter !== "all" && (injury.status || "active") !== injuryStatusFilter) return false;
+      if (!query) return true;
+      return normalizeAdminSearchTerm(`${player?.name || ""} ${player?.number || ""} ${team?.name || ""} ${injury.type || ""} ${injury.supportDetail || ""} ${injury.notes || ""}`).includes(query);
+    });
+  }, [activeLeague, injuries, injuryQuery, injuryStatusFilter]);
 
   function submitNewInjury(event) {
     event.preventDefault();
@@ -4949,7 +5837,7 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
   }
 
   return (
-    <section className="panel">
+    <section className="panel admin-data-panel commission-panel">
       <SectionHeading eyebrow="Salud y apoyo" title="Lesiones de jugadores" />
       <p className="helper-text">Registra lesiones activas para informar al publico y solicitar apoyo cuando la liga lo autorice. Los recuperados quedan como historial interno.</p>
       {injuryNotice && <p className="auth-ok">{injuryNotice}</p>}
@@ -4957,15 +5845,7 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
         <label>Torneo
           <CompetitionSelect league={league} name="competitionId" defaultValue={getDefaultCompetitionId(league)} />
         </label>
-        <label>Jugador
-          <select name="playerId" required>
-            {activeLeague.players.map((player) => (
-              <option key={player.id} value={player.id}>
-                #{player.number} {player.name} | {getTeam(activeLeague, player.teamId)?.name || "Sin equipo"}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SearchablePlayerSelect league={activeLeague} name="playerId" players={activeLeague.players} placeholder="Buscar jugador lesionado..." />
         <label>Tipo de lesion
           <input name="type" required placeholder="Ej. Rodilla, fractura, esguince" />
         </label>
@@ -4998,8 +5878,21 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
         <button className="primary" type="submit" disabled={!activeLeague.players.length}>Registrar lesion</button>
       </form>
 
+      <div className="admin-filter-console">
+        <label>Buscar lesion
+          <input type="search" value={injuryQuery} onChange={(event) => setInjuryQuery(event.target.value)} placeholder="Jugador, equipo, lesion o apoyo" />
+        </label>
+        <label>Estado
+          <select value={injuryStatusFilter} onChange={(event) => setInjuryStatusFilter(event.target.value)}>
+            <option value="active">Activas</option>
+            <option value="recovered">Recuperados</option>
+            <option value="all">Todas</option>
+          </select>
+        </label>
+      </div>
+
       <div className="injury-list">
-        {injuries.map((injury) => {
+        {visibleInjuries.map((injury) => {
           const player = getPlayer(activeLeague, injury.playerId);
           const team = player ? getTeam(activeLeague, player.teamId) : null;
           const competition = getCompetition(league, injury.competitionId);
@@ -5074,6 +5967,7 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
           );
         })}
         {!injuries.length && <p className="empty">Aun no hay lesiones registradas.</p>}
+        {injuries.length > 0 && !visibleInjuries.length && <p className="empty">No hay lesiones con esos filtros.</p>}
       </div>
     </section>
   );
@@ -5086,6 +5980,7 @@ function SuperAdmin({
   onAddSponsor,
   onDeleteLeague,
   onDeleteSponsor,
+  onOpenLeagueAdmin,
   onResetDemo,
   onToggleLeague,
   onUpdateLeagueMembership,
@@ -5125,6 +6020,7 @@ function SuperAdmin({
         stats={stats}
         onOpenCreateLeague={() => setCreateLeagueOpen(true)}
         onOpenLeagues={() => setActiveModule("leagues")}
+        onOpenModule={switchModule}
         onOpenUsers={() => setActiveModule("users")}
       />
     ),
@@ -5184,16 +6080,20 @@ function SuperAdmin({
 
       <main className="super-admin-main">
         <header className="super-admin-topbar">
+          <img className="super-admin-alp-watermark" alt="" src={alpLogo} aria-hidden="true" />
           <button className="super-admin-menu-button" type="button" aria-label="Abrir menu" onClick={() => setDrawerOpen(true)}>☰</button>
           <div className="super-admin-mobile-brand">
-            <img alt="LIGATEC" src={ligatecLogo} />
-            <span>Super Admin</span>
+            <span>Centro de operaciones</span>
           </div>
           <div className="super-admin-title-block">
             <span>{currentUser?.name ? `Buenos dias, ${currentUser.name.split(" ")[0]}` : "Panel Super Admin"}</span>
             <h1>{activeModuleInfo.label}</h1>
             <small>Control general de LIGATEC</small>
           </div>
+          <button className="super-admin-league-admin-button" type="button" onClick={onOpenLeagueAdmin}>
+            <AdminIcon type="leagues" />
+            Admin de liga
+          </button>
           <div className="super-admin-platform-pill">
             <span />
             Plataforma estable
@@ -5215,7 +6115,7 @@ function SuperAdmin({
               type="button"
               onClick={() => switchModule(module.id)}
             >
-              <span>{module.short}</span>
+              <span><AdminIcon type={module.icon} /></span>
               {module.label}
             </button>
           );
@@ -5233,26 +6133,25 @@ function SuperAdmin({
 }
 
 const SUPER_ADMIN_MODULES = [
-  { id: "dashboard", label: "Dashboard", short: "⌂" },
-  { id: "platform", label: "Plataforma", short: "◉" },
-  { id: "leagues", label: "Ligas", short: "▣" },
-  { id: "users", label: "Usuarios", short: "◌" },
-  { id: "tournaments", label: "Torneos", short: "♕" },
-  { id: "advertising", label: "Publicidad", short: "◧" },
-  { id: "audit", label: "Auditoria", short: "◎" },
-  { id: "backups", label: "Respaldos", short: "▤" },
-  { id: "settings", label: "Configuracion", short: "⚙" }
+  { id: "dashboard", label: "Inicio", short: "Inicio", icon: "home" },
+  { id: "platform", label: "Sistema", short: "Sistema", icon: "platform" },
+  { id: "leagues", label: "Ligas", short: "Ligas", icon: "leagues" },
+  { id: "users", label: "Usuarios", short: "Usuarios", icon: "users" },
+  { id: "tournaments", label: "Torneos", short: "Torneos", icon: "tournaments" },
+  { id: "advertising", label: "Publicidad", short: "Ads", icon: "advertising" },
+  { id: "audit", label: "Auditoria", short: "Audit", icon: "audit" },
+  { id: "backups", label: "Respaldos", short: "Backups", icon: "backups" },
+  { id: "settings", label: "Config.", short: "Config.", icon: "settings" }
 ];
 
-const SUPER_ADMIN_BOTTOM_MODULES = ["dashboard", "leagues", "users", "platform", "settings"];
+const SUPER_ADMIN_BOTTOM_MODULES = ["dashboard", "leagues", "users", "advertising", "audit", "settings"];
 
 function SuperAdminNav({ activeModule, currentUser, onSelect }) {
   return (
     <div className="super-admin-nav-shell">
       <div className="super-admin-brand">
-        <img alt="LIGATEC" src={ligatecLogo} />
         <div>
-          <strong>LIGATEC</strong>
+          <strong>Centro de operaciones</strong>
           <span>Super Admin</span>
         </div>
       </div>
@@ -5271,7 +6170,7 @@ function SuperAdminNav({ activeModule, currentUser, onSelect }) {
             type="button"
             onClick={() => onSelect(module.id)}
           >
-            <span>{module.short}</span>
+            <span><AdminIcon type={module.icon} /></span>
             {module.label}
           </button>
         ))}
@@ -5350,12 +6249,17 @@ function getLeagueSummary(league) {
   };
 }
 
-function SuperAdminDashboard({ leagues, stats, onOpenCreateLeague, onOpenLeagues, onOpenUsers }) {
+function SuperAdminDashboard({ leagues, stats, onOpenCreateLeague, onOpenLeagues, onOpenModule, onOpenUsers }) {
   const latestLeagues = leagues.filter((league) => league.status !== "deleted").slice(0, 4);
   const actionCards = [
-    { label: "Crear liga", text: "Alta guiada con admin, municipio y estado inicial.", action: onOpenCreateLeague },
-    { label: "Gestionar ligas", text: "Revisar ligas activas, suspendidas y sus administradores.", action: onOpenLeagues },
-    { label: "Usuarios y permisos", text: "Controlar super admin, admin liga, capturistas y roles limitados.", action: onOpenUsers }
+    { label: "Crear liga", text: "Alta guiada con admin, municipio y estado inicial.", icon: "leagues", action: onOpenCreateLeague },
+    { label: "Gestionar ligas", text: "Crear, ocultar, suspender o revisar ligas y municipios.", icon: "leagues", action: onOpenLeagues },
+    { label: "Usuarios admin", text: "Crear super admin, admin de liga y admin limitado.", icon: "users", action: onOpenUsers },
+    { label: "Publicidad", text: "Banners por liga para la vista publica.", icon: "advertising", action: () => onOpenModule("advertising") },
+    { label: "Auditoria", text: "Accesos, cambios criticos y actividad administrativa.", icon: "audit", action: () => onOpenModule("audit") },
+    { label: "Respaldos", text: "Crear, verificar y descargar respaldos operativos.", icon: "backups", action: () => onOpenModule("backups") },
+    { label: "Torneos globales", text: "Resumen de torneos publicados e historicos.", icon: "tournaments", action: () => onOpenModule("tournaments") },
+    { label: "Estado sistema", text: "Vista general de plataforma y servicios.", icon: "platform", action: () => onOpenModule("platform") }
   ];
 
   return (
@@ -5429,7 +6333,7 @@ function SuperAdminDashboard({ leagues, stats, onOpenCreateLeague, onOpenLeagues
           <div className="super-action-grid" aria-label="Acciones principales">
             {actionCards.map((card) => (
               <button key={card.label} type="button" onClick={card.action}>
-                <span>{card.label}</span>
+                <span><AdminIcon type={card.icon} />{card.label}</span>
                 <strong>{card.text}</strong>
                 <em>Entrar</em>
               </button>
@@ -5546,6 +6450,9 @@ function SuperAdminLeagueList({
                   <em><strong>{summary.tournaments}</strong> Torneos</em>
                 </span>
                 <span className={`status ${league.status}`}>{league.status === "active" ? "Activa" : "Suspendida"}</span>
+                <span className={`status ${league.publicVisibility === "hidden" ? "hidden" : "active"}`}>
+                  {(league.publicVisibility || "visible") === "hidden" ? "Oculta" : "Publica"}
+                </span>
                 <span className="super-detail-chevron">Editar</span>
               </summary>
               <form
@@ -5575,6 +6482,12 @@ function SuperAdminLeagueList({
                   <select name="status" defaultValue={league.status}>
                     <option value="active">Activa</option>
                     <option value="suspended">Suspendida</option>
+                  </select>
+                </label>
+                <label>Visibilidad publica
+                  <select name="publicVisibility" defaultValue={league.publicVisibility || "visible"}>
+                    <option value="visible">Visible en directorio publico</option>
+                    <option value="hidden">Oculta en directorio publico</option>
                   </select>
                 </label>
                 <input type="hidden" name="renewalDate" value={league.renewalDate || ""} />
@@ -5625,22 +6538,40 @@ function SuperAdminLeagueList({
 
 function SuperAdminCreateLeagueSheet({ onClose, onSubmit }) {
   return (
-    <div className="super-admin-modal" role="dialog" aria-modal="true" aria-label="Nueva liga">
+    <div className="super-admin-modal super-entity-modal" role="dialog" aria-modal="true" aria-label="Nueva liga">
       <button className="super-admin-modal-backdrop" type="button" aria-label="Cerrar" onClick={onClose} />
-      <section className="super-admin-sheet">
-        <div className="super-card-head">
+      <section className="super-admin-sheet super-entity-sheet super-league-sheet">
+        <div className="super-sheet-header">
+          <span className="super-sheet-badge"><AdminIcon type="leagues" /></span>
           <div>
             <span>Nueva liga</span>
             <h3>Crear liga en LIGATEC</h3>
+            <p>Registra el municipio, define su visibilidad publica y opcionalmente genera el acceso del administrador principal.</p>
           </div>
-          <button type="button" onClick={onClose}>Cerrar</button>
+          <button className="super-sheet-close" type="button" onClick={onClose}>Cerrar</button>
         </div>
-        <form className="league-create-form" onSubmit={onSubmit}>
-          <label>Liga<input name="name" required placeholder="Nombre de la nueva liga" /></label>
-          <label>Municipio<input name="city" required placeholder="Municipio o zona" /></label>
-          <label>Admin asignado<input name="adminName" placeholder="Nombre del administrador" /></label>
-          <label>Correo admin<input name="adminEmail" type="email" placeholder="correo del admin para enviar invitacion" /></label>
-          <button className="primary" type="submit">Crear liga</button>
+        <form className="league-create-form super-sheet-form" onSubmit={onSubmit}>
+          <fieldset>
+            <legend>Datos de la liga</legend>
+            <label className="wide-field">Liga<input name="name" required placeholder="Nombre de la nueva liga" /></label>
+            <label>Municipio<input name="city" required placeholder="Municipio o zona" /></label>
+            <label>Visibilidad
+              <select name="publicVisibility" defaultValue="visible">
+                <option value="visible">Visible al publico</option>
+                <option value="hidden">Oculta al publico</option>
+              </select>
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Administrador inicial</legend>
+            <label>Admin asignado<input name="adminName" placeholder="Nombre del administrador" /></label>
+            <label>Correo admin<input name="adminEmail" type="email" placeholder="correo del admin para enviar invitacion" /></label>
+            <p className="super-sheet-note">Si agregas correo, se generara una invitacion para activar su cuenta.</p>
+          </fieldset>
+          <div className="super-sheet-actions">
+            <button type="button" onClick={onClose}>Cancelar</button>
+            <button className="primary" type="submit">Crear liga</button>
+          </div>
         </form>
       </section>
     </div>
@@ -5649,44 +6580,53 @@ function SuperAdminCreateLeagueSheet({ onClose, onSubmit }) {
 
 function SuperAdminUserCreateSheet({ leagues, onClose, onSubmit }) {
   return (
-    <div className="super-admin-modal" role="dialog" aria-modal="true" aria-label="Nuevo usuario administrador">
+    <div className="super-admin-modal super-entity-modal" role="dialog" aria-modal="true" aria-label="Nuevo usuario administrador">
       <button className="super-admin-modal-backdrop" type="button" aria-label="Cerrar" onClick={onClose} />
-      <section className="super-admin-sheet super-user-sheet">
-        <div className="super-card-head">
+      <section className="super-admin-sheet super-entity-sheet super-user-sheet">
+        <div className="super-sheet-header">
+          <span className="super-sheet-badge"><AdminIcon type="users" /></span>
           <div>
             <span>Nuevo acceso</span>
             <h3>Crear usuario administrador</h3>
+            <p>Define el rol correcto y, si es admin limitado, marca solo los permisos necesarios para operar.</p>
           </div>
-          <button type="button" onClick={onClose}>Cerrar</button>
+          <button className="super-sheet-close" type="button" onClick={onClose}>Cerrar</button>
         </div>
-        <form className="user-create-form" onSubmit={onSubmit}>
-          <label>
-            Nombre
-            <input name="name" required placeholder="Nombre del usuario" />
-          </label>
-          <label>
-            Correo
-            <input name="email" required type="email" placeholder="correo@liga.com" />
-          </label>
-          <label>
-            Telefono
-            <input name="phone" placeholder="354..." />
-          </label>
-          <label>
-            Rol
-            <select name="role" defaultValue="league_admin">
-              <option value="league_admin">Admin de liga</option>
-              <option value="admin_limited">Admin limitado</option>
-              <option value="super_admin">Super admin</option>
-            </select>
-          </label>
-          <label>
-            Liga asignada
-            <select name="leagueId" defaultValue="">
-              <option value="">Sin liga</option>
-              {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
-            </select>
-          </label>
+        <form className="user-create-form super-sheet-form" onSubmit={onSubmit}>
+          <fieldset>
+            <legend>Identidad del usuario</legend>
+            <label>
+              Nombre
+              <input name="name" required placeholder="Nombre del usuario" />
+            </label>
+            <label>
+              Correo
+              <input name="email" required type="email" placeholder="correo@liga.com" />
+            </label>
+            <label>
+              Telefono
+              <input name="phone" placeholder="354..." />
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Acceso administrativo</legend>
+            <label>
+              Rol
+              <select name="role" defaultValue="league_admin">
+                <option value="league_admin">Admin de liga</option>
+                <option value="admin_limited">Admin limitado</option>
+                <option value="super_admin">Super admin</option>
+              </select>
+            </label>
+            <label>
+              Liga asignada
+              <select name="leagueId" defaultValue="">
+                <option value="">Sin liga</option>
+                {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
+              </select>
+            </label>
+            <p className="super-sheet-note">Super admin no requiere liga. Admin de liga y admin limitado si deben tener una liga asignada.</p>
+          </fieldset>
           <fieldset className="permission-checklist">
             <legend>Permisos para admin limitado</legend>
             {ADMIN_PERMISSION_OPTIONS.map((permission) => (
@@ -5697,7 +6637,10 @@ function SuperAdminUserCreateSheet({ leagues, onClose, onSubmit }) {
             ))}
           </fieldset>
           <p className="helper-text wide-field">Para un capturista de resultados, usa rol Admin limitado y marca solo Capturar actas/resultados.</p>
-          <button className="primary" type="submit">Crear invitacion</button>
+          <div className="super-sheet-actions">
+            <button type="button" onClick={onClose}>Cancelar</button>
+            <button className="primary" type="submit">Crear invitacion</button>
+          </div>
         </form>
       </section>
     </div>
@@ -5955,18 +6898,30 @@ function SuperAdminBackupsPanel({ authToken, stats }) {
 }
 
 function SuperAdminSettingsPanel({ onResetDemo }) {
+  const demoToolsEnabled = import.meta.env.DEV;
+
   return (
     <section className="panel super-module-panel">
       <SectionHeading eyebrow="Configuracion" title="Ajustes generales" />
       <p className="helper-text">Acciones globales con impacto en toda la plataforma. Mantengo las operaciones peligrosas separadas y con confirmacion.</p>
       <div className="super-settings-list">
-        <article>
-          <div>
-            <strong>Datos demo</strong>
-            <span>Restaurar datos de demostracion. No usar durante operacion real salvo que estes en entorno local o de pruebas.</span>
-          </div>
-          <button className="danger" type="button" onClick={onResetDemo}>Restaurar demo</button>
-        </article>
+        {demoToolsEnabled ? (
+          <article>
+            <div>
+              <strong>Datos demo</strong>
+              <span>Restaurar datos de demostracion. Solo disponible en desarrollo local.</span>
+            </div>
+            <button className="danger" type="button" onClick={onResetDemo}>Restaurar demo</button>
+          </article>
+        ) : (
+          <article>
+            <div>
+              <strong>Herramientas demo deshabilitadas</strong>
+              <span>En produccion no se permite restaurar datos de demostracion ni reemplazar informacion operativa desde este panel.</span>
+            </div>
+            <span className="status active">Produccion protegida</span>
+          </article>
+        )}
       </div>
     </section>
   );
@@ -6742,6 +7697,7 @@ function AuditPanel({ authToken, leagues }) {
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState({ leagueId: "all", action: "all", severity: "all", dateRange: "all", query: "" });
+  const [visibleLogLimit, setVisibleLogLimit] = useState(8);
   const leagueNames = useMemo(() => new Map(leagues.map((league) => [league.id, league.name])), [leagues]);
   const actionOptions = useMemo(() => Array.from(new Set(logs.map((log) => log.action))).sort(), [logs]);
   const todayStart = useMemo(() => {
@@ -6774,6 +7730,18 @@ function AuditPanel({ authToken, leagues }) {
       failedToday: todayLogs.filter((log) => ["login_failed", "login_locked", "login_blocked"].includes(log.action)).length
     };
   }, [logs, todayStart]);
+  const topAuditActions = useMemo(() => {
+    const counts = filteredLogs.reduce((accumulator, log) => {
+      const label = AUDIT_LABELS[log.action] || log.action;
+      accumulator[label] = (accumulator[label] || 0) + 1;
+      return accumulator;
+    }, {});
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+  }, [filteredLogs]);
+  const visibleLogs = filteredLogs.slice(0, visibleLogLimit);
+  const hiddenLogs = Math.max(filteredLogs.length - visibleLogs.length, 0);
 
   function updateFilter(name, value) {
     setFilters((current) => ({ ...current, [name]: value }));
@@ -6792,6 +7760,10 @@ function AuditPanel({ authToken, leagues }) {
   useEffect(() => {
     loadLogs();
   }, [authToken]);
+
+  useEffect(() => {
+    setVisibleLogLimit(8);
+  }, [filters]);
 
   return (
     <section className="panel super-module-panel super-audit-module">
@@ -6821,6 +7793,27 @@ function AuditPanel({ authToken, leagues }) {
           <strong>{auditSummary.failedToday}</strong>
         </article>
       </div>
+
+      <div className="audit-insight-grid" aria-label="Resumen rapido de auditoria">
+        <article>
+          <small>Vista actual</small>
+          <strong>{filteredLogs.length}</strong>
+          <span>movimiento(s) con filtros</span>
+        </article>
+        <article>
+          <small>Accion mas frecuente</small>
+          <strong>{topAuditActions[0]?.[0] || "Sin datos"}</strong>
+          <span>{topAuditActions[0] ? `${topAuditActions[0][1]} evento(s)` : "Ajusta filtros para revisar"}</span>
+        </article>
+      </div>
+
+      {topAuditActions.length > 1 && (
+        <div className="audit-action-strip" aria-label="Acciones frecuentes">
+          {topAuditActions.map(([label, count]) => (
+            <span key={label}><strong>{count}</strong>{label}</span>
+          ))}
+        </div>
+      )}
 
       <div className="audit-filters" aria-label="Filtros de auditoria">
         <select value={filters.leagueId} onChange={(event) => updateFilter("leagueId", event.target.value)} aria-label="Filtrar por liga">
@@ -6852,7 +7845,7 @@ function AuditPanel({ authToken, leagues }) {
       </div>
 
       <div className="audit-list">
-        {filteredLogs.map((log) => (
+        {visibleLogs.map((log) => (
           <article className={`audit-row ${auditSeverity(log.action)}`} key={log.id}>
             <span className="audit-severity-mark" aria-hidden="true" />
             <div>
@@ -6873,6 +7866,11 @@ function AuditPanel({ authToken, leagues }) {
             <time dateTime={log.createdAt}>{formatAuditDate(log.createdAt)}</time>
           </article>
         ))}
+        {hiddenLogs > 0 && (
+          <button className="audit-show-more" type="button" onClick={() => setVisibleLogLimit((value) => value + 8)}>
+            Mostrar 8 mas · {hiddenLogs} oculto(s)
+          </button>
+        )}
         {!logs.length && <p className="empty">Aun no hay movimientos registrados.</p>}
         {logs.length > 0 && !filteredLogs.length && <p className="empty">No hay movimientos con esos filtros.</p>}
       </div>

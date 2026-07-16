@@ -1,4 +1,3 @@
-import { seedData } from "../data/seedData.js";
 import {
   addLeague,
   addAnnouncement,
@@ -74,7 +73,13 @@ export function AdminRoute({
   store,
   userListRefreshKey
 }) {
-  function resetDemo() {
+  async function resetDemo() {
+    if (!import.meta.env.DEV) {
+      window.alert("Restaurar demo esta deshabilitado fuera del entorno de desarrollo.");
+      return;
+    }
+    const seedModulePath = "../data/seedData.js";
+    const { seedData } = await import(/* @vite-ignore */ seedModulePath);
     setAdminPanel("league");
     commit(seedData);
   }

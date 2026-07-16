@@ -36,6 +36,7 @@ LOGIN_IP_MAX_ATTEMPTS=40
 PASSWORD_RESET_WINDOW_MINUTES=30
 PASSWORD_RESET_MAX_REQUESTS=5
 SHOW_RECOVERY_CODE_IN_RESPONSE=false
+SEED_DEMO_DATA=false
 SEED_DEMO_USERS=false
 TRUST_PROXY=true
 JSON_BODY_LIMIT=2mb
@@ -68,10 +69,10 @@ npm install && npm run build
 Start command:
 
 ```bash
-npm start
+npm run start:api
 ```
 
-El comando `npm start` arranca Express en produccion y sirve el directorio `dist`.
+El build genera `dist` y `npm run start:api` arranca Express en produccion sirviendo ese directorio.
 
 ## Opcion Docker
 
@@ -81,7 +82,7 @@ El contenedor:
 
 - instala dependencias
 - compila `dist`
-- arranca `npm start`
+- arranca `npm run start:api` con `SERVE_STATIC=true`
 - expone el puerto `3001`
 
 Configura en el hosting las mismas variables de entorno de produccion.

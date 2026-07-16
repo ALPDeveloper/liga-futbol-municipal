@@ -5,6 +5,9 @@ dist/
 /deliverables/
 /uploads/
 /uploads-local-test*/
+scripts/cleanup-delegate-test-data.js
+scripts/prepare-delegate-test-data.js
+scripts/prepare-local-internal-test-league.js
 .env
 .env.local
 .DS_Store

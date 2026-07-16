@@ -57,8 +57,8 @@ export const runtimeConfig = {
     process.env.SHOW_RECOVERY_CODE_IN_RESPONSE,
     false
   ),
-  seedDemoData: parseBoolean(process.env.SEED_DEMO_DATA, !IS_PRODUCTION),
-  seedDemoUsers: parseBoolean(process.env.SEED_DEMO_USERS, !IS_PRODUCTION),
+  seedDemoData: parseBoolean(process.env.SEED_DEMO_DATA, false),
+  seedDemoUsers: parseBoolean(process.env.SEED_DEMO_USERS, false),
   tokenSecret: process.env.AUTH_SECRET || DEFAULT_DEV_SECRET,
   tokenTtlMs: 1000 * 60 * 60 * Number(process.env.TOKEN_TTL_HOURS || 8),
   databaseProvider: process.env.DATABASE_PROVIDER === "postgres" ? "postgres" : "sqlite",
