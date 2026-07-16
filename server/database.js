@@ -171,7 +171,12 @@ function runMigrations() {
     ["capture_mode", "TEXT NOT NULL DEFAULT 'admin'"],
     ["current_report_id", "TEXT"],
     ["published_at", "TEXT"],
-    ["finalized_at", "TEXT"]
+    ["finalized_at", "TEXT"],
+    ["schedule_note", "TEXT"],
+    ["original_date", "TEXT"],
+    ["original_time", "TEXT"],
+    ["original_round", "INTEGER"],
+    ["schedule_updated_at", "TEXT"]
   ].forEach(([name, definition]) => {
     if (!matchColumns.includes(name)) {
       db.prepare(`ALTER TABLE matches ADD COLUMN ${name} ${definition}`).run();
@@ -808,6 +813,11 @@ export function getStore() {
       date: row.date,
       time: row.time,
       venue: row.venue,
+      scheduleNote: row.schedule_note || "",
+      originalDate: row.original_date || "",
+      originalTime: row.original_time || "",
+      originalRound: row.original_round || "",
+      scheduleUpdatedAt: row.schedule_updated_at || "",
       homeTeamId: row.home_team_id,
       awayTeamId: row.away_team_id,
       status: row.status,
@@ -1225,8 +1235,8 @@ export function importStore(store) {
 
       for (const match of league.matches) {
         db.prepare(`
-          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, extra_time_home_goals, extra_time_away_goals, penalty_home_goals, penalty_away_goals, round, date, time, venue, home_team_id, away_team_id, status, workflow_status, capture_mode, current_report_id, published_at, finalized_at, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, extra_time_home_goals, extra_time_away_goals, penalty_home_goals, penalty_away_goals, round, date, time, venue, schedule_note, original_date, original_time, original_round, schedule_updated_at, home_team_id, away_team_id, status, workflow_status, capture_mode, current_report_id, published_at, finalized_at, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           match.id,
           league.id,
@@ -1244,6 +1254,11 @@ export function importStore(store) {
           match.date,
           match.time || "",
           match.venue || "",
+          match.scheduleNote || "",
+          match.originalDate || "",
+          match.originalTime || "",
+          match.originalRound || null,
+          match.scheduleUpdatedAt || "",
           match.homeTeamId,
           match.awayTeamId,
           match.status,

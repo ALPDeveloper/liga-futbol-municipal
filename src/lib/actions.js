@@ -734,6 +734,11 @@ export function addMatch(store, leagueId, payload) {
         date: payload.date,
         time: payload.time || "",
         venue: upperText(payload.venue || ""),
+        scheduleNote: upperText(payload.scheduleNote || ""),
+        originalDate: "",
+        originalTime: "",
+        originalRound: "",
+        scheduleUpdatedAt: "",
         homeTeamId: payload.homeTeamId,
         awayTeamId: payload.awayTeamId,
         status: payload.status || "scheduled",
@@ -1046,6 +1051,12 @@ export function updateMatch(store, leagueId, matchId, payload) {
       match.id === matchId
         ? (() => {
           const stage = payload.stage || match.stage || "regular";
+          const round = stage === "playoff" ? Number(payload.round || 0) : Number(payload.round);
+          const scheduleChanged = (
+            String(match.date || "") !== String(payload.date || "") ||
+            String(match.time || "") !== String(payload.time || "") ||
+            Number(match.round || 0) !== Number(round || 0)
+          );
           return {
             ...match,
             competitionId: payload.competitionId || match.competitionId || getDefaultCompetitionId(league),
@@ -1058,10 +1069,15 @@ export function updateMatch(store, leagueId, matchId, payload) {
             extraTimeAwayGoals: payload.extraTimeAwayGoals === undefined ? match.extraTimeAwayGoals ?? null : optionalMatchScore(payload.extraTimeAwayGoals),
             penaltyHomeGoals: payload.penaltyHomeGoals === undefined ? match.penaltyHomeGoals ?? null : optionalMatchScore(payload.penaltyHomeGoals),
             penaltyAwayGoals: payload.penaltyAwayGoals === undefined ? match.penaltyAwayGoals ?? null : optionalMatchScore(payload.penaltyAwayGoals),
-            round: stage === "playoff" ? Number(payload.round || 0) : Number(payload.round),
+            round,
             date: payload.date,
             time: payload.time || "",
             venue: upperText(payload.venue || ""),
+            scheduleNote: upperText(payload.scheduleNote ?? match.scheduleNote ?? ""),
+            originalDate: scheduleChanged ? (match.originalDate || match.date || "") : (match.originalDate || ""),
+            originalTime: scheduleChanged ? (match.originalTime || match.time || "") : (match.originalTime || ""),
+            originalRound: scheduleChanged ? (match.originalRound || match.round || "") : (match.originalRound || ""),
+            scheduleUpdatedAt: scheduleChanged ? new Date().toISOString() : (match.scheduleUpdatedAt || ""),
             homeTeamId: payload.homeTeamId,
             awayTeamId: payload.awayTeamId,
             status: payload.status || match.status || "scheduled",

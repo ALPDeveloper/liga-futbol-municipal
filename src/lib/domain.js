@@ -1201,5 +1201,8 @@ export function getIdentityTags(league) {
 }
 
 export function formatDate(value) {
-  return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00`));
+  if (!value) return "Fecha por definir";
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return "Fecha por definir";
+  return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(date);
 }

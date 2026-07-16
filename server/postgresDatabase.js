@@ -93,6 +93,12 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS photo_url TEXT");
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS photo_authorized BOOLEAN NOT NULL DEFAULT false");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS observations TEXT");
+  await pool.query("ALTER TABLE IF EXISTS matches ALTER COLUMN date DROP NOT NULL");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS schedule_note TEXT");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS original_date DATE");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS original_time TEXT");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS original_round INTEGER");
+  await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS schedule_updated_at TIMESTAMPTZ");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS central_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS matches ADD COLUMN IF NOT EXISTS assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL");
@@ -757,6 +763,11 @@ export async function getPostgresStore() {
         date: rowDate(row, "date"),
         time: row.time,
         venue: row.venue,
+        scheduleNote: row.schedule_note || "",
+        originalDate: rowDate(row, "original_date"),
+        originalTime: row.original_time || "",
+        originalRound: row.original_round || "",
+        scheduleUpdatedAt: toDateTimeValue(row.schedule_updated_at),
         homeTeamId: row.home_team_id,
         awayTeamId: row.away_team_id,
         status: row.status,
@@ -1101,7 +1112,7 @@ export async function importPostgresStore(store) {
         [adjustment.id, league.id, adjustment.playerId, Number(adjustment.value || 0), adjustment.date || "", adjustment.reason || "", adjustment.notes || "", adjustment.status || "active"]
       )), { dateColumns: ["date"] });
 
-      await insertRows(client, "matches", ["id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg", "aggregate_home", "aggregate_away", "extra_time_home_goals", "extra_time_away_goals", "penalty_home_goals", "penalty_away_goals", "round", "date", "time", "venue", "home_team_id", "away_team_id", "status", "workflow_status", "capture_mode", "current_report_id", "published_at", "finalized_at", "home_goals", "away_goals", "observations", "resolution_type", "resolution_note", "central_referee_user_id", "assistant_referee1_user_id", "assistant_referee2_user_id", "fourth_referee_user_id"], league.matches.map((match) => [
+      await insertRows(client, "matches", ["id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg", "aggregate_home", "aggregate_away", "extra_time_home_goals", "extra_time_away_goals", "penalty_home_goals", "penalty_away_goals", "round", "date", "time", "venue", "schedule_note", "original_date", "original_time", "original_round", "schedule_updated_at", "home_team_id", "away_team_id", "status", "workflow_status", "capture_mode", "current_report_id", "published_at", "finalized_at", "home_goals", "away_goals", "observations", "resolution_type", "resolution_note", "central_referee_user_id", "assistant_referee1_user_id", "assistant_referee2_user_id", "fourth_referee_user_id"], league.matches.map((match) => [
           match.id,
           league.id,
           match.competitionId || league.currentCompetitionId,
@@ -1118,6 +1129,11 @@ export async function importPostgresStore(store) {
           match.date || "",
           match.time || "",
           match.venue || "",
+          match.scheduleNote || "",
+          match.originalDate || "",
+          match.originalTime || "",
+          match.originalRound || null,
+          match.scheduleUpdatedAt || null,
           match.homeTeamId,
           match.awayTeamId,
           match.status,
@@ -1135,7 +1151,7 @@ export async function importPostgresStore(store) {
           match.assistantReferee1UserId || null,
           match.assistantReferee2UserId || null,
           match.fourthRefereeUserId || null
-        ]), { dateColumns: ["date"] });
+        ]), { dateColumns: ["date", "original_date"] });
 
       await insertRows(client, "match_events", ["match_id", "local_uuid", "type", "player_id", "secondary_player_id", "assist_player_id", "team_id", "event_team_side", "subtype", "period", "minute", "minute_label", "second", "suspension_matches", "suspension_indefinite", "disciplinary_pending", "reason", "metadata_json", "is_official", "sync_status", "created_by_user_id", "created_at", "updated_at", "version"], league.matches.flatMap((match) => (
         (match.events || []).map((event) => [

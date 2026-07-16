@@ -19586,6 +19586,153 @@ label {
   }
 }
 
+/* Production hotfix: mobile admin stability. */
+@media (max-width: 720px) {
+  .super-admin-layout {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: clip !important;
+  }
+
+  .super-admin-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
+    z-index: 80 !important;
+    width: min(312px, calc(100vw - 44px)) !important;
+    max-width: calc(100vw - 44px) !important;
+    border-radius: 0 18px 18px 0 !important;
+    background: linear-gradient(180deg, rgba(5, 19, 24, 0.98), rgba(2, 13, 17, 0.98)) !important;
+    box-shadow: 22px 0 60px rgba(0, 0, 0, 0.44) !important;
+    transform: translateX(-108%) !important;
+    transition: transform 180ms ease, opacity 180ms ease, visibility 180ms ease !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  .super-admin-sidebar.open {
+    transform: translateX(0) !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+  }
+
+  .super-admin-sidebar:not(.open),
+  .super-admin-sidebar:not(.open) * {
+    max-width: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  .super-admin-nav button {
+    display: grid !important;
+    grid-template-columns: 38px minmax(0, 1fr) !important;
+    align-items: center !important;
+    min-height: 44px !important;
+    text-align: left !important;
+  }
+
+  .super-admin-mobile-brand {
+    width: min(100%, 320px) !important;
+    margin-inline: auto !important;
+    justify-content: center !important;
+    text-align: center !important;
+    letter-spacing: 0.18em !important;
+    font-size: clamp(0.62rem, 2.6vw, 0.78rem) !important;
+  }
+
+  .admin-console-page .admin-sheet-match-grid {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .admin-console-page .admin-sheet-match-grid button {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 118px !important;
+    padding: 12px !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    align-items: center !important;
+    justify-items: stretch !important;
+    text-align: left !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head b,
+  .admin-console-page .admin-sheet-match-card-head small {
+    min-width: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head small {
+    padding: 5px 9px !important;
+    border-radius: 999px !important;
+    background: rgba(126, 255, 83, 0.16) !important;
+    border: 1px solid rgba(126, 255, 83, 0.28) !important;
+    color: #b8ff8a !important;
+    font-size: 0.62rem !important;
+    letter-spacing: 0 !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    color: #f8fffb !important;
+    opacity: 1 !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams span {
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    color: #f8fffb !important;
+    opacity: 1 !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams em {
+    min-width: 34px !important;
+    min-height: 28px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 9px !important;
+    background: #8bff4f !important;
+    color: #031014 !important;
+    font-size: 0.68rem !important;
+    font-style: normal !important;
+    font-weight: 950 !important;
+  }
+
+  .admin-console-page .admin-sheet-match-meta {
+    width: 100% !important;
+    min-width: 0 !important;
+    display: block !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    color: rgba(226, 241, 237, 0.78) !important;
+    opacity: 1 !important;
+    font-size: 0.72rem !important;
+  }
+}
+
 /* Final mobile admin layer: app-like header and stable acta capture layout. */
 @media (max-width: 920px) {
   .admin-topbar {

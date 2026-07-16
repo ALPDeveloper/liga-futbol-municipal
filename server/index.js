@@ -480,9 +480,24 @@ function buildMatchPayload({ league, payload, currentMatch = null, canEditResult
   const round = stage === "playoff"
     ? Number(payload.round || currentMatch?.round || 0)
     : parseIntegerInRange(payload.round, currentMatch?.round || 1, { min: 1, max: 999, label: "Jornada" });
+  let status = currentMatch?.status || "scheduled";
+  if (payload.status !== undefined) {
+    status = MATCH_ADMIN_STATUSES.has(payload.status) ? payload.status : status;
+    if (!canEditResults && MATCH_ADMIN_ONLY_STATUSES.has(status)) {
+      const error = new Error("Este permiso solo permite programar, adelantar, reprogramar o posponer partidos.");
+      error.status = 403;
+      throw error;
+    }
+  }
   const date = String(payload.date || currentMatch?.date || "").trim();
   const time = String(payload.time ?? currentMatch?.time ?? "").trim();
-  if (!isValidDateValue(date)) {
+  const allowsPendingSchedule = status === "postponed";
+  if (!allowsPendingSchedule && !isValidDateValue(date)) {
+    const error = new Error("Fecha invalida para el partido.");
+    error.status = 400;
+    throw error;
+  }
+  if (date && !isValidDateValue(date)) {
     const error = new Error("Fecha invalida para el partido.");
     error.status = 400;
     throw error;
@@ -522,7 +537,7 @@ function buildMatchPayload({ league, payload, currentMatch = null, canEditResult
     venue: upperText(payload.venue ?? currentMatch?.venue ?? ""),
     homeTeamId,
     awayTeamId,
-    status: currentMatch?.status || "scheduled",
+    status,
     scheduleNote: upperText(payload.scheduleNote ?? currentMatch?.scheduleNote ?? ""),
     originalDate: currentMatch?.originalDate || "",
     originalTime: currentMatch?.originalTime || "",
@@ -532,16 +547,6 @@ function buildMatchPayload({ league, payload, currentMatch = null, canEditResult
     observations: currentMatch?.observations || "",
     events: currentMatch?.events || []
   };
-
-  if (payload.status !== undefined) {
-    const status = MATCH_ADMIN_STATUSES.has(payload.status) ? payload.status : next.status;
-    if (!canEditResults && MATCH_ADMIN_ONLY_STATUSES.has(status)) {
-      const error = new Error("Este permiso solo permite programar, adelantar, reprogramar o posponer partidos.");
-      error.status = 403;
-      throw error;
-    }
-    next.status = status;
-  }
 
   if (currentMatch && (
     String(currentMatch.date || "") !== String(date || "") ||
@@ -1541,7 +1546,6 @@ app.post("/api/leagues/:leagueId/matches", requireAuth, async (request, response
   const match = {
     ...buildMatchPayload({ league, payload: request.body, canEditResults: false }),
     id: `match-${crypto.randomUUID()}`,
-    status: "scheduled",
     homeGoals: null,
     awayGoals: null,
     observations: "",
