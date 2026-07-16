@@ -112,10 +112,7 @@ function forcePublicScrollTop() {
   };
   scrollTop();
   window.requestAnimationFrame(scrollTop);
-  window.setTimeout(scrollTop, 80);
-  window.setTimeout(scrollTop, 240);
-  window.setTimeout(scrollTop, 700);
-  window.setTimeout(scrollTop, 1400);
+  window.setTimeout(scrollTop, 90);
 }
 
 export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate, onEntryModeChange }) {
@@ -274,10 +271,6 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     return () => window.clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    if (showCompetitionGate) forcePublicScrollTop();
-  }, [showIntro, showCompetitionGate]);
-
   useLayoutEffect(() => {
     if (!showCompetitionGate) return;
     clearPublicHash();
@@ -318,7 +311,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   useEffect(() => {
     if (showCompetitionGate || window.location.hash) return;
     forcePublicScrollTop();
-  }, [league.id, selectedCompetitionId, showCompetitionGate]);
+  }, [league.id, showCompetitionGate]);
 
   useEffect(() => {
     onEntryModeChange?.(showCompetitionGate);
@@ -3113,20 +3106,21 @@ function getMatchTiebreakerRows(match) {
 }
 
 function RoundSelector({ rounds, selectedRound, onSelectRound }) {
+  const tabsRef = useRef(null);
   const activeButtonRef = useRef(null);
 
   useEffect(() => {
-    activeButtonRef.current?.scrollIntoView({
-      behavior: "smooth",
-      inline: "center",
-      block: "nearest"
-    });
+    const activeButton = activeButtonRef.current;
+    const tabs = tabsRef.current;
+    if (!activeButton || !tabs) return;
+    const nextLeft = activeButton.offsetLeft - (tabs.clientWidth - activeButton.offsetWidth) / 2;
+    tabs.scrollTo({ left: Math.max(0, nextLeft), behavior: "smooth" });
   }, [rounds, selectedRound]);
 
   if (!rounds.length) return <p className="empty">Aun no hay jornadas programadas.</p>;
 
   return (
-    <div className="round-tabs" aria-label="Seleccionar jornada">
+    <div className="round-tabs" aria-label="Seleccionar jornada" ref={tabsRef}>
       {rounds.map((round) => {
         const isActive = Number(selectedRound) === Number(round);
         return (
