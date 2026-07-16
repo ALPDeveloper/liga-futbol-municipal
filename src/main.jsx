@@ -1194,7 +1194,7 @@ function App() {
                 </a>}
               </nav>
               {isAdminRoute && <span className={`api-pill private-api-pill ${apiStatus}`}>
-                {apiStatus === "connected" ? "API local" : apiStatus === "local" ? "Modo local" : "Conectando"}
+                {apiStatus === "connected" ? "API en linea" : apiStatus === "local" ? "Modo local" : "Conectando"}
               </span>}
               {currentUser && (
                 <div className="private-user-chip">
