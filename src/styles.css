@@ -19586,6 +19586,393 @@ label {
   }
 }
 
+/* Admin mobile polish: keep user-management modules inside the LIGATEC dark app shell. */
+.admin-console-page .delegate-admin-shell,
+.admin-console-page .referee-ops-shell {
+  overflow: hidden;
+  border-color: rgba(102, 255, 132, 0.18);
+  background:
+    radial-gradient(circle at 94% 0%, rgba(37, 180, 121, 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(12, 40, 34, 0.96), rgba(2, 18, 22, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.admin-console-page .delegate-admin-hero,
+.admin-console-page .referee-ops-header {
+  border-color: rgba(105, 255, 139, 0.18);
+  background:
+    radial-gradient(circle at 88% 18%, rgba(32, 213, 142, 0.17), transparent 32%),
+    linear-gradient(135deg, rgba(19, 65, 55, 0.96), rgba(6, 23, 31, 0.98));
+  color: #f7fff7;
+}
+
+.admin-console-page .delegate-admin-hero h2,
+.admin-console-page .delegate-admin-hero p,
+.admin-console-page .referee-ops-header h2,
+.admin-console-page .referee-ops-header p {
+  color: inherit;
+}
+
+.admin-console-page .delegate-quick-actions a,
+.admin-console-page .delegate-quick-actions button,
+.admin-console-page .delegate-filter-bar button,
+.admin-console-page .delegate-summary-cards span,
+.admin-console-page .delegate-wizard-card,
+.admin-console-page .delegate-filter-bar,
+.admin-console-page .delegate-tabs,
+.admin-console-page .delegate-list-panel,
+.admin-console-page .delegate-compact-group,
+.admin-console-page .delegate-card,
+.admin-console-page .referee-help-box,
+.admin-console-page .referee-command-center,
+.admin-console-page .referee-operations-card,
+.admin-console-page .arbitration-metric-card,
+.admin-console-page .referee-ops-match-card,
+.admin-console-page .admin-referee-card,
+.admin-console-page .referee-review-panel,
+.admin-console-page .referee-review-card,
+.admin-console-page .referee-sheet-match-summary,
+.admin-console-page .arbitration-empty-state {
+  border-color: rgba(148, 255, 177, 0.13);
+  background:
+    linear-gradient(180deg, rgba(20, 42, 44, 0.96), rgba(8, 24, 29, 0.98));
+  color: #f5fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.admin-console-page .delegate-quick-actions span,
+.admin-console-page .delegate-hero-icon,
+.admin-console-page .referee-progress-ring,
+.admin-console-page .admin-referee-avatar {
+  border: 1px solid rgba(105, 255, 139, 0.22);
+  background: rgba(62, 244, 117, 0.12);
+  color: #8eff67;
+}
+
+.admin-console-page .delegate-quick-actions b,
+.admin-console-page .delegate-summary-cards strong,
+.admin-console-page .delegate-wizard-head h3,
+.admin-console-page .delegate-section-head h3,
+.admin-console-page .delegate-card strong,
+.admin-console-page .delegate-compact-group > summary strong,
+.admin-console-page .referee-command-center strong,
+.admin-console-page .referee-operations-head strong,
+.admin-console-page .referee-progress-copy b,
+.admin-console-page .referee-operations-next strong,
+.admin-console-page .referee-match-teams strong,
+.admin-console-page .referee-assignment-lines b,
+.admin-console-page .referee-tab-head h3,
+.admin-console-page .admin-referee-card strong,
+.admin-console-page .referee-review-card strong,
+.admin-console-page .referee-review-summary strong,
+.admin-console-page .referee-sheet-match-summary strong {
+  color: #f8fff8;
+}
+
+.admin-console-page .delegate-quick-actions small,
+.admin-console-page .delegate-card small,
+.admin-console-page .delegate-card span,
+.admin-console-page .delegate-section-head small,
+.admin-console-page .delegate-compact-group > summary span,
+.admin-console-page .referee-ops-header p,
+.admin-console-page .referee-tab-head p,
+.admin-console-page .referee-help-box span,
+.admin-console-page .referee-command-center span,
+.admin-console-page .referee-command-center small,
+.admin-console-page .referee-progress-ring span,
+.admin-console-page .referee-progress-copy small,
+.admin-console-page .referee-progress-ring,
+.admin-console-page .referee-operations-next span,
+.admin-console-page .referee-operations-next small,
+.admin-console-page .arbitration-metric-card span,
+.admin-console-page .referee-day-head span,
+.admin-console-page .referee-match-timebox small,
+.admin-console-page .referee-assignment-lines span,
+.admin-console-page .referee-match-action small,
+.admin-console-page .admin-referee-card small,
+.admin-console-page .referee-review-card small,
+.admin-console-page .referee-review-card p,
+.admin-console-page .referee-review-summary span,
+.admin-console-page .referee-sheet-match-summary span,
+.admin-console-page .referee-sheet-match-summary small {
+  color: rgba(220, 236, 235, 0.74);
+}
+
+.admin-console-page .delegate-admin-hero small,
+.admin-console-page .delegate-wizard-head small,
+.admin-console-page .delegate-wizard-card legend,
+.admin-console-page .delegate-form-note,
+.admin-console-page .referee-operations-head span,
+.admin-console-page .referee-tab-head span,
+.admin-console-page .referee-day-head strong {
+  color: #8eff67;
+}
+
+.admin-console-page .delegate-wizard-card fieldset,
+.admin-console-page .referee-role-checks {
+  border-color: rgba(148, 255, 177, 0.12);
+  background: rgba(2, 16, 20, 0.5);
+}
+
+.admin-console-page .delegate-filter-bar label,
+.admin-console-page .delegate-wizard-card label,
+.admin-console-page .delegate-card label,
+.admin-console-page .referee-list-tools,
+.admin-console-page .referee-sheet-form-grid label,
+.admin-console-page .referee-role-checks {
+  color: rgba(220, 236, 235, 0.84);
+}
+
+.admin-console-page .delegate-filter-bar input,
+.admin-console-page .delegate-filter-bar select,
+.admin-console-page .delegate-wizard-card input,
+.admin-console-page .delegate-wizard-card select,
+.admin-console-page .delegate-card input,
+.admin-console-page .delegate-card select,
+.admin-console-page .referee-filter-chips select,
+.admin-console-page .referee-filter-chips button,
+.admin-console-page .referee-search-chip,
+.admin-console-page .referee-search-chip input,
+.admin-console-page .referee-list-tools input,
+.admin-console-page .referee-list-tools select,
+.admin-console-page .referee-sheet-form-grid input,
+.admin-console-page .referee-sheet-form-grid select,
+.admin-console-page .referee-sheet-form-grid textarea,
+.admin-console-page .referee-review-note textarea {
+  border-color: rgba(129, 194, 202, 0.22);
+  background: rgba(0, 13, 19, 0.78);
+  color: #f7fbff;
+}
+
+.admin-console-page .delegate-filter-bar input::placeholder,
+.admin-console-page .delegate-wizard-card input::placeholder,
+.admin-console-page .delegate-card input::placeholder,
+.admin-console-page .referee-search-chip input::placeholder,
+.admin-console-page .referee-list-tools input::placeholder,
+.admin-console-page .referee-sheet-form-grid input::placeholder,
+.admin-console-page .referee-sheet-form-grid textarea::placeholder,
+.admin-console-page .referee-review-note textarea::placeholder {
+  color: rgba(220, 236, 235, 0.46);
+}
+
+.admin-console-page .delegate-tabs button,
+.admin-console-page .referee-command-center button {
+  color: rgba(220, 236, 235, 0.78);
+}
+
+.admin-console-page .delegate-tabs button.active,
+.admin-console-page .delegate-tabs button[aria-selected="true"],
+.admin-console-page .referee-command-center button.active {
+  border-color: rgba(105, 255, 139, 0.28);
+  background: linear-gradient(135deg, rgba(46, 244, 109, 0.2), rgba(0, 118, 153, 0.2));
+  color: #f7fff7;
+}
+
+.admin-console-page .delegate-form-note {
+  border-color: rgba(105, 255, 139, 0.18);
+  background: rgba(57, 255, 116, 0.08);
+}
+
+.admin-console-page .delegate-user-card > summary b,
+.admin-console-page .referee-user-card > summary b,
+.admin-console-page .admin-referee-tags span,
+.admin-console-page .referee-venue-pill,
+.admin-console-page .referee-active-filters span {
+  border-color: rgba(105, 255, 139, 0.14);
+  background: rgba(105, 255, 139, 0.1);
+  color: #b9ff91;
+}
+
+.admin-console-page .delegate-compact-group > summary,
+.admin-console-page .delegate-user-card > summary {
+  border-color: rgba(148, 255, 177, 0.12);
+  background: rgba(4, 20, 24, 0.78);
+  color: #f7fff7;
+}
+
+.admin-console-page .referee-match-timebox,
+.admin-console-page .referee-day-head b {
+  background: rgba(57, 255, 116, 0.1);
+  color: #8eff67;
+}
+
+.admin-console-page .referee-match-action button,
+.admin-console-page .referee-operations-head button,
+.admin-console-page .referee-ops-header button,
+.admin-console-page .referee-bottom-sheet-head button,
+.admin-console-page .referee-active-filters button,
+.admin-console-page .referee-quick-actions button,
+.admin-console-page .arbitration-empty-state button {
+  border-color: rgba(105, 255, 139, 0.2);
+  background: rgba(105, 255, 139, 0.12);
+  color: #b9ff91;
+}
+
+.admin-console-page .delegate-filter-bar button,
+.admin-console-page .referee-quick-actions button.primary,
+.admin-console-page .arbitration-empty-state button {
+  min-height: 44px;
+  border-radius: 8px;
+  font-weight: 950;
+}
+
+.admin-console-page .delegate-filter-bar button {
+  background: linear-gradient(135deg, rgba(48, 235, 105, 0.18), rgba(30, 153, 183, 0.18));
+  color: #f7fff7;
+}
+
+.admin-console-page .delegate-stepper span::before {
+  background: rgba(220, 236, 235, 0.14);
+  color: rgba(220, 236, 235, 0.78);
+}
+
+.admin-console-page .delegate-stepper span.active::before {
+  background: linear-gradient(135deg, #31f66b, #12a5d3);
+  color: #031116;
+}
+
+.admin-console-page .arbitration-empty-state span,
+.admin-console-page .arbitration-empty-state strong {
+  color: #f8fff8;
+}
+
+.admin-console-page .arbitration-empty-state p {
+  color: rgba(220, 236, 235, 0.74);
+}
+
+.admin-console-page .referee-bottom-sheet {
+  border: 1px solid rgba(148, 255, 177, 0.16);
+  background: linear-gradient(180deg, #102a2d, #061319);
+  color: #f7fbff;
+}
+
+.admin-console-page .referee-status-badge.missing,
+.admin-console-page .referee-access-badge.pending_activation,
+.admin-console-page .referee-status-badge.incomplete {
+  background: rgba(245, 183, 49, 0.16);
+  color: #ffd66b;
+}
+
+.admin-console-page .referee-status-badge.complete,
+.admin-console-page .referee-access-badge.active {
+  background: rgba(46, 244, 109, 0.14);
+  color: #8eff67;
+}
+
+.admin-console-page .referee-access-badge.disabled {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+}
+
+.admin-console-page .referee-access-badge.suspended {
+  background: rgba(239, 68, 68, 0.14);
+  color: #ff9a9a;
+}
+
+.admin-console-page .arbitration-metric-card strong {
+  color: #8eff67;
+}
+
+.admin-console-page .arbitration-metric-card.tone-warning strong,
+.admin-console-page .arbitration-metric-card.tone-amber strong {
+  color: #ffd66b;
+}
+
+.admin-console-page .arbitration-metric-card.tone-danger strong {
+  color: #ff7a7a;
+}
+
+.admin-console-page .arbitration-metric-card.tone-info strong {
+  color: #6ad5ff;
+}
+
+.admin-console-page .arbitration-metric-card.tone-neutral strong {
+  color: #d6e5e2;
+}
+
+@media (max-width: 760px) {
+  .admin-console-page .delegate-summary-cards,
+  .admin-console-page .referee-metric-grid,
+  .admin-console-page .referee-metric-grid.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-console-page .referee-command-center {
+    position: sticky;
+    top: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    padding: 5px;
+    background: rgba(5, 22, 27, 0.92);
+  }
+
+  .admin-console-page .referee-command-center button {
+    min-height: 54px;
+    padding: 7px 4px;
+  }
+
+  .admin-console-page .referee-command-center strong {
+    font-size: 0.78rem;
+  }
+
+  .admin-console-page .referee-command-center span {
+    font-size: 0.61rem;
+  }
+
+  .admin-console-page .referee-operations-card,
+  .admin-console-page .admin-referee-card,
+  .admin-console-page .referee-ops-match-card {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .referee-progress-ring {
+    width: 76px;
+    height: 76px;
+    justify-self: center;
+  }
+
+  .admin-console-page .referee-filter-chips,
+  .admin-console-page .referee-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .admin-console-page .referee-filter-chips select,
+  .admin-console-page .referee-filter-chips button,
+  .admin-console-page .referee-search-chip,
+  .admin-console-page .referee-quick-actions button {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .admin-console-page .referee-search-chip {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .admin-console-page .referee-search-chip input {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 430px) {
+  .admin-console-page .delegate-summary-cards,
+  .admin-console-page .referee-metric-grid,
+  .admin-console-page .referee-metric-grid.compact,
+  .admin-console-page .referee-filter-chips,
+  .admin-console-page .referee-quick-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .delegate-summary-cards span,
+  .admin-console-page .arbitration-metric-card {
+    min-height: 64px;
+  }
+}
+
 /* Production hotfix: mobile admin stability. */
 @media (max-width: 720px) {
   .super-admin-layout {
