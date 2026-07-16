@@ -10175,8 +10175,82 @@ th {
   font-weight: 850;
 }
 
+.admin-console-page .venue-card-shell {
+  overflow: hidden;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(91, 255, 137, 0.06), transparent 28%),
+    rgba(255, 255, 255, 0.055);
+  color: #f7fbff;
+}
+
+.admin-console-page .venue-card-summary {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 72px;
+  padding: 9px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.admin-console-page .venue-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-console-page .venue-card-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-console-page .venue-card-copy strong,
+.admin-console-page .venue-card-copy small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-console-page .venue-card-copy strong {
+  color: #f7fbff;
+  font-size: 0.88rem;
+  text-transform: uppercase;
+}
+
+.admin-console-page .venue-card-copy small {
+  color: rgba(220, 232, 240, 0.64);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.admin-console-page .venue-card-summary em {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid rgba(140, 247, 76, 0.2);
+  border-radius: 999px;
+  background: rgba(140, 247, 76, 0.1);
+  color: #9dff75;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .venue-card-shell[open] .venue-card-summary {
+  border-bottom: 1px solid rgba(132, 166, 190, 0.14);
+  background: rgba(140, 247, 76, 0.07);
+}
+
 .admin-console-page .venue-card {
   grid-template-columns: 76px repeat(3, minmax(0, 1fr)) auto auto;
+  margin: 0;
+  border: 0;
   border-radius: 16px;
 }
 
@@ -13404,6 +13478,590 @@ th {
 
   .super-today-strip article {
     padding: 11px;
+  }
+}
+
+/* Critical mobile admin polish: compact chrome, remove dead scroll, and prevent card overflow. */
+@media (max-width: 920px) {
+  body:has(.admin-route-shell) {
+    background: #020811;
+  }
+
+  .admin-route-shell,
+  .admin-route-shell:has(.admin-console-page),
+  .admin-console-page,
+  .admin-console-page .admin-shell-app,
+  .admin-console-page .super-admin-only-shell,
+  .super-admin-v2 {
+    min-height: 0 !important;
+  }
+
+  .admin-route-shell {
+    overflow-x: clip;
+  }
+
+  .admin-topbar {
+    grid-template-columns: 46px minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 6px !important;
+    min-height: 0 !important;
+    padding: 6px !important;
+  }
+
+  .admin-topbar .brand {
+    min-height: 44px !important;
+    width: 44px !important;
+    min-width: 44px !important;
+    grid-template-columns: 1fr !important;
+    place-items: center !important;
+    padding: 4px !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-topbar .brand::after,
+  .admin-topbar .brand-copy {
+    display: none !important;
+  }
+
+  .admin-topbar .brand-mark-logo {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 10px !important;
+  }
+
+  .admin-topbar .private-topbar-actions {
+    grid-template-columns: minmax(0, 1fr) 38px auto !important;
+    align-items: center !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+  }
+
+  .admin-topbar .private-league-switcher {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    min-height: 44px !important;
+    padding: 5px 6px !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-topbar .private-league-switcher span {
+    display: none !important;
+  }
+
+  .admin-topbar .private-league-switcher select {
+    min-height: 34px !important;
+    padding-inline: 9px 24px !important;
+    font-size: 0.72rem !important;
+  }
+
+  .admin-topbar .private-api-pill {
+    display: none !important;
+  }
+
+  .admin-topbar .private-panel-nav {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .admin-topbar .private-panel-link {
+    width: 38px !important;
+    min-width: 38px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-topbar .private-panel-link span {
+    width: 26px !important;
+    height: 26px !important;
+  }
+
+  .admin-topbar .private-user-chip {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    min-height: 44px !important;
+    grid-template-columns: 32px auto !important;
+    gap: 6px !important;
+    padding: 5px !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-topbar .private-user-chip > span:not(.private-user-avatar) {
+    display: none !important;
+  }
+
+  .admin-topbar .private-user-avatar {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 10px !important;
+  }
+
+  .admin-topbar .private-user-chip button {
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 9px !important;
+    border-radius: 10px !important;
+    font-size: 0.66rem !important;
+  }
+
+  .admin-console-page {
+    padding: 7px 7px calc(86px + env(safe-area-inset-bottom)) !important;
+    align-content: start !important;
+  }
+
+  .admin-console-page .admin-shell-app {
+    padding: 8px !important;
+    overflow: visible !important;
+  }
+
+  .admin-console-page .admin-content,
+  .admin-console-page .admin-league-app,
+  .admin-console-page .admin-module-content,
+  .super-admin-main,
+  .super-dashboard {
+    min-width: 0 !important;
+  }
+
+  .admin-console-page .admin-league-top {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 10px !important;
+    min-height: 0 !important;
+    padding: 11px !important;
+    overflow: hidden !important;
+  }
+
+  .admin-console-page .admin-league-title {
+    min-width: 0 !important;
+    gap: 8px !important;
+  }
+
+  .admin-console-page .admin-league-title h2 {
+    max-width: 100% !important;
+    font-size: clamp(1.05rem, 5vw, 1.42rem) !important;
+    line-height: 0.98 !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .admin-console-page .admin-league-title small {
+    font-size: 0.72rem !important;
+    line-height: 1.15 !important;
+  }
+
+  .admin-console-page .admin-super-return-button {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    min-height: 38px !important;
+    padding: 0 10px !important;
+    border-radius: 12px !important;
+    font-size: 0.7rem !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-league-status {
+    grid-column: 1 / -1 !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    padding: 8px !important;
+  }
+
+  .admin-console-page .admin-league-status span,
+  .admin-console-page .admin-league-status strong {
+    min-width: 0 !important;
+    text-align: center !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .admin-league-alp-watermark,
+  .admin-operation-watermark {
+    right: 8px !important;
+    max-width: 46vw !important;
+    opacity: 0.055 !important;
+  }
+
+  .admin-league-alp-watermark {
+    top: 70% !important;
+    width: min(42%, 170px) !important;
+    transform: translate(0, -50%) !important;
+  }
+
+  .admin-operation-watermark {
+    top: -14px !important;
+    width: 150px !important;
+  }
+
+  .admin-console-page .admin-operation-card,
+  .admin-console-page .admin-workspace-card,
+  .admin-console-page .admin-function-card,
+  .admin-console-page .admin-home-action-grid button,
+  .admin-console-page .admin-league-top {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: clip !important;
+  }
+
+  .admin-console-page .admin-workspace-card::after,
+  .admin-console-page .admin-function-card::after {
+    display: none !important;
+  }
+
+  .admin-operation-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .admin-operation-overview > div {
+    min-height: 86px !important;
+    padding: 10px !important;
+  }
+
+  .admin-operation-insights,
+  .admin-operation-actions,
+  .admin-league-summary,
+  .admin-home-action-grid,
+  .admin-workspace-grid,
+  .admin-function-grid,
+  .admin-console-page .admin-sheet-scoreboard,
+  .admin-console-page .admin-sheet-score-edit,
+  .admin-console-page .admin-sheet-summary-grid,
+  .admin-console-page .config-compact-guide,
+  .admin-console-page .rules-preview,
+  .admin-console-page .identity-dashboard,
+  .admin-console-page .identity-form,
+  .admin-console-page .identity-metrics,
+  .admin-console-page .venue-card,
+  .admin-console-page .tournament-card,
+  .admin-console-page .tournament-card-head {
+    grid-template-columns: 1fr !important;
+  }
+
+  .admin-console-page .admin-league-summary,
+  .admin-console-page .identity-metrics,
+  .admin-console-page .admin-sheet-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .admin-console-page .admin-home-action-grid button,
+  .admin-console-page .admin-workspace-card,
+  .admin-console-page .admin-function-card {
+    display: grid !important;
+    min-height: 76px !important;
+    grid-template-columns: 42px minmax(0, 1fr) !important;
+    align-items: center !important;
+    align-content: center !important;
+    padding: 11px !important;
+    box-sizing: border-box !important;
+  }
+
+  .admin-console-page .admin-workspace-card em,
+  .admin-console-page .admin-function-card em,
+  .admin-console-page .admin-home-action-grid small {
+    grid-column: 2 !important;
+    justify-self: start !important;
+  }
+
+  .admin-console-page .admin-home-action-grid button > span,
+  .admin-console-page .admin-workspace-card > span,
+  .admin-console-page .admin-function-card > span {
+    grid-row: 1 / span 3 !important;
+    align-self: center !important;
+  }
+
+  .admin-console-page .admin-workspace-card strong,
+  .admin-console-page .admin-workspace-card small,
+  .admin-console-page .admin-workspace-card em,
+  .admin-console-page .admin-function-card strong,
+  .admin-console-page .admin-function-card small,
+  .admin-console-page .admin-function-card em,
+  .admin-console-page .admin-home-action-grid strong,
+  .admin-console-page .admin-home-action-grid small {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .admin-console-page .admin-workspace-nav {
+    width: min(calc(100% - 12px), 520px) !important;
+    max-width: calc(100% - 12px) !important;
+    grid-auto-columns: minmax(64px, 1fr) !important;
+    padding: 6px !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button {
+    min-height: 50px !important;
+    font-size: 0.55rem !important;
+  }
+
+  .admin-console-page .admin-section-tabs.compact {
+    position: sticky !important;
+    top: 62px !important;
+    z-index: 12 !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+  }
+
+  .admin-console-page .admin-section-tabs.compact::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .admin-console-page .admin-section-tabs.compact button {
+    min-width: max-content !important;
+  }
+
+  .admin-console-page .venue-card-summary {
+    grid-template-columns: 64px minmax(0, 1fr) auto !important;
+  }
+
+  .admin-console-page .venue-card-summary .venue-card-title,
+  .admin-console-page .venue-card-summary .venue-card-copy,
+  .admin-console-page .venue-card-summary em {
+    grid-column: auto !important;
+  }
+
+  .admin-console-page .venue-card-summary em {
+    min-width: 0 !important;
+    width: auto !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .super-admin-v2 {
+    padding: 7px 7px calc(82px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .super-admin-topbar {
+    position: relative !important;
+    top: auto !important;
+    min-height: 0 !important;
+    grid-template-columns: 44px minmax(0, 1fr) auto !important;
+    gap: 8px !important;
+    padding: 10px !important;
+    align-items: center !important;
+    overflow: hidden !important;
+  }
+
+  .super-admin-mobile-brand {
+    position: static !important;
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    justify-self: center !important;
+    transform: none !important;
+    min-height: 34px !important;
+    padding: 6px 9px !important;
+  }
+
+  .super-admin-mobile-brand span {
+    font-size: 0.58rem !important;
+    letter-spacing: 0.09em !important;
+  }
+
+  .super-admin-menu-button {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    border-radius: 12px !important;
+  }
+
+  .super-admin-avatar {
+    width: 36px !important;
+    height: 36px !important;
+    flex-basis: 36px !important;
+  }
+
+  .super-admin-title-block {
+    grid-column: 1 / 3 !important;
+    grid-row: 2 !important;
+    padding-top: 0 !important;
+    display: grid !important;
+    gap: 3px !important;
+    text-align: left !important;
+  }
+
+  .super-admin-title-block span {
+    font-size: 0.62rem !important;
+    letter-spacing: 0.07em !important;
+  }
+
+  .super-admin-title-block h1 {
+    font-size: clamp(1.18rem, 6vw, 1.55rem) !important;
+    line-height: 0.98 !important;
+  }
+
+  .super-admin-league-admin-button {
+    grid-column: 3 !important;
+    grid-row: 2 !important;
+    justify-self: end !important;
+    width: auto !important;
+    min-height: 40px !important;
+    padding-inline: 11px !important;
+    border-radius: 13px !important;
+    font-size: 0.68rem !important;
+    white-space: nowrap !important;
+  }
+
+  .super-admin-alp-watermark {
+    right: 8px !important;
+    bottom: -38px !important;
+    width: min(62%, 260px) !important;
+    opacity: 0.065 !important;
+  }
+
+  .super-status-card,
+  .super-panel-card,
+  .super-module-panel,
+  .super-metric-card,
+  .super-today-strip article {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: clip !important;
+  }
+
+  .super-dashboard {
+    margin-top: 10px !important;
+    gap: 12px !important;
+  }
+
+  .super-metric-grid,
+  .super-today-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .super-metric-card {
+    min-height: 76px !important;
+    padding: 10px !important;
+  }
+
+  .super-metric-card small,
+  .super-metric-card span,
+  .super-today-strip small,
+  .super-today-strip span {
+    font-size: 0.66rem !important;
+    line-height: 1.12 !important;
+  }
+
+  .super-metric-card strong,
+  .super-today-strip strong {
+    font-size: 1.38rem !important;
+  }
+
+  .super-action-grid button {
+    min-height: 66px !important;
+    padding: 11px !important;
+  }
+
+  .super-league-card-shell summary,
+  .super-user-card summary,
+  .super-backup-card,
+  .super-audit-module .audit-row {
+    max-width: 100% !important;
+    overflow-x: clip !important;
+  }
+
+  .super-admin-bottom-nav {
+    left: 6px !important;
+    right: 6px !important;
+    bottom: max(7px, env(safe-area-inset-bottom)) !important;
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+    gap: 3px !important;
+    padding: 6px !important;
+    max-width: calc(100% - 12px) !important;
+  }
+
+  .super-admin-bottom-nav button {
+    min-height: 50px !important;
+    font-size: 0.52rem !important;
+    line-height: 1 !important;
+  }
+
+  .super-entity-modal {
+    padding: 7px !important;
+  }
+
+  .super-entity-sheet {
+    width: min(100%, 560px) !important;
+    max-height: calc(100svh - 14px) !important;
+    border-radius: 18px !important;
+  }
+
+  .super-sheet-header {
+    grid-template-columns: 42px minmax(0, 1fr) !important;
+    gap: 10px !important;
+    padding: 12px !important;
+  }
+
+  .super-sheet-badge {
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 13px !important;
+  }
+
+  .super-sheet-header h3 {
+    font-size: 1.05rem !important;
+  }
+
+  .super-sheet-header p {
+    font-size: 0.76rem !important;
+  }
+
+  .super-sheet-form {
+    max-height: calc(100svh - 132px) !important;
+    padding: 12px !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .super-admin-title-block small {
+    display: none !important;
+  }
+
+  .super-admin-league-admin-button {
+    min-height: 36px !important;
+    padding-inline: 9px !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .admin-topbar .private-topbar-actions {
+    grid-template-columns: minmax(0, 1fr) 36px auto !important;
+    gap: 5px !important;
+  }
+
+  .admin-topbar .private-user-chip button {
+    padding-inline: 7px !important;
+  }
+
+  .super-admin-mobile-brand span {
+    max-width: 138px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .super-admin-league-admin-button {
+    font-size: 0 !important;
+    width: 38px !important;
+    min-width: 38px !important;
+    padding: 0 !important;
+  }
+
+  .super-admin-league-admin-button svg {
+    margin: 0 !important;
+  }
+
+  .admin-operation-overview,
+  .admin-console-page .admin-league-summary,
+  .admin-console-page .identity-metrics,
+  .admin-console-page .admin-sheet-summary-grid,
+  .super-metric-grid,
+  .super-today-strip {
+    grid-template-columns: 1fr !important;
   }
 }
 
@@ -18928,6 +19586,605 @@ label {
   }
 }
 
+/* Final mobile admin layer: app-like header and stable acta capture layout. */
+@media (max-width: 920px) {
+  .admin-topbar {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 120 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 9px !important;
+    padding: 10px !important;
+    border-bottom: 1px solid rgba(91, 255, 137, 0.18) !important;
+    background:
+      radial-gradient(circle at 6% 0%, rgba(91, 255, 137, 0.18), transparent 36%),
+      linear-gradient(180deg, rgba(4, 17, 22, 0.98), rgba(3, 13, 18, 0.98)) !important;
+  }
+
+  .admin-topbar .brand {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 66px !important;
+    display: grid !important;
+    grid-template-columns: 58px minmax(0, 1fr) auto !important;
+    gap: 12px !important;
+    place-items: center start !important;
+    padding: 10px 12px !important;
+    border: 1px solid rgba(91, 255, 137, 0.22) !important;
+    border-radius: 22px !important;
+    background:
+      radial-gradient(circle at 94% 0%, rgba(140, 247, 76, 0.08), transparent 34%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.035)),
+      rgba(2, 10, 17, 0.76) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  .admin-topbar .brand-copy {
+    display: grid !important;
+    gap: 3px !important;
+    min-width: 0 !important;
+  }
+
+  .admin-topbar .brand::after {
+    content: "Panel admin" !important;
+    justify-self: end !important;
+    min-height: 38px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 0 14px !important;
+    border: 1px solid rgba(140, 247, 76, 0.26) !important;
+    border-radius: 999px !important;
+    color: #9dff75 !important;
+    background: rgba(140, 247, 76, 0.1) !important;
+    font-size: 0.82rem !important;
+    font-weight: 1000 !important;
+    letter-spacing: 0.03em !important;
+    text-transform: uppercase !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-topbar .brand-mark-logo {
+    width: 54px !important;
+    height: 54px !important;
+    border-radius: 15px !important;
+  }
+
+  .admin-topbar .brand-wordmark {
+    color: #fff !important;
+    font-size: clamp(1.2rem, 5.2vw, 1.55rem) !important;
+    font-style: italic !important;
+    line-height: 0.95 !important;
+    letter-spacing: 0.04em !important;
+  }
+
+  .admin-topbar .brand-copy small {
+    color: rgba(220, 232, 240, 0.72) !important;
+    font-size: 0.66rem !important;
+    font-weight: 950 !important;
+    letter-spacing: 0.03em !important;
+    line-height: 1 !important;
+  }
+
+  .admin-topbar .private-topbar-actions {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: minmax(112px, 0.52fr) minmax(0, 1fr) 54px !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+  }
+
+  .admin-topbar .private-league-switcher {
+    grid-column: 1 / -1 !important;
+    grid-row: 1 !important;
+    min-height: 56px !important;
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    gap: 9px !important;
+    align-items: center !important;
+    padding: 9px 12px !important;
+    border: 1px solid rgba(132, 166, 190, 0.18) !important;
+    border-radius: 20px !important;
+    background: rgba(255, 255, 255, 0.065) !important;
+  }
+
+  .admin-topbar .private-league-switcher span {
+    display: block !important;
+    color: rgba(220, 232, 240, 0.58) !important;
+    font-size: 0.72rem !important;
+    font-weight: 1000 !important;
+    text-transform: uppercase !important;
+  }
+
+  .admin-topbar .private-league-switcher select {
+    min-width: 0 !important;
+    min-height: 38px !important;
+    border-radius: 15px !important;
+    padding: 0 30px 0 12px !important;
+    color: #f7fbff !important;
+    background: rgba(2, 10, 17, 0.78) !important;
+    font-size: 0.82rem !important;
+    font-weight: 1000 !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .admin-topbar .private-api-pill {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    min-height: 54px !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    padding: 0 10px !important;
+    border-radius: 20px !important;
+    border-color: rgba(140, 247, 76, 0.2) !important;
+    color: #8cff5a !important;
+    background: rgba(140, 247, 76, 0.11) !important;
+    font-size: clamp(0.76rem, 3.7vw, 1rem) !important;
+    font-weight: 1000 !important;
+    letter-spacing: 0.02em !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-topbar .private-user-chip {
+    grid-column: 2 !important;
+    grid-row: 2 !important;
+    min-width: 0 !important;
+    min-height: 54px !important;
+    display: grid !important;
+    grid-template-columns: 44px minmax(0, 1fr) auto !important;
+    gap: 9px !important;
+    align-items: center !important;
+    padding: 6px !important;
+    border-radius: 20px !important;
+  }
+
+  .admin-topbar .private-user-avatar {
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 14px !important;
+    font-size: 0.92rem !important;
+  }
+
+  .admin-topbar .private-user-chip > span:not(.private-user-avatar) {
+    display: block !important;
+    min-width: 0 !important;
+  }
+
+  .admin-topbar .private-user-chip strong {
+    display: block !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    color: #f7fbff !important;
+    font-size: clamp(0.74rem, 3.6vw, 1rem) !important;
+    font-weight: 1000 !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-topbar .private-user-chip small {
+    display: none !important;
+  }
+
+  .admin-topbar .private-user-chip button {
+    min-height: 42px !important;
+    height: 42px !important;
+    padding: 0 12px !important;
+    border-radius: 14px !important;
+    font-size: 0.78rem !important;
+  }
+
+  .admin-topbar .private-panel-nav {
+    grid-column: 3 !important;
+    grid-row: 2 !important;
+    display: flex !important;
+    align-items: stretch !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .admin-topbar .private-panel-nav button {
+    display: none !important;
+  }
+
+  .admin-topbar .private-panel-link {
+    width: 54px !important;
+    min-width: 54px !important;
+    min-height: 54px !important;
+    padding: 0 !important;
+    border-radius: 19px !important;
+  }
+
+  .admin-topbar .private-panel-link strong {
+    display: none !important;
+  }
+
+  .admin-topbar .private-panel-link span {
+    width: 31px !important;
+    height: 31px !important;
+    border-radius: 12px !important;
+    font-size: 1.05rem !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .admin-topbar {
+    padding: 8px !important;
+    gap: 8px !important;
+  }
+
+  .admin-topbar .brand {
+    grid-template-columns: 48px minmax(0, 1fr) auto !important;
+    min-height: 60px !important;
+    gap: 9px !important;
+    padding: 8px 10px !important;
+    border-radius: 20px !important;
+  }
+
+  .admin-topbar .brand-mark-logo {
+    width: 46px !important;
+    height: 46px !important;
+  }
+
+  .admin-topbar .brand::after {
+    min-height: 34px !important;
+    padding: 0 10px !important;
+    font-size: 0.68rem !important;
+  }
+
+  .admin-topbar .private-topbar-actions {
+    grid-template-columns: minmax(102px, 0.5fr) minmax(0, 1fr) 50px !important;
+    gap: 7px !important;
+  }
+
+  .admin-topbar .private-api-pill,
+  .admin-topbar .private-user-chip,
+  .admin-topbar .private-panel-link {
+    min-height: 50px !important;
+  }
+
+  .admin-topbar .private-user-chip {
+    grid-template-columns: 40px minmax(0, 1fr) auto !important;
+    gap: 7px !important;
+  }
+
+  .admin-topbar .private-user-avatar {
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  .admin-topbar .private-user-chip button {
+    min-height: 38px !important;
+    height: 38px !important;
+    padding: 0 10px !important;
+  }
+
+  .admin-topbar .private-panel-link {
+    width: 50px !important;
+    min-width: 50px !important;
+  }
+}
+
+@media (max-width: 920px) {
+  .admin-console-page .admin-sheet-shell {
+    gap: 10px !important;
+    padding: 10px !important;
+    overflow: hidden !important;
+  }
+
+  .admin-console-page .admin-sheet-stepper {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    gap: 5px !important;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+  }
+
+  .admin-console-page .admin-sheet-stepper button {
+    min-width: 0 !important;
+    min-height: 58px !important;
+    display: grid !important;
+    justify-items: center !important;
+    align-content: center !important;
+    gap: 3px !important;
+    padding: 5px 2px !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-console-page .admin-sheet-stepper button span {
+    width: 29px !important;
+    height: 29px !important;
+    font-size: 0.82rem !important;
+  }
+
+  .admin-console-page .admin-sheet-stepper button strong {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    font-size: clamp(0.52rem, 2.7vw, 0.68rem) !important;
+    line-height: 1 !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-screen {
+    padding: 10px !important;
+    border-radius: 16px !important;
+    overflow: hidden !important;
+  }
+
+  .admin-console-page .admin-sheet-picker,
+  .admin-console-page .sheet-picker {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    padding: 10px !important;
+    overflow: hidden !important;
+  }
+
+  .admin-console-page .admin-sheet-picker label,
+  .admin-console-page .sheet-picker label {
+    min-width: 0 !important;
+  }
+
+  .admin-console-page .admin-sheet-picker select,
+  .admin-console-page .sheet-picker select {
+    width: 100% !important;
+    min-width: 0 !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .admin-console-page .admin-sheet-selection-brief {
+    padding: 10px !important;
+  }
+
+  .admin-console-page .admin-sheet-match-grid {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .admin-console-page .admin-sheet-match-grid button {
+    min-height: 92px !important;
+    display: grid !important;
+    gap: 6px !important;
+    align-content: center !important;
+    padding: 12px !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head b,
+  .admin-console-page .admin-sheet-match-card-head small {
+    position: static !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 7px !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    color: #f7fbff !important;
+    font-size: clamp(0.8rem, 3.8vw, 0.95rem) !important;
+    font-weight: 1000 !important;
+    line-height: 1.08 !important;
+    text-align: center !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams span {
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams b {
+    flex: 0 0 auto !important;
+    padding: 4px 8px !important;
+    border-radius: 9px !important;
+    color: #06110d !important;
+    background: #8cff5a !important;
+  }
+
+  .admin-console-page .admin-sheet-match-meta {
+    display: block !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    color: rgba(220, 232, 240, 0.72) !important;
+    font-size: 0.7rem !important;
+    line-height: 1.18 !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .admin-console-page .admin-sheet-stepper {
+    gap: 4px !important;
+  }
+
+  .admin-console-page .admin-sheet-stepper button {
+    min-height: 54px !important;
+    border-radius: 12px !important;
+  }
+
+  .admin-console-page .admin-sheet-stepper button span {
+    width: 25px !important;
+    height: 25px !important;
+    font-size: 0.72rem !important;
+  }
+
+  .admin-console-page .admin-sheet-stepper button strong {
+    font-size: 0.5rem !important;
+  }
+}
+
+/* Final pass: mobile admin headers, bottom navigation and acta stability. */
+@media (max-width: 920px) {
+  .admin-console-page .admin-workspace-nav {
+    left: max(10px, env(safe-area-inset-left)) !important;
+    right: max(10px, env(safe-area-inset-right)) !important;
+    width: auto !important;
+    max-width: none !important;
+    transform: none !important;
+    display: flex !important;
+    gap: 8px !important;
+    justify-content: flex-start !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    overscroll-behavior-x: contain !important;
+    scroll-snap-type: x proximity !important;
+    scrollbar-width: none !important;
+  }
+
+  .admin-console-page .admin-workspace-nav::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button {
+    flex: 0 0 66px !important;
+    min-width: 66px !important;
+    max-width: 66px !important;
+    scroll-snap-align: center !important;
+  }
+
+  .super-admin-topbar {
+    grid-template-columns: 48px minmax(0, 1fr) 48px !important;
+    gap: 12px !important;
+    padding: 14px !important;
+    border-radius: 24px !important;
+  }
+
+  .super-admin-mobile-brand {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    justify-self: center !important;
+    width: min(100%, 260px) !important;
+    min-height: 38px !important;
+    border-radius: 999px !important;
+  }
+
+  .super-admin-menu-button {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    width: 48px !important;
+    min-width: 48px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    border-radius: 16px !important;
+  }
+
+  .super-admin-avatar {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    width: 48px !important;
+    height: 48px !important;
+    flex-basis: 48px !important;
+  }
+
+  .super-admin-title-block {
+    grid-column: 1 / -1 !important;
+    grid-row: 2 !important;
+    padding-top: 18px !important;
+    gap: 5px !important;
+  }
+
+  .super-admin-title-block span {
+    color: #3cff76 !important;
+    font-size: 0.74rem !important;
+    letter-spacing: 0.12em !important;
+  }
+
+  .super-admin-title-block h1 {
+    font-size: clamp(1.55rem, 8vw, 2.3rem) !important;
+    letter-spacing: 0 !important;
+  }
+
+  .super-admin-title-block small,
+  .super-admin-platform-pill {
+    display: none !important;
+  }
+
+  .super-admin-league-admin-button {
+    grid-column: 1 / -1 !important;
+    grid-row: 3 !important;
+    justify-self: stretch !important;
+    width: 100% !important;
+    min-height: 56px !important;
+    margin-top: 14px !important;
+    border-radius: 20px !important;
+    font-size: clamp(0.95rem, 4.6vw, 1.18rem) !important;
+  }
+
+  .super-admin-alp-watermark {
+    left: 50% !important;
+    right: auto !important;
+    bottom: 18px !important;
+    width: min(82%, 360px) !important;
+    transform: translateX(-50%) !important;
+    opacity: 0.055 !important;
+  }
+
+  .super-admin-sidebar:not(.open) {
+    width: 0 !important;
+    transform: translateX(-110%) !important;
+    pointer-events: none !important;
+  }
+
+  .admin-console-page .admin-sheet-shell {
+    width: min(100%, 430px) !important;
+    margin-inline: auto !important;
+  }
+
+  .admin-console-page .admin-sheet-screen {
+    min-width: 0 !important;
+  }
+
+  .admin-console-page .admin-sheet-screen-head {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .admin-console-page .admin-sheet-screen-head small {
+    width: 100% !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+
+  .admin-console-page .admin-sheet-match-grid {
+    width: 100% !important;
+  }
+
+  .admin-console-page .admin-sheet-match-grid button {
+    width: 100% !important;
+    max-width: 100% !important;
+    justify-items: stretch !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head,
+  .admin-console-page .admin-sheet-match-teams,
+  .admin-console-page .admin-sheet-match-meta {
+    width: 100% !important;
+    max-width: 100% !important;
+    transform: none !important;
+  }
+}
+
 /* Polished public match schedule states: postponed, rescheduled and advanced. */
 .public-league-page .match-card.has-schedule-note {
   border-color: rgba(118, 204, 255, 0.24);
@@ -18981,6 +20238,258 @@ label {
 .public-league-page .match-card.has-schedule-note .match-card-center {
   min-height: 48px;
   align-content: center;
+}
+
+/* Mobile production polish: admin/super admin chrome and match-sheet alignment. */
+@media (max-width: 920px) {
+  .super-admin-sidebar:not(.open) {
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden !important;
+    transform: translateX(-120%) !important;
+    pointer-events: none !important;
+  }
+
+  .super-admin-sidebar.open {
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: min(82vw, 310px) !important;
+    max-width: min(82vw, 310px) !important;
+    padding: 14px !important;
+    overflow-y: auto !important;
+    transform: translateX(0) !important;
+    pointer-events: auto !important;
+  }
+
+  .admin-console-page .admin-super-return-button {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    min-height: 56px !important;
+    display: inline-flex !important;
+    gap: 10px !important;
+    border-radius: 20px !important;
+    border-color: rgba(91, 255, 137, 0.28) !important;
+    background:
+      linear-gradient(135deg, rgba(29, 143, 75, 0.72), rgba(17, 79, 110, 0.78)) !important;
+    color: #f7fbff !important;
+    font-size: clamp(0.92rem, 4vw, 1.08rem) !important;
+    font-weight: 1000 !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 14px 30px rgba(0, 0, 0, 0.24) !important;
+  }
+
+  .admin-console-page .admin-super-return-button svg {
+    width: 20px !important;
+    height: 20px !important;
+    color: #9dff75 !important;
+  }
+
+  .admin-console-page .admin-league-status {
+    grid-column: 1 / -1 !important;
+  }
+
+  .admin-console-page .admin-sheet-scoreboard {
+    grid-template-columns: minmax(66px, 0.72fr) minmax(116px, 1fr) minmax(66px, 0.72fr) !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+    padding: 10px !important;
+  }
+
+  .admin-console-page .admin-sheet-club {
+    justify-items: center !important;
+    align-content: center !important;
+    gap: 5px !important;
+    text-align: center !important;
+  }
+
+  .admin-console-page .admin-sheet-club.away {
+    justify-items: center !important;
+    text-align: center !important;
+  }
+
+  .admin-console-page .admin-sheet-team-badge {
+    width: 50px !important;
+    height: 50px !important;
+    border-radius: 12px !important;
+    font-size: 0.86rem !important;
+  }
+
+  .admin-console-page .admin-sheet-club strong {
+    max-width: 100% !important;
+    min-height: 22px !important;
+    display: block !important;
+    overflow: hidden !important;
+    font-size: clamp(0.56rem, 2.8vw, 0.72rem) !important;
+    line-height: 1.04 !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: normal !important;
+  }
+
+  .admin-console-page .admin-sheet-club span {
+    font-size: 0.54rem !important;
+  }
+
+  .admin-console-page .admin-sheet-result {
+    min-width: 0 !important;
+    padding: 9px 8px !important;
+    align-content: center !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-console-page .admin-sheet-result strong {
+    font-size: clamp(1.72rem, 8vw, 2.4rem) !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-result span,
+  .admin-console-page .admin-sheet-result small {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    font-size: 0.56rem !important;
+    line-height: 1.05 !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .super-admin-mobile-brand {
+    width: min(100%, 310px) !important;
+    min-height: 42px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding-inline: 14px !important;
+    text-align: center !important;
+  }
+
+  .super-admin-mobile-brand span {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    color: #baff86 !important;
+    font-size: clamp(0.66rem, 3.1vw, 0.82rem) !important;
+    font-weight: 1000 !important;
+    letter-spacing: 0.12em !important;
+    line-height: 1 !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-match-grid button {
+    grid-template-columns: minmax(0, 1fr) !important;
+    min-height: 136px !important;
+    grid-template-rows: auto auto auto auto !important;
+    align-content: center !important;
+    justify-content: stretch !important;
+    justify-items: stretch !important;
+    gap: 8px !important;
+    padding: 15px 14px !important;
+    text-align: center !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head {
+    justify-self: stretch !important;
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: 8px !important;
+    justify-content: initial !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head b {
+    justify-self: start !important;
+    overflow: hidden !important;
+    color: rgba(232, 246, 242, 0.82) !important;
+    font-size: 0.76rem !important;
+    line-height: 1 !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-match-card-head small {
+    justify-self: end !important;
+    min-height: 28px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 10px !important;
+    border-radius: 999px !important;
+    color: #baff86 !important;
+    background: rgba(140, 247, 76, 0.12) !important;
+    font-size: 0.64rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams {
+    justify-self: stretch !important;
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin-top: 2px !important;
+    font-size: clamp(0.78rem, 3.5vw, 0.96rem) !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams span {
+    display: block !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .admin-console-page .admin-sheet-match-teams em {
+    width: 40px !important;
+    height: 32px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 12px !important;
+    color: #06110d !important;
+    background: #8cff5a !important;
+    font-style: normal !important;
+    font-weight: 1000 !important;
+  }
+
+  .admin-console-page .admin-sheet-match-meta {
+    justify-self: stretch !important;
+    display: block !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    color: rgba(220, 232, 240, 0.76) !important;
+    font-size: 0.72rem !important;
+    font-weight: 900 !important;
+    line-height: 1.18 !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .admin-console-page .admin-sheet-scoreboard {
+    grid-template-columns: 60px minmax(104px, 1fr) 60px !important;
+    gap: 6px !important;
+    padding: 8px !important;
+  }
+
+  .admin-console-page .admin-sheet-team-badge {
+    width: 44px !important;
+    height: 44px !important;
+  }
 }
 
 .public-league-page .match-card.status-postponed .match-card-action,
@@ -28985,6 +30494,8 @@ button.arbitration-metric-card {
   .admin-route-shell select,
   .admin-route-shell textarea {
     min-height: 40px;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .admin-route-shell button {

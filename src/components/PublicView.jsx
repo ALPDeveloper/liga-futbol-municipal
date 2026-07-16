@@ -1143,11 +1143,11 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
       : `${fileBaseName}-${index + 1}.png`;
     return new File([blob], resolvedName, { type: "image/png" });
   });
+  const shareText = url || text || "";
   const shareData = {
     files,
     ...(title ? { title } : {}),
-    ...(text ? { text } : {}),
-    ...(url ? { url } : {})
+    ...(shareText ? { text: shareText } : {})
   };
 
   if (canShareGeneratedFile(shareData)) {
@@ -1160,9 +1160,8 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
   }
 
   if (blobs.length === 1 && await copyImageBlobToClipboard(blobs[0])) {
-    const shareText = [text, url].filter(Boolean).join("\n");
     window.alert(shareText
-      ? `Imagen copiada. Pega la imagen en WhatsApp y agrega este link en el texto:\n\n${url || shareText}`
+      ? `Imagen copiada. Pega la imagen en WhatsApp y agrega este link en el texto:\n\n${shareText}`
       : "Imagen copiada. Abre WhatsApp y pegala en el chat para enviarla como imagen."
     );
     return;
@@ -1175,8 +1174,8 @@ async function shareGeneratedCards({ fileBaseName = "ligatec", fileName, imageBu
     downloadBlob(blob, resolvedName);
   });
   window.alert(blobs.length === 1
-    ? `Tu navegador no permite adjuntar la imagen directamente. Se descargo el PNG para enviarlo como imagen.\n\nLink para compartir:\n${url || ""}`
-    : `Tu navegador no permite adjuntar varias imagenes directamente. Se descargaron ${blobs.length} PNG para enviarlos por WhatsApp.\n\nLink para compartir:\n${url || ""}`
+    ? `Tu navegador no permite adjuntar la imagen directamente. Se descargo el PNG para enviarlo como imagen.\n\nLink para compartir:\n${shareText}`
+    : `Tu navegador no permite adjuntar varias imagenes directamente. Se descargaron ${blobs.length} PNG para enviarlos por WhatsApp.\n\nLink para compartir:\n${shareText}`
   );
 }
 
@@ -1273,19 +1272,20 @@ async function createStandingsShareImage({ league, competition, standings }) {
 
   insights.forEach(([label, teamName, value], index) => {
     const cardWidth = 304;
-    const cardHeight = 116;
+    const cardHeight = 122;
     const x = 60 + index * 328;
-    drawRoundedRect(context, x, 190, cardWidth, cardHeight, 18, "rgba(4, 33, 28, 0.94)");
+    const y = 190;
+    drawRoundedRect(context, x, y, cardWidth, cardHeight, 18, "rgba(4, 33, 28, 0.94)");
     context.strokeStyle = "rgba(43, 255, 135, 0.34)";
     context.lineWidth = 2;
     context.stroke();
-    drawRoundedRect(context, x, 190, 7, cardHeight, 4, "#8cff45");
+    drawRoundedRect(context, x, y, 7, cardHeight, 4, "#8cff45");
     context.fillStyle = label === "LIDER" ? "#8cff45" : "#f8fffb";
-    drawCanvasFittedText(context, label, x + 28, 214, cardWidth - 56, 18, 15, 950);
+    drawCanvasFittedText(context, label, x + 28, y + 24, cardWidth - 56, 18, 15, 950);
     context.fillStyle = "#ffffff";
-    drawCanvasFittedText(context, teamName.toLocaleUpperCase("es-MX"), x + 28, 246, cardWidth - 56, 24, 17, 950);
+    drawCanvasFittedText(context, teamName.toLocaleUpperCase("es-MX"), x + 28, y + 56, cardWidth - 56, 24, 17, 950);
     context.fillStyle = "#7be34d";
-    drawCanvasFittedText(context, value, x + 28, 282, cardWidth - 56, 34, 24, 1000);
+    drawCanvasFittedText(context, value, x + 28, y + 88, cardWidth - 56, 28, 22, 1000);
   });
 
   const boardY = 338;

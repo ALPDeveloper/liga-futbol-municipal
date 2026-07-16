@@ -2820,23 +2820,32 @@ function VenuesPanel({ league, onAddVenue, onDeleteVenue, onUpdateVenue }) {
       </div>
       <div className="venue-list">
         {venues.map((venue) => (
-          <form className="venue-card" key={venue.id} onSubmit={(event) => updateExistingVenue(event, venue)}>
-            <div className="venue-card-title">
-              <b>{venue.name?.slice(0, 2).toUpperCase() || "CA"}</b>
-              <span>{(venue.status || "active") === "active" ? "Activa" : "Inactiva"}</span>
-            </div>
-            <label>Cancha<input name="name" defaultValue={venue.name} required aria-label={`Cancha ${venue.name}`} /></label>
-            <label>Direccion<input name="address" defaultValue={venue.address || ""} aria-label={`Direccion ${venue.name}`} /></label>
-            <label>Estado
-              <select name="status" defaultValue={venue.status || "active"} aria-label={`Estado ${venue.name}`}>
-                <option value="active">Activa</option>
-                <option value="inactive">Inactiva</option>
-              </select>
-            </label>
-            <label className="wide-field">Notas<textarea name="notes" defaultValue={venue.notes || ""} aria-label={`Notas ${venue.name}`} /></label>
-            <button className="primary" type="submit">Guardar</button>
-            <button className="danger" type="button" onClick={() => deleteExistingVenue(venue)}>Eliminar</button>
-          </form>
+          <details className="venue-card-shell" key={venue.id}>
+            <summary className="venue-card-summary">
+              <div className="venue-card-title">
+                <b>{venue.name?.slice(0, 2).toUpperCase() || "CA"}</b>
+                <span>{(venue.status || "active") === "active" ? "Activa" : "Inactiva"}</span>
+              </div>
+              <div className="venue-card-copy">
+                <strong>{venue.name}</strong>
+                <small>{venue.address || "Sin direccion capturada"}</small>
+              </div>
+              <em>Editar</em>
+            </summary>
+            <form className="venue-card" onSubmit={(event) => updateExistingVenue(event, venue)}>
+              <label>Cancha<input name="name" defaultValue={venue.name} required aria-label={`Cancha ${venue.name}`} /></label>
+              <label>Direccion<input name="address" defaultValue={venue.address || ""} aria-label={`Direccion ${venue.name}`} /></label>
+              <label>Estado
+                <select name="status" defaultValue={venue.status || "active"} aria-label={`Estado ${venue.name}`}>
+                  <option value="active">Activa</option>
+                  <option value="inactive">Inactiva</option>
+                </select>
+              </label>
+              <label className="wide-field">Notas<textarea name="notes" defaultValue={venue.notes || ""} aria-label={`Notas ${venue.name}`} /></label>
+              <button className="primary" type="submit">Guardar</button>
+              <button className="danger" type="button" onClick={() => deleteExistingVenue(venue)}>Eliminar</button>
+            </form>
+          </details>
         ))}
         {!venues.length && <p className="empty">Aun no hay canchas registradas.</p>}
       </div>
