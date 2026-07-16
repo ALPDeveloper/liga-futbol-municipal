@@ -32857,10 +32857,28 @@ button.arbitration-metric-card {
 
 /* Final iOS Safari override: keep the admin league switch compact on real iPhones. */
 @media (max-width: 920px) {
+  .admin-console-page .admin-content,
+  .admin-console-page .admin-league-app {
+    height: auto !important;
+    min-height: 0 !important;
+    align-content: start !important;
+    align-items: start !important;
+    grid-auto-rows: max-content !important;
+  }
+
+  .admin-console-page .admin-league-app > *,
+  .admin-console-page .admin-league-home,
+  .admin-console-page .admin-workspace-screen,
+  .admin-console-page .admin-module-screen {
+    align-self: start !important;
+    min-height: 0 !important;
+  }
+
   .admin-console-page .admin-league-top {
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
+    align-self: start !important;
     align-items: start !important;
     align-content: start !important;
     grid-auto-rows: max-content !important;
