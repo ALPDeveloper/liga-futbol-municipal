@@ -69,6 +69,21 @@ export async function getLiveMatchState(matchId) {
   return runStore(STATE_STORE, "readonly", (store) => requestToPromise(store.get(matchId)));
 }
 
+export async function listLiveMatchStates() {
+  const db = await openLiveDb();
+  if (!db) return [];
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STATE_STORE, "readonly");
+    const store = tx.objectStore(STATE_STORE);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const rows = Array.isArray(request.result) ? request.result : [];
+      resolve(rows.sort((a, b) => String(b.lastLocalUpdate || "").localeCompare(String(a.lastLocalUpdate || ""))));
+    };
+    request.onerror = () => reject(request.error || new Error("No se pudo leer el respaldo local."));
+  });
+}
+
 export async function clearLiveMatchState(matchId) {
   if (!matchId) return;
   await runStore(STATE_STORE, "readwrite", (store) => store.delete(matchId));

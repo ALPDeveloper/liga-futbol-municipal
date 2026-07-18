@@ -67,6 +67,18 @@ export async function updateTeamRosterPermission(token, teamId, payload) {
   return parseResponse(response, "No se pudo actualizar el permiso de plantilla");
 }
 
+export async function updateTeamRosterPermissionsBulk(token, payload) {
+  const response = await fetch(`${API_BASE_URL}/team-roster-permissions/bulk`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudieron actualizar los permisos de plantilla");
+}
+
 export async function fetchTeamPortal(token) {
   const response = await fetch(`${API_BASE_URL}/team-portal/me`, {
     headers: { Authorization: `Bearer ${token}` }

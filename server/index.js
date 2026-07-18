@@ -659,6 +659,28 @@ async function buildTeamPortalPayload(userId) {
       const signatures = report?.id ? await listMatchReportSignaturesData(report.id) : [];
       const mySignature = signatures.find((signature) => signature.teamId === context.teamId) || null;
       const opponentSignature = signatures.find((signature) => signature.teamId === opponentTeamId) || null;
+      const homeTeam = getTeam(league, match.homeTeamId);
+      const awayTeam = getTeam(league, match.awayTeamId);
+      const playerById = new Map([...(league.players || []), ...(league.allPlayers || [])].map((player) => [player.id, player]));
+      const reportPayload = report?.payload && typeof report.payload === "object" ? report.payload : null;
+      const enrichedReportPayload = reportPayload
+        ? {
+            ...reportPayload,
+            events: Array.isArray(reportPayload.events)
+              ? reportPayload.events.map((event) => {
+                  const eventTeam = getTeam(league, event.teamId);
+                  const player = playerById.get(event.playerId);
+                  const playerTeam = player?.teamId ? getTeam(league, player.teamId) : null;
+                  return {
+                    ...event,
+                    teamName: event.teamName || playerTeam?.name || eventTeam?.name || "",
+                    playerName: event.playerName || player?.name || "",
+                    playerNumber: event.playerNumber || player?.number || ""
+                  };
+                })
+              : []
+          }
+        : null;
       return {
         id: match.id,
         date: match.date,
@@ -680,7 +702,7 @@ async function buildTeamPortalPayload(userId) {
         finalizedAt: match.finalizedAt || "",
         reportStatus: report?.status || "",
         reportId: report?.id || "",
-        reportPayload: report?.payload || null,
+        reportPayload: enrichedReportPayload,
         myTeamSigned: Boolean(mySignature),
         opponentSigned: Boolean(opponentSignature),
         signaturesCount: signatures.length,
@@ -688,6 +710,8 @@ async function buildTeamPortalPayload(userId) {
         isHome: match.homeTeamId === context.teamId,
         homeTeamId: match.homeTeamId,
         awayTeamId: match.awayTeamId,
+        homeTeamName: homeTeam?.name || "LOCAL",
+        awayTeamName: awayTeam?.name || "VISITANTE",
         opponentName: opponent?.name || "RIVAL",
         centralRefereeName: getRefereeName(match.centralRefereeUserId),
         assistantReferee1Name: getRefereeName(match.assistantReferee1UserId),
@@ -723,6 +747,14 @@ function generateCaptainPin() {
 
 function normalizePin(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 8);
+}
+
+function normalizeJerseyNumber(value) {
+  return String(value ?? "").replace(/\D/g, "").slice(0, 4);
+}
+
+function getDefaultCompetitionIdForLeague(league) {
+  return league?.currentCompetitionId || league?.competitions?.[0]?.id || "";
 }
 
 function normalizeOperationId(value) {
@@ -824,12 +856,16 @@ async function buildPreliminaryReportResponse({ report, match }) {
   const signatures = report ? await listMatchReportSignaturesData(report.id) : [];
   const homeSignature = signatures.find((signature) => signature.teamId === match.homeTeamId) || null;
   const awaySignature = signatures.find((signature) => signature.teamId === match.awayTeamId) || null;
+  const signatureIssue = report?.payload && typeof report.payload === "object" ? report.payload.signatureIssue : null;
+  const hasPublishableSignatureIssue = Boolean(signatureIssue?.status === "pending_admin_attention");
   return {
     report,
     signatures,
     homeSigned: Boolean(homeSignature),
     awaySigned: Boolean(awaySignature),
-    readyToFinalize: Boolean(homeSignature && awaySignature)
+    readyToFinalize: Boolean(homeSignature && awaySignature),
+    readyToPublish: Boolean((homeSignature && awaySignature) || hasPublishableSignatureIssue),
+    signatureIssue: hasPublishableSignatureIssue ? signatureIssue : null
   };
 }
 
@@ -939,14 +975,17 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
           .map((notice) => notice.player.id)
       );
       const buildRosterPlayers = (players, roster) => {
-        const rosterPlayerIds = new Set((roster?.players || []).map((entry) => typeof entry === "string" ? entry : entry.playerId));
+        const rosterEntries = (roster?.players || []).map((entry) => (typeof entry === "string" ? { playerId: entry } : entry));
+        const rosterPlayerIds = new Set(rosterEntries.map((entry) => entry.playerId).filter(Boolean));
+        const rosterNumberByPlayerId = new Map(rosterEntries.map((entry) => [entry.playerId, normalizeJerseyNumber(entry.jerseyNumber ?? entry.rosterNumber)]));
         const starterIds = new Set(roster?.starters || roster?.lineup?.starters || []);
         const substituteIds = new Set(roster?.substitutes || roster?.lineup?.substitutes || []);
         const source = roster ? players.filter((player) => rosterPlayerIds.has(player.id)) : players;
         return source.map((player) => ({
           id: player.id,
           name: player.name,
-          number: player.number,
+          number: rosterNumberByPlayerId.get(player.id) || player.number,
+          registeredNumber: player.number,
           position: player.position,
           teamId: player.teamId,
           isCaptain: roster?.captainPlayerId === player.id,
@@ -2640,6 +2679,44 @@ app.patch("/api/matches/:matchId/referees", requireAuth, async (request, respons
   response.json(await getStoreData());
 });
 
+app.put("/api/team-roster-permissions/bulk", requireAuth, async (request, response) => {
+  const leagueId = String(request.body.leagueId || request.user.leagueId || getPrimaryAdminLeagueId(request.user, ["delegates"]) || "").trim();
+  const competitionId = String(request.body.competitionId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "delegates")) {
+    return response.status(403).json({ error: "No puedes modificar permisos de esta liga" });
+  }
+  if (!competitionId) return response.status(400).json({ error: "Selecciona una categoria o torneo para aplicar la accion." });
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === leagueId);
+  if (!league) return response.status(404).json({ error: "Liga no encontrada" });
+  const teamIds = (league.teams || [])
+    .filter((team) => (team.competitionId || getDefaultCompetitionIdForLeague(league)) === competitionId)
+    .map((team) => team.id);
+  if (!teamIds.length) return response.status(400).json({ error: "No hay equipos en esa categoria." });
+
+  const registrationEnabled = request.body.registrationEnabled === true || request.body.registrationEnabled === "true";
+  const enabledUntil = request.body.enabledUntil || null;
+  const notes = request.body.notes || "";
+  for (const teamId of teamIds) {
+    await setTeamRosterPermissionData({
+      leagueId,
+      teamId,
+      registrationEnabled,
+      enabledUntil,
+      notes
+    });
+  }
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "team_roster_permission_bulk_update",
+    entityType: "competition",
+    entityId: competitionId,
+    detail: `${registrationEnabled ? "Abrio" : "Cerro"} registro de plantilla para ${teamIds.length} equipo(s)`
+  });
+  response.json(await listTeamDelegatesData(leagueId));
+});
+
 app.put("/api/team-roster-permissions/:teamId", requireAuth, async (request, response) => {
   const teamId = String(request.params.teamId || "").trim();
   const leagueId = String(request.body.leagueId || request.user.leagueId || getPrimaryAdminLeagueId(request.user, ["delegates"]) || "").trim();
@@ -3149,13 +3226,44 @@ app.post("/api/referee-portal/matches/:matchId/report/finalize", requireAuth, as
   if (!report) return response.status(404).json({ error: "No hay acta preliminar para finalizar." });
 
   const reportState = await buildPreliminaryReportResponse({ report, match: context.match });
-  if (report.captureMode === MATCH_CAPTURE_MODES.LIVE && !reportState.readyToFinalize) {
-    return response.status(400).json({ error: "Se requiere firma de ambos capitanes antes de finalizar el acta." });
+  const reportPayload = report.payload && typeof report.payload === "object" ? report.payload : {};
+  const signatureIssue = reportPayload.signatureIssue && typeof reportPayload.signatureIssue === "object"
+    ? reportPayload.signatureIssue
+    : null;
+  const canPublishBySignatureIssue = Boolean(signatureIssue?.status === "pending_admin_attention");
+  if (report.captureMode === MATCH_CAPTURE_MODES.LIVE && !reportState.readyToFinalize && !canPublishBySignatureIssue) {
+    return response.status(400).json({ error: "Se requiere firma de ambos capitanes o una incidencia de firma documentada antes de publicar el acta." });
   }
 
   const finalizedAt = new Date().toISOString();
   const store = await getStoreData();
-  const sheetPayload = buildOfficialSheetPayloadFromReport(report);
+  const signatureIssueNote = canPublishBySignatureIssue
+    ? `PUBLICACION POR INCIDENCIA DE FIRMA: ${upperText(signatureIssue.reasonLabel || "Problema con firma")}. Registrado por arbitro.`
+    : "";
+  let reportForPublish = canPublishBySignatureIssue
+    ? {
+        ...report,
+        payload: {
+          ...reportPayload,
+          observations: [reportPayload.observations, signatureIssueNote].filter(Boolean).join("\n"),
+          resolutionNote: [reportPayload.resolutionNote, signatureIssueNote].filter(Boolean).join("\n"),
+          signatureIssue: {
+            ...signatureIssue,
+            status: "published_by_referee_exception",
+            resolvedAt: finalizedAt
+          }
+        }
+      }
+    : report;
+  if (canPublishBySignatureIssue) {
+    reportForPublish = await updateMatchReportPayloadData({
+      reportId: report.id,
+      payload: reportForPublish.payload,
+      homeGoals: report.homeGoals,
+      awayGoals: report.awayGoals
+    });
+  }
+  const sheetPayload = buildOfficialSheetPayloadFromReport(reportForPublish);
   const publishedStore = saveMatchSheet(store, context.league.id, sheetPayload);
   const publishedMatch = publishedStore.leagues
     .find((item) => item.id === context.league.id)
@@ -3177,7 +3285,9 @@ app.post("/api/referee-portal/matches/:matchId/report/finalize", requireAuth, as
     action: "match_report_finalize",
     entityType: "match_report",
     entityId: report.id,
-    detail: "Arbitro finalizo acta firmada y se publico resultado oficial"
+    detail: canPublishBySignatureIssue
+      ? `Arbitro publico acta con incidencia de firma: ${signatureIssue.reasonLabel || "Problema con firma"}`
+      : "Arbitro finalizo acta firmada y se publico resultado oficial"
   });
 
   const publishedReport = await getMatchReportData(report.id);
@@ -3518,6 +3628,14 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
     return response.status(400).json({ error: `${player?.name || "Un jugador"} debe estar marcado como titular o suplente.` });
   }
 
+  const jerseyNumbers = request.body.jerseyNumbers && typeof request.body.jerseyNumbers === "object" ? request.body.jerseyNumbers : {};
+  const playerById = new Map((league.players || []).map((player) => [player.id, player]));
+  const rosterPlayers = requestedPlayerIds.map((playerId) => {
+    const player = playerById.get(playerId);
+    const jerseyNumber = normalizeJerseyNumber(jerseyNumbers[playerId] ?? player?.number ?? "");
+    return { playerId, ...(jerseyNumber ? { jerseyNumber } : {}) };
+  });
+
   const rosterId = existingRoster?.id || `match-roster-${crypto.randomUUID()}`;
   const captainPin = existingRoster?.captainPin || generateCaptainPin();
 
@@ -3530,7 +3648,7 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
     captainPlayerId,
     goalkeeperPlayerId,
     captainPin,
-    players: requestedPlayerIds.map((playerId) => ({ playerId })),
+    players: rosterPlayers,
     starters: normalizedStarters,
     substitutes: normalizedSubstitutes,
     lineup: {

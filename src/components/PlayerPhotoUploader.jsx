@@ -147,7 +147,7 @@ export function PlayerPhotoUploader({
         <div className="player-photo-actions">
           <label className={`player-photo-file ${!authorized ? "disabled" : ""}`}>
             {!authorized ? "Autoriza foto primero" : visiblePhotoUrl ? changeLabel : addLabel}
-            <input disabled={!authorized} type="file" accept={PLAYER_PHOTO_ACCEPT} capture="environment" onChange={handleFileChange} />
+            <input disabled={!authorized} type="file" accept={PLAYER_PHOTO_ACCEPT} onChange={handleFileChange} />
           </label>
           {visiblePhotoUrl && (
             <button type="button" className="secondary" onClick={removePhoto}>{removeLabel}</button>

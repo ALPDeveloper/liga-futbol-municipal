@@ -7,7 +7,7 @@ import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
 import { createUser, deleteUser, disableUser, fetchUsers, resendUserInvitation, updateUser } from "../lib/userApi.js";
-import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamDelegateInvitation, updateTeamDelegate, updateTeamRosterPermission } from "../lib/teamDelegateApi.js";
+import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamDelegateInvitation, updateTeamDelegate, updateTeamRosterPermission, updateTeamRosterPermissionsBulk } from "../lib/teamDelegateApi.js";
 import { createReferee, deleteReferee, fetchFinalizedMatchReports, fetchReferees, fetchRefereeMatchSheets, publishFinalizedMatchReport, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
 import { updateMatchSheetEventItem } from "../lib/matchSheet.js";
@@ -969,6 +969,9 @@ function TeamDelegatesPanel({ authToken, league }) {
   const [delegateCompetitionFilter, setDelegateCompetitionFilter] = useState("all");
   const [delegateStatusFilter, setDelegateStatusFilter] = useState("all");
   const [delegateListTab, setDelegateListTab] = useState("delegates");
+  const [bulkRosterUntil, setBulkRosterUntil] = useState("");
+  const [delegateTeamSearch, setDelegateTeamSearch] = useState("");
+  const [selectedDelegateTeamId, setSelectedDelegateTeamId] = useState("");
   const teams = useMemo(() => [...(league.teams || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.teams]);
   const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
   const filteredTeams = useMemo(() => {
@@ -1006,6 +1009,16 @@ function TeamDelegatesPanel({ authToken, league }) {
       : teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === delegateCompetitionFilter),
     [delegateCompetitionFilter, league, teams]
   );
+  const createTeamSearchOptions = useMemo(() => {
+    const query = normalizeAdminSearchTerm(delegateTeamSearch);
+    if (!query) return createTeamOptions;
+    return createTeamOptions.filter((team) => {
+      const competition = getCompetition(league, team.competitionId || getDefaultCompetitionId(league));
+      return normalizeAdminSearchTerm(`${team.name} ${competition?.name || ""}`).includes(query);
+    });
+  }, [createTeamOptions, delegateTeamSearch, league]);
+  const activeBulkCompetitionId = delegateCompetitionFilter !== "all" ? delegateCompetitionFilter : "";
+  const activeBulkCompetition = competitions.find((competition) => competition.id === activeBulkCompetitionId);
   const assignedTeamIds = useMemo(() => new Set(delegates.map((delegate) => delegate.teamId)), [delegates]);
 
   function setCardMessage(key, message, type = "ok") {
@@ -1028,6 +1041,17 @@ function TeamDelegatesPanel({ authToken, league }) {
     reload();
   }, [authToken, league.id]);
 
+  useEffect(() => {
+    if (selectedDelegateTeamId && createTeamOptions.some((team) => team.id === selectedDelegateTeamId)) return;
+    setSelectedDelegateTeamId(createTeamOptions[0]?.id || "");
+  }, [createTeamOptions, selectedDelegateTeamId]);
+
+  useEffect(() => {
+    if (!createTeamSearchOptions.length) return;
+    if (selectedDelegateTeamId && createTeamSearchOptions.some((team) => team.id === selectedDelegateTeamId)) return;
+    setSelectedDelegateTeamId(createTeamSearchOptions[0].id);
+  }, [createTeamSearchOptions, selectedDelegateTeamId]);
+
   async function submitDelegate(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1041,6 +1065,8 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice(`Invitacion creada para ${payload.name}. Copia el mensaje y envialo por WhatsApp.`);
       setError("");
       form.reset();
+      setDelegateTeamSearch("");
+      setSelectedDelegateTeamId(createTeamOptions[0]?.id || "");
     } catch (saveError) {
       setNotice("");
       setError(saveError.message || "No se pudo crear el delegado.");
@@ -1093,6 +1119,42 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice("");
       setError(saveError.message || "No se pudo actualizar el permiso.");
       setCardMessage(actionKey, saveError.message || "No se pudo actualizar el permiso.", "error");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function bulkUpdateRosterPermissions(registrationEnabled) {
+    if (!activeBulkCompetitionId) {
+      setError("Selecciona un torneo o categoria para aplicar la accion masiva.");
+      return;
+    }
+    const scopedTeams = teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === activeBulkCompetitionId);
+    if (!scopedTeams.length) {
+      setError("No hay equipos en esa categoria.");
+      return;
+    }
+    const actionLabel = registrationEnabled ? "abrir" : "cerrar";
+    if (!window.confirm(`¿${actionLabel.toUpperCase()} registro de plantilla para ${scopedTeams.length} equipo(s) de ${activeBulkCompetition?.name || "esta categoria"}?\n\nSolo se afectara esta liga y esta categoria.`)) return;
+    const actionKey = `bulk-roster-${activeBulkCompetitionId}`;
+    setBusyAction(actionKey);
+    setNotice(`${registrationEnabled ? "Abriendo" : "Cerrando"} registros por categoria...`);
+    setError("");
+    try {
+      const nextDelegates = await updateTeamRosterPermissionsBulk(authToken, {
+        leagueId: league.id,
+        competitionId: activeBulkCompetitionId,
+        registrationEnabled,
+        enabledUntil: registrationEnabled ? bulkRosterUntil : "",
+        notes: registrationEnabled
+          ? `Registro abierto por lote${bulkRosterUntil ? ` hasta ${bulkRosterUntil}` : ""}`
+          : "Registro cerrado por lote"
+      });
+      setDelegates(nextDelegates);
+      setNotice(`Listo: registro ${registrationEnabled ? "abierto" : "cerrado"} para ${scopedTeams.length} equipo(s) de ${activeBulkCompetition?.name || "la categoria"}.`);
+    } catch (saveError) {
+      setNotice("");
+      setError(saveError.message || "No se pudieron actualizar los registros por categoria.");
     } finally {
       setBusyAction("");
     }
@@ -1251,8 +1313,32 @@ function TeamDelegatesPanel({ authToken, league }) {
             </select>
           </label>
           <label>Equipo
-            <select name="teamId" required disabled={!createTeamOptions.length}>
-              {createTeamOptions.map((team) => (
+            <input
+              aria-label="Buscar equipo para delegado"
+              value={delegateTeamSearch}
+              onChange={(event) => setDelegateTeamSearch(event.target.value)}
+              placeholder="Teclea equipo, ej. Guas..."
+            />
+            {delegateTeamSearch && createTeamSearchOptions.length > 0 && (
+              <div className="delegate-team-suggestions" aria-label="Sugerencias de equipo">
+                {createTeamSearchOptions.slice(0, 6).map((team) => (
+                  <button
+                    key={team.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDelegateTeamId(team.id);
+                      setDelegateTeamSearch(team.name);
+                      if (team.competitionId) setDelegateCompetitionFilter(team.competitionId);
+                    }}
+                  >
+                    <strong>{team.name}</strong>
+                    <small>{getCompetition(league, team.competitionId || getDefaultCompetitionId(league))?.name || "Categoria"}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+            <select name="teamId" required disabled={!createTeamSearchOptions.length} value={selectedDelegateTeamId} onChange={(event) => setSelectedDelegateTeamId(event.target.value)}>
+              {createTeamSearchOptions.map((team) => (
                 <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Categoria"}</option>
               ))}
             </select>
@@ -1322,6 +1408,23 @@ function TeamDelegatesPanel({ authToken, league }) {
           <div className="delegate-section-head">
             <h3>Permisos por equipo</h3>
             <small>{filteredTeams.length} equipo(s)</small>
+          </div>
+          <div className="delegate-bulk-permissions">
+            <div>
+              <strong>{activeBulkCompetition?.name || "Selecciona categoria"}</strong>
+              <small>La accion masiva solo afecta equipos de esta liga y categoria.</small>
+            </div>
+            <label>Abierto hasta
+              <input type="datetime-local" value={bulkRosterUntil} onChange={(event) => setBulkRosterUntil(event.target.value)} />
+            </label>
+            <div className="inline-actions">
+              <button type="button" disabled={!activeBulkCompetitionId || busyAction === `bulk-roster-${activeBulkCompetitionId}`} onClick={() => bulkUpdateRosterPermissions(true)}>
+                Abrir registro a todos
+              </button>
+              <button className="danger ghost-danger" type="button" disabled={!activeBulkCompetitionId || busyAction === `bulk-roster-${activeBulkCompetitionId}`} onClick={() => bulkUpdateRosterPermissions(false)}>
+                Cerrar registro a todos
+              </button>
+            </div>
           </div>
           <div className="delegate-group-list">
             {teamsByCompetition.map((group) => (
@@ -1403,26 +1506,29 @@ function TeamDelegatesPanel({ authToken, league }) {
                       {delegate.userPhone && <span>{delegate.userPhone}</span>}
                       <small>{delegate.competitionName || group.name}</small>
                       {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
-                      <div className="inline-actions delegate-action-grid">
-                        <button type="button" disabled={delegate.status === "active" || delegate.status === "pending_activation" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "active")}>
-                          {isActivating ? "Activando..." : "Activar usuario"}
-                        </button>
-                        <button type="button" disabled={isBusyDelegate} onClick={() => regenerateInvitation(delegate)}>
-                          {isInviting ? "Generando..." : delegate.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
-                        </button>
-                        <button className="danger" type="button" disabled={delegate.status === "disabled" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "disabled")}>
-                          {isDisabling ? "Desactivando..." : "Desactivar usuario"}
-                        </button>
-                        <button className="danger" type="button" disabled={delegate.status === "suspended" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "suspended")}>
-                          {isSuspending ? "Suspendiendo..." : "Suspender usuario"}
-                        </button>
-                        <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => removeDelegate(delegate)}>
-                          {isRemoving ? "Quitando..." : "Quitar acceso al equipo"}
-                        </button>
-                        <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => deleteDelegateUser(delegate)}>
-                          {isDeleting ? "Eliminando..." : "Eliminar usuario definitivo"}
-                        </button>
-                      </div>
+                      <details className="delegate-card-actions">
+                        <summary>Acciones de acceso</summary>
+                        <div className="inline-actions delegate-action-grid">
+                          <button type="button" disabled={delegate.status === "active" || delegate.status === "pending_activation" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "active")}>
+                            {isActivating ? "Activando..." : "Activar usuario"}
+                          </button>
+                          <button type="button" disabled={isBusyDelegate} onClick={() => regenerateInvitation(delegate)}>
+                            {isInviting ? "Generando..." : delegate.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
+                          </button>
+                          <button className="danger" type="button" disabled={delegate.status === "disabled" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "disabled")}>
+                            {isDisabling ? "Desactivando..." : "Desactivar usuario"}
+                          </button>
+                          <button className="danger" type="button" disabled={delegate.status === "suspended" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "suspended")}>
+                            {isSuspending ? "Suspendiendo..." : "Suspender usuario"}
+                          </button>
+                          <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => removeDelegate(delegate)}>
+                            {isRemoving ? "Quitando..." : "Quitar acceso al equipo"}
+                          </button>
+                          <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => deleteDelegateUser(delegate)}>
+                            {isDeleting ? "Eliminando..." : "Eliminar usuario definitivo"}
+                          </button>
+                        </div>
+                      </details>
                     </details>
                     );
                   })}
@@ -1458,6 +1564,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   const [assignmentFeedback, setAssignmentFeedback] = useState({});
   const [activeRefereeTask, setActiveRefereeTask] = useState("assign");
   const [selectedAssignmentMatch, setSelectedAssignmentMatch] = useState(null);
+  const [focusedAssignmentMatchId, setFocusedAssignmentMatchId] = useState("");
   const [showRefereeCreateSheet, setShowRefereeCreateSheet] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showRefereeHelp, setShowRefereeHelp] = useState(false);
@@ -1491,8 +1598,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     const query = normalizeAdminSearchTerm(matchSearch);
     return [...competitionLeague.matches]
       .filter((match) => {
-        if (matchStatusFilter === "scheduled" && !isActiveScheduleStatus(match.status)) return false;
-        if (matchStatusFilter === "finished" && match.status !== "finished" && match.status !== "walkover") return false;
+        if (!isActiveScheduleStatus(match.status)) return false;
         if (selectedRoundFilter !== "all") {
           const targetRound = selectedRoundFilter === "next" ? displayRound : Number(selectedRoundFilter);
           if (targetRound && Number(match.round || 0) !== Number(targetRound)) return false;
@@ -1509,6 +1615,20 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
         String(a.time || "").localeCompare(String(b.time || ""))
       ));
   }, [assignmentCoverageFilter, competitionLeague.matches, displayRound, league, matchSearch, matchStatusFilter, selectedRoundFilter]);
+  const matchSearchSuggestions = useMemo(() => {
+    const query = normalizeAdminSearchTerm(matchSearch);
+    if (!query) return [];
+    return [...competitionLeague.matches]
+      .filter((match) => {
+        if (!isActiveScheduleStatus(match.status)) return false;
+        return normalizeAdminSearchTerm(`${getMatchAdminLabel(league, match)} ${match.venue || ""} ${match.date || ""} jornada ${match.round || ""}`).includes(query);
+      })
+      .sort((a, b) => (
+        String(a.date || "").localeCompare(String(b.date || "")) ||
+        String(a.time || "").localeCompare(String(b.time || ""))
+      ))
+      .slice(0, 6);
+  }, [competitionLeague.matches, league, matchSearch]);
   const assignmentPendingCount = useMemo(
     () => competitionLeague.matches.filter((match) => isActiveScheduleStatus(match.status) && !match.centralRefereeUserId).length,
     [competitionLeague.matches]
@@ -1550,7 +1670,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   const activeFilterChips = [
     selectedCompetition ? { id: "competition", label: selectedCompetition.name, clear: null } : null,
     selectedRoundFilter !== "all" ? { id: "round", label: selectedRoundFilter === "next" ? `Jornada ${displayRound || "-"}` : `Jornada ${selectedRoundFilter}`, clear: () => setSelectedRoundFilter("all") } : null,
-    matchStatusFilter !== "all" ? { id: "status", label: matchStatusFilter === "scheduled" ? "Programados" : "Capturados", clear: () => setMatchStatusFilter("all") } : null,
+    matchStatusFilter !== "all" ? { id: "status", label: "Por jugarse", clear: () => setMatchStatusFilter("all") } : null,
     assignmentCoverageFilter !== "all" ? { id: "coverage", label: getAssignmentCoverageLabel(assignmentCoverageFilter), clear: () => setAssignmentCoverageFilter("all") } : null,
     matchSearch ? { id: "search", label: matchSearch, clear: () => setMatchSearch("") } : null
   ].filter(Boolean);
@@ -1785,6 +1905,17 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     }
   }
 
+  function selectRefereeMatchSuggestion(match) {
+    setSelectedRoundFilter(String(match.round || "all"));
+    setAssignmentCoverageFilter("all");
+    setMatchSearch("");
+    setFocusedAssignmentMatchId(match.id);
+    setSelectedAssignmentMatch(match);
+    window.requestAnimationFrame(() => {
+      document.querySelector(`[data-referee-match-id="${CSS.escape(match.id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
   return (
     <section className="panel referee-ops-shell">
       <div className="referee-ops-header">
@@ -1863,7 +1994,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
               setAssignmentCoverageFilter("all");
               setMatchStatusFilter("all");
               setSelectedRoundFilter("all");
-            }}>Programacion completa</button>
+            }}>Programacion pendiente</button>
           </div>
 
           <div className="referee-filter-chips" aria-label="Filtros de programacion">
@@ -1878,9 +2009,8 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
               {roundOptions.map((round) => <option key={round} value={round}>Jornada {round}</option>)}
             </select>
             <select aria-label="Estado del partido" value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
-              <option value="scheduled">Programados</option>
-              <option value="finished">Capturados</option>
-              <option value="all">Todos</option>
+              <option value="scheduled">Por jugarse</option>
+              <option value="all">Toda la programacion pendiente</option>
             </select>
             <select aria-label="Estado de designacion" value={assignmentCoverageFilter} onChange={(event) => setAssignmentCoverageFilter(event.target.value)}>
               <option value="missing_central">Sin central</option>
@@ -1892,6 +2022,16 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
             <label className="referee-search-chip">
               <span>Buscar</span>
               <input type="search" value={matchSearch} onChange={(event) => setMatchSearch(event.target.value)} placeholder="Equipo o cancha" />
+              {matchSearchSuggestions.length > 0 && (
+                <div className="referee-match-suggestions" aria-label="Sugerencias de partidos">
+                  {matchSearchSuggestions.map((match) => (
+                    <button key={match.id} type="button" onClick={() => selectRefereeMatchSuggestion(match)}>
+                      <strong>{getMatchAdminLabel(league, match)}</strong>
+                      <small>J{match.round || "-"} · {match.date ? formatDate(match.date) : "Sin fecha"} · {match.time || "Hora por definir"} · {match.venue || "Cancha por definir"}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
             </label>
           </div>
 
@@ -1921,9 +2061,13 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
                     <RefereeMatchOpsCard
                       key={match.id}
                       feedback={assignmentFeedback[match.id]}
+                      focused={focusedAssignmentMatchId === match.id}
                       league={league}
                       match={match}
-                      onOpen={() => setSelectedAssignmentMatch(match)}
+                      onOpen={() => {
+                        setFocusedAssignmentMatchId(match.id);
+                        setSelectedAssignmentMatch(match);
+                      }}
                       referees={referees}
                     />
                   ))}
@@ -1932,7 +2076,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
             ))}
             {!loading && !competitionLeague.matches.length && (
               <ArbitrationEmptyState
-                actionLabel="Ver todos los partidos"
+                actionLabel="Ver programacion pendiente"
                 description="Cuando se publique la jornada, los partidos apareceran aqui para realizar las designaciones."
                 onAction={() => setMatchStatusFilter("all")}
                 title="Aun no hay partidos programados"
@@ -2070,9 +2214,8 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
               </label>
               <label>Estado partido
                 <select value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
-                  <option value="scheduled">Programados</option>
-                  <option value="finished">Capturados</option>
-                  <option value="all">Todos</option>
+                  <option value="scheduled">Por jugarse</option>
+                  <option value="all">Toda la programacion pendiente</option>
                 </select>
               </label>
               <label>Designacion
@@ -2229,12 +2372,12 @@ function countRefereeAssignmentsInRound(matches, targetMatch, refereeId) {
   )).length;
 }
 
-function RefereeMatchOpsCard({ feedback, league, match, onOpen, referees }) {
+function RefereeMatchOpsCard({ feedback, focused = false, league, match, onOpen, referees }) {
   const homeTeam = getTeam(league, match.homeTeamId);
   const awayTeam = getTeam(league, match.awayTeamId);
   const assignment = getAssignmentState(match);
   return (
-    <article className="referee-ops-match-card">
+    <article className={`referee-ops-match-card ${focused ? "is-focused" : ""}`} data-referee-match-id={match.id}>
       <div className="referee-match-timebox">
         <span>{match.time || "--:--"}</span>
         <small>{match.date ? formatDate(match.date) : "Sin fecha"}</small>
@@ -2592,7 +2735,22 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
     () => teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === targetCompetitionId),
     [league, targetCompetitionId, teams]
   );
+  const [sourceTeamId, setSourceTeamId] = useState("");
+  const [targetTeamId, setTargetTeamId] = useState("");
   const [notice, setNotice] = useState("");
+  const activeAffiliations = useMemo(
+    () => (league.teamAffiliations || []).filter((affiliation) => !affiliation.status || affiliation.status === "active"),
+    [league.teamAffiliations]
+  );
+  const affiliatedPlayerCount = useMemo(() => activeAffiliations.reduce((total, affiliation) => (
+    total + league.players.filter((player) => player.teamId === affiliation.sourceTeamId).length
+  ), 0), [activeAffiliations, league.players]);
+  const selectedSourceTeam = getTeam(league, sourceTeamId);
+  const selectedTargetTeam = getTeam(league, targetTeamId);
+  const selectedSourcePlayers = league.players.filter((player) => player.teamId === sourceTeamId);
+  const affiliationAlreadyExists = Boolean(sourceTeamId && targetTeamId && activeAffiliations.some((affiliation) => (
+    affiliation.sourceTeamId === sourceTeamId && affiliation.targetTeamId === targetTeamId
+  )));
 
   useEffect(() => {
     if (!competitions.length) {
@@ -2614,11 +2772,23 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
     }
   }, [targetCompetitionId, targetCompetitionOptions]);
 
+  useEffect(() => {
+    setSourceTeamId((current) => sourceTeams.some((team) => team.id === current) ? current : sourceTeams[0]?.id || "");
+  }, [sourceTeams]);
+
+  useEffect(() => {
+    setTargetTeamId((current) => targetTeams.some((team) => team.id === current) ? current : targetTeams[0]?.id || "");
+  }, [targetTeams]);
+
   function submitAffiliation(event) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (payload.sourceTeamId === payload.targetTeamId) {
       setNotice("El equipo origen y receptor deben ser distintos.");
+      return;
+    }
+    if (affiliationAlreadyExists) {
+      setNotice("Esta afiliacion ya esta activa.");
       return;
     }
     const source = getTeam(league, payload.sourceTeamId);
@@ -2652,109 +2822,141 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
   }
 
   return (
-    <section className="panel">
-      <SectionHeading eyebrow="Afiliaciones" title="Equipos afiliados" />
-      <p className="helper-text">
-        Afiliar no duplica jugadores. La plantilla del equipo origen queda disponible en el equipo receptor dentro de esta misma liga y temporada.
-        Los goles se asignan al equipo del evento; las amarillas se acumulan para el jugador.
-      </p>
+    <section className="panel admin-affiliations-panel">
+      <div className="affiliation-hero">
+        <div>
+          <span>Control deportivo</span>
+          <strong>Afiliaciones de equipos</strong>
+          <small>Conecta plantillas entre categorias sin duplicar jugadores y conserva el historial disciplinario.</small>
+        </div>
+        <div className="affiliation-hero-metrics">
+          <span><b>{activeAffiliations.length}</b> Activas</span>
+          <span><b>{affiliatedPlayerCount}</b> Jugadores vinculados</span>
+          <span><b>{competitions.length}</b> Categorias</span>
+        </div>
+      </div>
       {notice && <p className="auth-ok">{notice}</p>}
 
-      <form className="affiliation-form" onSubmit={submitAffiliation}>
-        <label>Categoria origen
-          <select value={sourceCompetitionId} onChange={(event) => setSourceCompetitionId(event.target.value)} required>
-            {competitions.map((competition) => (
-              <option key={competition.id} value={competition.id}>{competition.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>Equipo origen
-          <select name="sourceTeamId" required disabled={!sourceTeams.length}>
-            {sourceTeams.map((team) => (
-              <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Torneo"}</option>
-            ))}
-          </select>
-        </label>
-        <label>Categoria receptor
-          <select value={targetCompetitionId} onChange={(event) => setTargetCompetitionId(event.target.value)} required disabled={targetCompetitionOptions.length <= 1}>
-            {targetCompetitionOptions.map((competition) => (
-              <option key={competition.id} value={competition.id}>{competition.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>Equipo receptor
-          <select name="targetTeamId" required disabled={!targetTeams.length}>
-            {targetTeams.map((team) => (
-              <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Torneo"}</option>
-            ))}
-          </select>
-        </label>
-        <label className="wide-field">Notas
-          <textarea name="notes" placeholder="Ej. Plantilla de segunda afiliada a primera para este torneo." />
-        </label>
-        <button className="primary" type="submit" disabled={teams.length < 2 || !sourceTeams.length || !targetTeams.length}>Guardar afiliacion</button>
-      </form>
-
-      <div className="discipline-admin-list">
-        <h3>Afiliaciones activas</h3>
-        {(league.teamAffiliations || []).map((affiliation) => {
-          const source = getTeam(league, affiliation.sourceTeamId);
-          const target = getTeam(league, affiliation.targetTeamId);
-          const sourcePlayers = league.players.filter((player) => player.teamId === affiliation.sourceTeamId);
-          return (
-            <article className="discipline-admin-card affiliation-card" key={affiliation.id}>
-              <div>
-                <strong>{source?.name || "Equipo origen"}{" -> "}{target?.name || "Equipo receptor"}</strong>
-                <span>{getCompetition(league, source?.competitionId)?.name || "Categoria origen"} a {getCompetition(league, target?.competitionId)?.name || "categoria receptor"}</span>
-                {affiliation.notes && <small>{affiliation.notes}</small>}
-              </div>
-              <div>
-                <small>Plantilla</small>
-                <span>{sourcePlayers.length} jugador(es)</span>
-              </div>
-              <div>
-                <small>Estado</small>
-                <span>{affiliation.status === "active" ? "ACTIVA" : affiliation.status}</span>
-              </div>
-              <button className="danger" type="button" onClick={() => {
-                if (!window.confirm("¿Eliminar esta afiliacion? Los jugadores dejaran de estar disponibles en el equipo receptor.")) return;
-                onDeleteTeamAffiliation(affiliation.id);
-                setNotice("Afiliacion eliminada.");
-              }}>Quitar</button>
-              <form className="affiliation-number-form" onSubmit={(event) => {
-                event.preventDefault();
-                onUpdateTeamAffiliationPlayerNumber(affiliation.id, getFormPayload(event.currentTarget));
-                setNotice("Numero de afiliado actualizado.");
-              }}>
-                <label>Numero en {target?.name || "receptor"}
-                  <select name="playerId" required>
-                    {sourcePlayers.map((player) => (
-                      <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <input name="number" type="number" min="0" max="9999" placeholder="Numero" />
-                <button type="submit" disabled={!sourcePlayers.length}>Guardar numero</button>
-              </form>
-            </article>
-          );
-        })}
-        {!(league.teamAffiliations || []).length && <p className="empty">Aun no hay equipos afiliados.</p>}
-      </div>
-
-      <div className="discipline-admin-list">
-        <h3>Fusionar jugador duplicado</h3>
-        <form className="duplicate-merge-form" onSubmit={submitMerge}>
-          <label>Jugador principal que se conserva
-            <SearchablePlayerSelect league={league} name="targetPlayerId" players={players} placeholder="Buscar jugador principal..." />
+      <div className="affiliation-workspace">
+        <form className="affiliation-form affiliation-builder" onSubmit={submitAffiliation}>
+          <div className="affiliation-builder-head">
+            <span>Nuevo enlace</span>
+            <strong>Origen {"->"} Receptor</strong>
+            <small>El origen presta su plantilla. El receptor podra usar esos jugadores al armar actas.</small>
+          </div>
+          <label><span>1</span> Categoria origen
+            <select value={sourceCompetitionId} onChange={(event) => setSourceCompetitionId(event.target.value)} required>
+              {competitions.map((competition) => (
+                <option key={competition.id} value={competition.id}>{competition.name}</option>
+              ))}
+            </select>
           </label>
-          <label>Registro duplicado que se elimina
-            <SearchablePlayerSelect league={league} name="duplicatePlayerId" players={players} placeholder="Buscar registro duplicado..." />
+          <label><span>2</span> Equipo origen
+            <select name="sourceTeamId" value={sourceTeamId} onChange={(event) => setSourceTeamId(event.target.value)} required disabled={!sourceTeams.length}>
+              {sourceTeams.map((team) => (
+                <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Torneo"}</option>
+              ))}
+            </select>
           </label>
-          <button className="primary" type="submit" disabled={players.length < 2}>Fusionar duplicado</button>
+          <label><span>3</span> Categoria receptor
+            <select value={targetCompetitionId} onChange={(event) => setTargetCompetitionId(event.target.value)} required disabled={targetCompetitionOptions.length <= 1}>
+              {targetCompetitionOptions.map((competition) => (
+                <option key={competition.id} value={competition.id}>{competition.name}</option>
+              ))}
+            </select>
+          </label>
+          <label><span>4</span> Equipo receptor
+            <select name="targetTeamId" value={targetTeamId} onChange={(event) => setTargetTeamId(event.target.value)} required disabled={!targetTeams.length}>
+              {targetTeams.map((team) => (
+                <option key={team.id} value={team.id}>{team.name} | {getCompetition(league, team.competitionId)?.name || "Torneo"}</option>
+              ))}
+            </select>
+          </label>
+          <div className={`affiliation-route-preview ${affiliationAlreadyExists ? "warning" : ""}`}>
+            <span>{getCompetition(league, selectedSourceTeam?.competitionId)?.name || "Categoria origen"}</span>
+            <strong>{selectedSourceTeam?.name || "Equipo origen"}</strong>
+            <b aria-hidden="true">{"->"}</b>
+            <strong>{selectedTargetTeam?.name || "Equipo receptor"}</strong>
+            <span>{selectedSourcePlayers.length} jugador(es) disponibles</span>
+            {affiliationAlreadyExists && <small>Esta afiliacion ya existe.</small>}
+          </div>
+          <label className="wide-field">Notas operativas
+            <textarea name="notes" placeholder="Ej. Plantilla de segunda afiliada a primera para este torneo." />
+          </label>
+          <button className="primary" type="submit" disabled={teams.length < 2 || !sourceTeams.length || !targetTeams.length || affiliationAlreadyExists}>Guardar afiliacion</button>
         </form>
-        <p className="helper-text">Usa esta herramienta para casos como “CAPILLA JORGE” y “#3 CAPILLA JORGE”. El historial del duplicado se mueve al jugador principal.</p>
+
+        <section className="affiliation-maintenance-card">
+          <div>
+            <span>Depuracion</span>
+            <strong>Fusionar jugador duplicado</strong>
+            <small>Mueve actas, goles, tarjetas, sanciones y movimientos al registro principal.</small>
+          </div>
+          <form className="duplicate-merge-form" onSubmit={submitMerge}>
+            <label>Jugador principal
+              <SearchablePlayerSelect league={league} name="targetPlayerId" players={players} placeholder="Buscar jugador principal..." />
+            </label>
+            <label>Registro duplicado
+              <SearchablePlayerSelect league={league} name="duplicatePlayerId" players={players} placeholder="Buscar registro duplicado..." />
+            </label>
+            <button className="primary" type="submit" disabled={players.length < 2}>Fusionar duplicado</button>
+          </form>
+        </section>
       </div>
+
+      <section className="affiliation-active-section">
+        <div className="affiliation-section-head">
+          <div>
+            <span>Mapa activo</span>
+            <strong>Afiliaciones activas</strong>
+          </div>
+          <small>{activeAffiliations.length} enlace(s)</small>
+        </div>
+        <div className="affiliation-card-grid">
+          {(league.teamAffiliations || []).map((affiliation) => {
+            const source = getTeam(league, affiliation.sourceTeamId);
+            const target = getTeam(league, affiliation.targetTeamId);
+            const sourcePlayers = league.players.filter((player) => player.teamId === affiliation.sourceTeamId);
+            return (
+              <article className="discipline-admin-card affiliation-card" key={affiliation.id}>
+                <div className="affiliation-card-route">
+                  <span>{getCompetition(league, source?.competitionId)?.name || "Categoria origen"}</span>
+                  <strong>{source?.name || "Equipo origen"}</strong>
+                  <b aria-hidden="true">{"->"}</b>
+                  <strong>{target?.name || "Equipo receptor"}</strong>
+                  <span>{getCompetition(league, target?.competitionId)?.name || "Categoria receptor"}</span>
+                </div>
+                <div className="affiliation-card-metrics">
+                  <span><small>Plantilla</small><b>{sourcePlayers.length}</b></span>
+                  <span><small>Estado</small><b>{affiliation.status === "active" ? "Activa" : affiliation.status}</b></span>
+                </div>
+                {affiliation.notes && <p>{affiliation.notes}</p>}
+                <form className="affiliation-number-form" onSubmit={(event) => {
+                  event.preventDefault();
+                  onUpdateTeamAffiliationPlayerNumber(affiliation.id, getFormPayload(event.currentTarget));
+                  setNotice("Numero de afiliado actualizado.");
+                }}>
+                  <label>Numero alterno en {target?.name || "receptor"}
+                    <select name="playerId" required>
+                      {sourcePlayers.map((player) => (
+                        <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <input name="number" type="number" min="0" max="9999" placeholder="No." />
+                  <button type="submit" disabled={!sourcePlayers.length}>Guardar</button>
+                </form>
+                <button className="danger" type="button" onClick={() => {
+                  if (!window.confirm("¿Eliminar esta afiliacion? Los jugadores dejaran de estar disponibles en el equipo receptor.")) return;
+                  onDeleteTeamAffiliation(affiliation.id);
+                  setNotice("Afiliacion eliminada.");
+                }}>Quitar afiliacion</button>
+              </article>
+            );
+          })}
+          {!(league.teamAffiliations || []).length && <p className="empty">Aun no hay equipos afiliados.</p>}
+        </div>
+      </section>
     </section>
   );
 }
@@ -5359,6 +5561,7 @@ function DisciplineControlPanel({
               <small>Estado</small>
               <span>{row.message}</span>
             </div>
+            <DisciplineAdminTrace league={league} row={row} />
           </article>
         ))}
         {!rows.length && <p className="empty">No hay jugadores con acumulacion disciplinaria vigente.</p>}
@@ -5409,6 +5612,58 @@ function disciplineRowMatchesFilters(league, row, filters) {
   if (filters.status !== "all" && row.status !== filters.status) return false;
   const linkedPlayers = row.linkedPlayers?.length ? row.linkedPlayers : [row.player];
   return linkedPlayers.some((player) => disciplinePlayerMatchesFilters(league, player, filters));
+}
+
+function getAdminDisciplineMatchLabel(league, match) {
+  if (!match) return "";
+  const home = getTeam(league, match.homeTeamId)?.name || "Local";
+  const away = getTeam(league, match.awayTeamId)?.name || "Visitante";
+  const round = match.round ? `J${match.round}` : "Jornada";
+  return `${round} | ${home} vs ${away}`;
+}
+
+function getDisciplineTraceMeta(source) {
+  if (source.minuteLabel) return `${source.minuteLabel}'`;
+  if (source.minute !== undefined && source.minute !== null && source.minute !== "") return `${source.minute}'`;
+  return "";
+}
+
+function DisciplineAdminTrace({ league, row }) {
+  const sources = row.sources || [];
+  if (!sources.length) return null;
+  const visibleSources = sources.slice(-4);
+  const hiddenCount = Math.max(sources.length - visibleSources.length, 0);
+  return (
+    <div className="discipline-admin-trace">
+      <small>Trazabilidad</small>
+      <div>
+        {visibleSources.map((source, index) => {
+          const match = source.matchId ? league.matches.find((item) => item.id === source.matchId) : null;
+          const sourceKey = source.matchId || source.adjustmentId || `${source.date}-${index}`;
+          const traceMeta = getDisciplineTraceMeta(source);
+          return (
+            <span className={source.type === "Ajuste" ? "adjustment" : "sheet"} key={sourceKey}>
+              <b>{source.type}</b>
+              {match ? (
+                <>
+                  <em>{getAdminDisciplineMatchLabel(league, match)}</em>
+                  {match.date && <i>{formatDate(match.date)}</i>}
+                  {traceMeta && <i>{traceMeta}</i>}
+                </>
+              ) : (
+                <>
+                  <em>{source.reason || "Movimiento manual"}</em>
+                  {source.date && <i>{formatDate(source.date)}</i>}
+                  {source.value !== undefined && <i>{Number(source.value || 0) > 0 ? "+" : ""}{source.value}</i>}
+                </>
+              )}
+            </span>
+          );
+        })}
+        {hiddenCount > 0 && <span className="more"><b>+{hiddenCount}</b><em>movimiento(s) anterior(es)</em></span>}
+      </div>
+    </div>
+  );
 }
 
 function disciplineMovementMatchesFilters(league, item, filters) {

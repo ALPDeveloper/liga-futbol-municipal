@@ -16,6 +16,12 @@ import {
 import { getPlayerPhotoInitials } from "../lib/playerPhotoProcessing.js";
 
 const PLAYER_POSITION_OPTIONS = ["Arquero", "Defensor", "Mediocampista", "Delantero"];
+const PLAYER_POSITION_LABELS = {
+  Arquero: "Arqueros",
+  Defensor: "Defensas",
+  Mediocampista: "Medios",
+  Delantero: "Delanteros"
+};
 
 function getTeamInitials(name) {
   const words = String(name || "EQ")
@@ -31,6 +37,13 @@ function formatMatchDate(match) {
   const date = match?.date || "Fecha por definir";
   const time = match?.time || "Hora por definir";
   return `${date} | ${time}`;
+}
+
+function formatDate(value) {
+  if (!value) return "Fecha por definir";
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("es-MX", { weekday: "short", day: "2-digit", month: "short" }).format(date);
 }
 
 function getDelegateMatchStatus(match) {
@@ -81,7 +94,6 @@ function getReportEvents(match) {
 
 function getReportEventIcon(event) {
   const type = event?.type;
-  if (event?.cardDetail === "double_yellow") return "🟨🟥";
   if (type === "yellow" || type === "yellow_card") return "🟨";
   if (type === "red" || type === "red_card") return "🟥";
   if (type === "substitution") return "🔄";
@@ -90,6 +102,8 @@ function getReportEventIcon(event) {
 }
 
 function getReportEventLabel(event) {
+  if (event.cardDetail === "double_yellow") return "Roja por 2a amarilla";
+  if (event.cardDetail === "double_yellow_second") return "2a amarilla";
   if (event.type === "own_goal") return "Autogol";
   if (event.type === "yellow" || event.type === "yellow_card") return "Amarilla";
   if (event.type === "red" || event.type === "red_card") return "Roja";
@@ -98,8 +112,30 @@ function getReportEventLabel(event) {
   return "Gol";
 }
 
+function getReportEventMinute(event) {
+  const value = event?.minuteLabel || event?.minute;
+  if (value === null || value === undefined || value === "") return "S/M";
+  return `${value}'`;
+}
+
+function getDelegateReportEventTeamName(match, event, context) {
+  if (event?.teamName) return event.teamName;
+  if (event?.teamId === match?.homeTeamId) return match?.homeTeamName || (match?.isHome ? context?.teamName : match?.opponentName) || "Local";
+  if (event?.teamId === match?.awayTeamId) return match?.awayTeamName || (match?.isHome ? match?.opponentName : context?.teamName) || "Visitante";
+  return "Equipo no identificado";
+}
+
+function getDelegateReportEventPlayerName(event) {
+  const number = event?.playerNumber ? `#${event.playerNumber} ` : "";
+  return `${number}${event?.playerName || event?.player || event?.playerId || "Jugador no identificado"}`;
+}
+
 function normalizePinInput(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 8);
+}
+
+function normalizeJerseyNumberInput(value) {
+  return String(value ?? "").replace(/\D/g, "").slice(0, 4);
 }
 
 function getDelegateViewLabel(activeView, navItems) {
@@ -107,6 +143,15 @@ function getDelegateViewLabel(activeView, navItems) {
   if (activeView === "player") return "Editar jugador";
   if (activeView === "newPlayer") return "Nuevo jugador";
   return navItems.find((item) => item.id === activeView)?.label || "Inicio";
+}
+
+function scrollDelegatePortalToTop() {
+  if (typeof window === "undefined") return;
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.querySelector(".delegate-phone-frame")?.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+    document.querySelector(".team-portal-page")?.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+  });
 }
 
 function getDelegateNextAction(match, status) {
@@ -128,6 +173,16 @@ function getDelegateNextAction(match, status) {
       detail: match.scheduleNote || "La liga pausó este partido. La convocatoria se conserva y se reactivara cuando se reprograme.",
       button: "Ver partidos",
       target: "matches"
+    };
+  }
+  if (match.reportStatus === "published" || match.status === "finished" || status?.tone === "published") {
+    return {
+      tone: "published",
+      eyebrow: "Resultado",
+      title: "Acta publicada",
+      detail: "El resultado ya quedo oficial y disponible para consulta publica.",
+      button: "Ver acta",
+      target: "acta"
     };
   }
   if (!match.roster) {
@@ -170,16 +225,6 @@ function getDelegateNextAction(match, status) {
       target: "acta"
     };
   }
-  if (match.reportStatus === "published" || match.status === "finished" || status?.tone === "published") {
-    return {
-      tone: "published",
-      eyebrow: "Resultado",
-      title: "Acta publicada",
-      detail: "El resultado ya quedo oficial y disponible para consulta publica.",
-      button: "Ver acta",
-      target: "acta"
-    };
-  }
   return {
     tone: "sent",
     eyebrow: "Proxima accion",
@@ -192,6 +237,15 @@ function getDelegateNextAction(match, status) {
 
 function isDelegateMatchOperational(match) {
   return ["scheduled", "rescheduled", "advanced"].includes(match?.status || "scheduled");
+}
+
+function hasDelegateActaAvailable(match) {
+  return Boolean(match && (
+    match.reportPayload ||
+    match.reportStatus === "published" ||
+    match.status === "finished" ||
+    match.status === "walkover"
+  ));
 }
 
 function getScheduleChangeText(match) {
@@ -235,6 +289,40 @@ function PortalNavIcon({ type }) {
   return <svg {...common}><path d="M3 11 12 3l9 8" /><path d="M5 10v10h14V10" /><path d="M9 20v-6h6v6" /></svg>;
 }
 
+function RosterIcon({ type }) {
+  const common = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true"
+  };
+  if (type === "search") {
+    return <svg {...common}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>;
+  }
+  if (type === "filters") {
+    return <svg {...common}><path d="M4 7h10" /><path d="M18 7h2" /><circle cx="16" cy="7" r="2" /><path d="M4 17h2" /><path d="M10 17h10" /><circle cx="8" cy="17" r="2" /></svg>;
+  }
+  if (type === "all") {
+    return <svg {...common}><rect x="4" y="4" width="6" height="6" rx="1.5" /><rect x="14" y="4" width="6" height="6" rx="1.5" /><rect x="4" y="14" width="6" height="6" rx="1.5" /><rect x="14" y="14" width="6" height="6" rx="1.5" /></svg>;
+  }
+  if (type === "goalkeeper") {
+    return <svg {...common}><path d="M12 3 5 6v5c0 4.2 2.7 7.7 7 10 4.3-2.3 7-5.8 7-10V6l-7-3Z" /><path d="M9 12h6" /><path d="M12 9v6" /></svg>;
+  }
+  if (type === "defense") {
+    return <svg {...common}><path d="M12 3 5 6v5c0 4.2 2.7 7.7 7 10 4.3-2.3 7-5.8 7-10V6l-7-3Z" /></svg>;
+  }
+  if (type === "midfield") {
+    return <svg {...common}><path d="M4 12h16" /><circle cx="12" cy="12" r="3" /><path d="M12 4v16" /></svg>;
+  }
+  if (type === "forward") {
+    return <svg {...common}><circle cx="12" cy="12" r="8" /><path d="M12 7v10" /><path d="m8 11 4-4 4 4" /></svg>;
+  }
+  return <svg {...common}><path d="M12 5v14" /><path d="M5 12h14" /></svg>;
+}
+
 function getTeamPortalCacheKey(userId) {
   return `ligatec-team-portal-cache-${userId || "anonymous"}`;
 }
@@ -272,6 +360,28 @@ function getPlayerPositionOptionValue(position) {
   return "Delantero";
 }
 
+function getDelegatePlayerStatus(player) {
+  if (player?.suspension) return { className: "blocked", label: "Suspendido" };
+  if (player?.playoffEligibility?.applies && !player.playoffEligibility?.eligible) return { className: "warning", label: "Liguilla" };
+  return { className: "available", label: "Disponible" };
+}
+
+function getDelegateMatchTone(match) {
+  if (match?.status === "postponed") return "warning";
+  if (["in_progress", "match_finished", "temporarily_saved"].includes(match?.workflowStatus || "")) return "live";
+  if (hasDelegateActaAvailable(match)) return "published";
+  if (match?.status === "advanced" || match?.status === "rescheduled") return "rescheduled";
+  return "scheduled";
+}
+
+function getDelegateMatchRoleLabel(match) {
+  return match?.isHome ? "Local" : "Visitante";
+}
+
+function getDelegateOpponentRoleLabel(match) {
+  return match?.isHome ? "Visitante" : "Local";
+}
+
 function DelegateLoadingShell() {
   return (
     <main className="page team-portal-page portal-loading-page">
@@ -305,6 +415,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const [photoResetKey, setPhotoResetKey] = useState(0);
   const [playerQuery, setPlayerQuery] = useState("");
   const [positionFilter, setPositionFilter] = useState("");
+  const [rosterFiltersOpen, setRosterFiltersOpen] = useState(true);
   const [editingPlayerId, setEditingPlayerId] = useState("");
   const [busyPlayerId, setBusyPlayerId] = useState("");
   const [busyMatchId, setBusyMatchId] = useState("");
@@ -312,9 +423,12 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const [visiblePinsByMatchId, setVisiblePinsByMatchId] = useState({});
   const [teamLogoResetKey, setTeamLogoResetKey] = useState(0);
   const [activeView, setActiveView] = useState("home");
+  const [delegateMatchTab, setDelegateMatchTab] = useState("upcoming");
+  const [actaReturnView, setActaReturnView] = useState("home");
   const [selectedMatchId, setSelectedMatchId] = useState("");
   const [signaturePin, setSignaturePin] = useState("");
   const [signingMatchId, setSigningMatchId] = useState("");
+  const canManageRoster = Boolean(context?.canManageRoster);
   const filteredPlayers = useMemo(() => {
     const query = normalizeSearch(playerQuery);
     return players.filter((player) => {
@@ -324,10 +438,44 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
       return matchesQuery && matchesPosition;
     });
   }, [playerQuery, players, positionFilter]);
+  const visibleRosterPlayers = useMemo(() => {
+    return [...filteredPlayers].sort((a, b) => {
+      const numberA = Number(a.number || 9999);
+      const numberB = Number(b.number || 9999);
+      if (numberA !== numberB) return numberA - numberB;
+      return String(a.name || "").localeCompare(String(b.name || ""), "es");
+    });
+  }, [filteredPlayers]);
   const selectedMatch = useMemo(
     () => matches.find((match) => match.id === selectedMatchId) || matches[0] || null,
     [matches, selectedMatchId]
   );
+  const upcomingMatchItems = useMemo(
+    () => matches.filter((match) => match.status !== "finished" && match.status !== "walkover" && match.reportStatus !== "published"),
+    [matches]
+  );
+  const historicalMatchItems = useMemo(
+    () => matches.filter((match) => match.status === "finished" || match.status === "walkover" || match.reportStatus === "published" || hasDelegateActaAvailable(match)),
+    [matches]
+  );
+  const visibleMatchItems = delegateMatchTab === "upcoming"
+    ? upcomingMatchItems
+    : delegateMatchTab === "history"
+    ? historicalMatchItems
+    : matches;
+  const groupedMatches = useMemo(() => {
+    const sortedMatches = [...visibleMatchItems].sort((a, b) => (
+      String(a.date || "9999-12-31").localeCompare(String(b.date || "9999-12-31")) ||
+      String(a.time || "23:59").localeCompare(String(b.time || "23:59"))
+    ));
+    const groups = new Map();
+    for (const match of sortedMatches) {
+      const dateKey = match.date || "sin-fecha";
+      if (!groups.has(dateKey)) groups.set(dateKey, []);
+      groups.get(dateKey).push(match);
+    }
+    return [...groups.entries()].map(([date, groupMatches]) => ({ date, matches: groupMatches }));
+  }, [visibleMatchItems]);
   const selectedEditingPlayer = useMemo(
     () => players.find((player) => player.id === editingPlayerId) || null,
     [editingPlayerId, players]
@@ -376,6 +524,17 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
     setSelectedMatchId((current) => matches.some((match) => match.id === current) ? current : matches[0].id);
   }, [matches]);
 
+  useEffect(() => {
+    if (!context || activeView !== "newPlayer" || canManageRoster) return;
+    setActiveView("roster");
+    setNotice("");
+    setError("El registro de plantilla esta cerrado para tu equipo.");
+  }, [activeView, canManageRoster, context]);
+
+  useEffect(() => {
+    scrollDelegatePortalToTop();
+  }, [activeView, selectedMatchId]);
+
   function applyPortalPayload(payload) {
     const nextEligiblePlayers = payload.eligiblePlayers || [];
     const nextMatches = payload.matches || [];
@@ -388,7 +547,12 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
 
   async function submitPlayer(event) {
     event.preventDefault();
-    if (!context?.canManageRoster) return;
+    if (!context?.canManageRoster) {
+      setNotice("");
+      setError("El registro de plantilla esta cerrado para tu equipo.");
+      setActiveView("roster");
+      return;
+    }
 
     const form = event.currentTarget;
     const payload = getFormPayload(form);
@@ -469,14 +633,14 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   function updateRosterDraft(matchId, updater) {
     setRosterDrafts((current) => ({
       ...current,
-      [matchId]: updater(current[matchId] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", notes: "" })
+      [matchId]: updater(current[matchId] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" })
     }));
   }
 
   async function submitMatchRoster(event, match) {
     event.preventDefault();
     if (busyMatchId) return;
-    const draft = rosterDrafts[match.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", notes: "" };
+    const draft = rosterDrafts[match.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" };
     if (!draft.playerIds.length) {
       setError("Selecciona al menos un jugador para enviar la convocatoria.");
       return;
@@ -581,9 +745,11 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
     );
   }
 
-  const upcomingMatches = matches.filter((match) => match.status !== "finished" && match.status !== "walkover" && match.reportStatus !== "published");
-  const operationalUpcomingMatches = upcomingMatches.filter(isDelegateMatchOperational);
-  const nextMatch = operationalUpcomingMatches[0] || upcomingMatches[0] || matches[0] || null;
+  const operationalUpcomingMatches = upcomingMatchItems.filter(isDelegateMatchOperational);
+  const nextMatch = operationalUpcomingMatches[0] || upcomingMatchItems[0] || matches[0] || null;
+  const nextLineupMatch = operationalUpcomingMatches.find((match) => !hasDelegateActaAvailable(match) && !match.roster) ||
+    operationalUpcomingMatches.find((match) => !hasDelegateActaAvailable(match)) ||
+    null;
   const submittedRosters = matches.filter((match) => match.roster).length;
   const openRosterMatches = matches.filter((match) => !match.roster).length;
   const positionCounts = PLAYER_POSITION_OPTIONS.map((position) => ({
@@ -604,9 +770,15 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
     !activeMatch.myTeamSigned &&
     ["pending_captain_review", "correction_requested", "both_signed"].includes(activeMatch.reportStatus)
   );
+  const activeActaReadOnly = Boolean(activeMatch && (
+    activeMatch.reportStatus === "published" ||
+    activeMatch.status === "finished" ||
+    activeMatch.status === "walkover"
+  ));
+  const activeLineupAvailable = Boolean(activeMatch && isDelegateMatchOperational(activeMatch) && !hasDelegateActaAvailable(activeMatch));
   const activeDraft = activeMatch
-    ? rosterDrafts[activeMatch.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", notes: "" }
-    : { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", notes: "" };
+    ? rosterDrafts[activeMatch.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" }
+    : { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" };
   const activeAvailablePlayers = activeMatch
     ? eligiblePlayers.filter((player) => {
         const blockedBySuspension = Boolean(player.suspension);
@@ -644,10 +816,16 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const openMatchWorkflow = (match) => {
     if (!match) return;
     setSelectedMatchId(match.id);
+    if (hasDelegateActaAvailable(match)) {
+      setActaReturnView(activeView === "matches" ? "matches" : "home");
+      setActiveView("acta");
+      return;
+    }
     if (!isDelegateMatchOperational(match)) {
       setActiveView("matches");
       return;
     }
+    if (match.roster) setActaReturnView(activeView === "matches" ? "matches" : "home");
     setActiveView(match.roster ? "acta" : "lineup");
   };
   const openDelegateNextAction = () => {
@@ -658,12 +836,20 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
     }
     if (nextAction.target === "acta" && nextMatch) {
       setSelectedMatchId(nextMatch.id);
+      setActaReturnView("home");
       setActiveView("acta");
       return;
     }
     setActiveView(nextAction.target || "matches");
   };
-
+  const openDelegateNavItem = (itemId) => {
+    if (itemId === "lineup") {
+      if (nextLineupMatch) setSelectedMatchId(nextLineupMatch.id);
+      setActiveView("lineup");
+      return;
+    }
+    setActiveView(itemId);
+  };
   return (
     <main className={`page team-portal-page portal-mobile-shell portal-board-shell delegate-view-${activeView} ${isExclusiveView ? "delegate-acta-exclusive-page" : ""}`} id="delegate-home">
       <div className="portal-board-layout delegate-board">
@@ -696,46 +882,64 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
               <em>{isPlayerEditView ? `#${selectedEditingPlayer?.number || "-"} ${getPlayerPositionOptionValue(selectedEditingPlayer?.position)}` : isPlayerCreateView ? "Plantilla del equipo" : context.competitionName || "Categoria asignada"}</em>
             </div>
             {activeView === "home" && <button className="delegate-logout-button" type="button" onClick={onLogout}>Salir</button>}
+            {activeView === "matches" && (
+              <button
+                className="delegate-header-filter-button"
+                type="button"
+                onClick={() => setDelegateMatchTab((current) => current === "all" ? "upcoming" : "all")}
+              >
+                <RosterIcon type="filters" />
+                <span>Filtros</span>
+              </button>
+            )}
           </div>}
 
           {notice && <p className="auth-ok">{notice}</p>}
           {error && <p className="auth-error">{error}</p>}
 
           {activeView === "home" && (
-            <div className="delegate-view-stack">
+            <div className="delegate-view-stack delegate-home-screen">
               {nextMatch ? (
-                <article className="portal-next-match-card delegate-feature-match">
-                  <div className="portal-card-head">
-                    <strong>Jornada en curso</strong>
+                <article className="delegate-home-match-card">
+                  <div className="delegate-home-match-card-head">
+                    <span>Jornada en curso</span>
                     <span className={`portal-status-pill ${nextMatchStatus.tone}`}>{nextMatchStatus.label}</span>
                   </div>
-                  <span className="portal-match-date">{formatMatchDate(nextMatch)}</span>
-                  <div className="portal-match-teams">
-                    <div>
+                  <div className="delegate-home-match-date">
+                    <span>{nextMatch.date || "Fecha por definir"}</span>
+                    <b>•</b>
+                    <span>{nextMatch.time || "Hora por definir"}</span>
+                  </div>
+                  <div className="delegate-home-teams">
+                    <div className="delegate-home-team local">
                       <TeamBadge logoUrl={context.teamLogoUrl} name={context.teamName} />
                       <strong>{context.teamName}</strong>
-                      <small>{nextMatch.isHome ? "Local" : "Visitante"}</small>
+                      <small>{context.competitionName || "Categoria"}</small>
+                      <em>{nextMatch.isHome ? "Local" : "Visitante"}</em>
                     </div>
-                    <b>VS</b>
-                    <div>
+                    <b className="delegate-home-vs">VS</b>
+                    <div className="delegate-home-team away">
                       <TeamBadge name={nextMatch.opponentName} tone="away" />
                       <strong>{nextMatch.opponentName}</strong>
-                      <small>{nextMatch.isHome ? "Visitante" : "Local"}</small>
+                      <small>{context.competitionName || "Categoria"}</small>
+                      <em>{nextMatch.isHome ? "Visitante" : "Local"}</em>
                     </div>
                   </div>
-                  <div className="portal-match-meta">
-                    <span>Jornada {nextMatch.round || "-"}</span>
-                    <span>{nextMatch.venue || "Cancha por definir"}</span>
-                    <span>{nextMatch.captureMode === "manual" ? "Acta manual" : "Acta digital"}</span>
+                  <div className="delegate-home-match-meta">
+                    <span><PortalNavIcon type="matches" /><small>Jornada</small><b>{nextMatch.round || "-"}</b></span>
+                    <span><PortalNavIcon type="home" /><small>Cancha</small><b>{nextMatch.venue || "Por definir"}</b></span>
+                    <span><PortalNavIcon type="history" /><small>Formato</small><b>{nextMatch.captureMode === "manual" ? "Acta manual" : "Acta digital"}</b></span>
                   </div>
                   {getScheduleChangeText(nextMatch) && <small className="delegate-schedule-note">{getScheduleChangeText(nextMatch)}</small>}
-                  <button className="portal-primary-action" type="button" onClick={() => openMatchWorkflow(nextMatch)}>
-                    {!isDelegateMatchOperational(nextMatch) ? "Ver partidos" : nextMatch.roster ? "Ver acta y firmas" : "Mandar plantilla"}
+                  <button className="delegate-home-primary-action" type="button" onClick={() => setActiveView("matches")}>
+                    <PortalNavIcon type="matches" />
+                    <span>Ver partidos</span>
+                    <b>›</b>
                   </button>
-                  <small className="portal-card-note">{nextMatchStatus.detail}</small>
+                  <small className="delegate-home-footnote"><i />{nextMatchStatus.detail}</small>
                 </article>
               ) : (
-                <article className="portal-next-match-card">
+                <article className="delegate-home-match-card empty-state">
                   <div className="portal-card-head">
                     <strong>Proximo partido</strong>
                     <span className="portal-status-pill neutral">Sin programar</span>
@@ -744,14 +948,19 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                 </article>
               )}
 
-              <article className={`delegate-next-action-card ${nextAction.tone}`}>
-                <div>
-                  <span>{nextAction.eyebrow}</span>
-                  <strong>{nextAction.title}</strong>
-                  <small>{nextAction.detail}</small>
+              <article className={`delegate-home-state-card ${nextAction.tone}`}>
+                <div className="delegate-home-state-head">
+                  <span>Estado actual</span>
                 </div>
-                <button type="button" onClick={openDelegateNextAction}>{nextAction.button}</button>
-                <div className="delegate-next-action-checks">
+                <div className="delegate-home-state-main">
+                  <PortalNavIcon type={nextAction.target === "acta" ? "history" : nextAction.target === "lineup" ? "teams" : "matches"} />
+                  <div>
+                    <strong>{nextAction.title}</strong>
+                    <small>{nextAction.detail}</small>
+                  </div>
+                  <button type="button" onClick={openDelegateNextAction}>{nextAction.button}<b>›</b></button>
+                </div>
+                <div className="delegate-home-checks">
                   {nextActionChecks.map((item) => (
                     <span className={item.done ? "done" : ""} key={item.label}>
                       <b>{item.done ? "✓" : "•"}</b>
@@ -761,14 +970,14 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                 </div>
               </article>
 
-              <div className="delegate-stat-grid">
-                <span><b>{players.length}</b> Plantilla</span>
-                <span><b>{submittedRosters}</b> Enviadas</span>
-                <span><b>{openRosterMatches}</b> Pendientes</span>
+              <div className="delegate-home-summary">
+                <span><PortalNavIcon type="teams" /><b>{players.length}</b><small>Plantilla total</small></span>
+                <span><PortalNavIcon type="matches" /><b>{submittedRosters}</b><small>Enviadas</small></span>
+                <span><PortalNavIcon type="history" /><b>{openRosterMatches}</b><small>Pendientes</small></span>
               </div>
 
-              <div className="portal-flow-strip delegate compact" aria-label="Flujo del delegado">
-                {["Conv.", "Curso", "Acta", "Firma", "Publ."].map((label, index) => (
+              <div className="portal-flow-strip delegate compact delegate-home-flow" aria-label="Flujo del delegado">
+                {["Convocatoria", "Curso", "Acta", "Firma", "Publicado"].map((label, index) => (
                   <span className={nextMatchStatus.step >= index + 1 ? "active" : ""} key={label}><b>{index + 1}</b> {label}</span>
                 ))}
               </div>
@@ -776,37 +985,95 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
           )}
 
           {activeView === "matches" && (
-            <div className="delegate-view-stack">
-              <div className="delegate-compact-list">
-                {matches.map((match) => {
-                  const status = getDelegateMatchStatus(match);
-                  const score = getTeamScore(match);
-                  return (
-                    <button
-                      className={selectedMatchId === match.id ? "selected" : ""}
-                      key={match.id}
-                      type="button"
-                      onClick={() => setSelectedMatchId(match.id)}
-                    >
-                      <span>
-                        <strong>{context.teamName} vs {match.opponentName}</strong>
-                        <small>{formatMatchDate(match)} | {match.venue || "Cancha por definir"}</small>
-                      </span>
-                      <b>{match.status === "finished" || match.reportStatus === "published" ? `${score.own}-${score.opponent}` : status.label}</b>
-                    </button>
-                  );
-                })}
-                {!matches.length && <p className="empty">No hay partidos programados para este equipo.</p>}
+            <div className="delegate-view-stack delegate-matches-screen">
+              <div className="delegate-match-tabs" role="tablist" aria-label="Filtro de partidos">
+                <button className={delegateMatchTab === "upcoming" ? "active" : ""} type="button" onClick={() => setDelegateMatchTab("upcoming")}>
+                  <PortalNavIcon type="matches" /><span>Proximos</span><b>{upcomingMatchItems.length}</b>
+                </button>
+                <button className={delegateMatchTab === "history" ? "active" : ""} type="button" onClick={() => setDelegateMatchTab("history")}>
+                  <PortalNavIcon type="history" /><span>Historial</span><b>{historicalMatchItems.length}</b>
+                </button>
+                <button className={delegateMatchTab === "all" ? "active" : ""} type="button" onClick={() => setDelegateMatchTab("all")}>
+                  <RosterIcon type="filters" /><span>Todos</span><b>{matches.length}</b>
+                </button>
               </div>
-              {activeMatch && (
-                <article className="delegate-match-detail">
-                  <span className={`portal-status-pill ${activeMatchStatus.tone}`}>{activeMatchStatus.label}</span>
-                  <strong>{activeMatchStatus.detail}</strong>
-                  <small>{activeMatch.opponentRosterSubmitted ? "El rival ya envio convocatoria." : "Convocatoria rival pendiente."}</small>
-                  {getScheduleChangeText(activeMatch) && <small>{getScheduleChangeText(activeMatch)}</small>}
-                  <button className="portal-primary-action" type="button" disabled={!isDelegateMatchOperational(activeMatch)} onClick={() => setActiveView(activeMatch.roster ? "acta" : "lineup")}>
-                    {!isDelegateMatchOperational(activeMatch) ? "Partido pospuesto" : activeMatch.roster ? "Ver seguimiento del acta" : "Crear convocatoria"}
-                  </button>
+              <div className="delegate-match-board-list">
+                {groupedMatches.map((group) => (
+                  <section className="delegate-match-day-group" key={group.date}>
+                    <header>
+                      <PortalNavIcon type="matches" />
+                      <strong>{group.date === "sin-fecha" ? "Fecha por definir" : formatDate(group.date)}</strong>
+                      <span>{group.matches.length} partido(s)</span>
+                    </header>
+                    {group.matches.map((match) => {
+                      const status = getDelegateMatchStatus(match);
+                      const score = getTeamScore(match);
+                      const actaAvailable = hasDelegateActaAvailable(match);
+                      const tone = getDelegateMatchTone(match);
+                      return (
+                        <article
+                          className={`delegate-match-card-app ${tone} ${selectedMatchId === match.id ? "selected" : ""}`}
+                          key={match.id}
+                        >
+                          <div className="delegate-match-card-side">
+                            <strong>{match.time || "--:--"}</strong>
+                            <span><PortalNavIcon type="home" /></span>
+                            <small>{match.venue || "Cancha por definir"}</small>
+                          </div>
+                          <div className="delegate-match-card-main">
+                            <span className="delegate-match-round-pill">Jornada {match.round || "-"}</span>
+                            <div className="delegate-match-card-teams">
+                              <div>
+                                <TeamBadge logoUrl={context.teamLogoUrl} name={context.teamName} />
+                                <strong>{context.teamName}</strong>
+                                <small>{context.competitionName || "Categoria"}</small>
+                                <em>{getDelegateMatchRoleLabel(match)}</em>
+                              </div>
+                              <b>VS</b>
+                              <div>
+                                <TeamBadge name={match.opponentName} tone="away" />
+                                <strong>{match.opponentName}</strong>
+                                <small>{context.competitionName || "Categoria"}</small>
+                                <em>{getDelegateOpponentRoleLabel(match)}</em>
+                              </div>
+                            </div>
+                            <div className="delegate-match-card-checks">
+                              <span className={match.roster ? "done" : ""}><b>{match.roster ? "✓" : "○"}</b>Convocatoria {match.roster ? "enviada" : "pendiente"}</span>
+                              <span className={actaAvailable ? "done" : ""}><b>{actaAvailable ? "✓" : "○"}</b>Acta {actaAvailable ? "activa" : "pendiente"}</span>
+                              <span className={match.myTeamSigned ? "done" : ""}><b>{match.myTeamSigned ? "✓" : "○"}</b>Firma {match.myTeamSigned ? "lista" : "pendiente"}</span>
+                            </div>
+                          </div>
+                          <div className="delegate-match-card-action">
+                            {actaAvailable ? (
+                              <button type="button" onClick={() => openMatchWorkflow(match)}>
+                                <span>Ver acta</span>
+                                <strong>{score.own} - {score.opponent}</strong>
+                              </button>
+                            ) : isDelegateMatchOperational(match) ? (
+                              <button type="button" onClick={() => openMatchWorkflow(match)}>
+                                <span>{match.roster ? "Seguimiento" : "Convocar"}</span>
+                                <strong>{status.label}</strong>
+                              </button>
+                            ) : (
+                              <span className="delegate-match-disabled-action">{status.label}</span>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </section>
+                ))}
+                {!visibleMatchItems.length && <p className="empty">No hay partidos para este filtro.</p>}
+              </div>
+              {historicalMatchItems.length > 0 && (
+                <article className="delegate-match-published-summary">
+                  <span><PortalNavIcon type="history" /></span>
+                  <div>
+                    <small>Resultado publicado</small>
+                    <strong>Resultado oficial disponible</strong>
+                    <p>Consulta las actas resueltas de tu equipo en modo lectura.</p>
+                  </div>
+                  <button type="button" onClick={() => setDelegateMatchTab("history")}>Ver actas</button>
                 </article>
               )}
             </div>
@@ -817,9 +1084,9 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
               {activeMatch ? (
                 <>
                   <div className="delegate-acta-exclusive-head">
-                    <button type="button" onClick={() => setActiveView("home")} aria-label="Regresar al panel delegado">‹</button>
+                    <button type="button" onClick={() => setActiveView(actaReturnView || "home")} aria-label="Regresar">‹</button>
                     <div>
-                      <strong>Acta del partido</strong>
+                      <strong>{activeActaReadOnly ? "Acta resuelta" : "Acta del partido"}</strong>
                       <small>{activeHomeTeamName} vs {activeAwayTeamName}</small>
                     </div>
                   </div>
@@ -845,7 +1112,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
 
                   <article className="delegate-match-detail delegate-acta-details">
                     <div className="portal-card-head">
-                      <strong>Datos del partido</strong>
+                      <strong>{activeActaReadOnly ? "Consulta publica del acta" : "Datos del partido"}</strong>
                       <span>{activeMatch.captureMode === "manual" ? "Acta manual" : "Acta digital"}</span>
                     </div>
                     <div className="delegate-acta-detail-grid">
@@ -871,16 +1138,21 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                     </div>
                     <div className="delegate-acta-mini-events full">
                       {activeReportEvents.map((eventItem, index) => (
-                        <span key={`${eventItem.id || eventItem.minute || index}-${index}`}>
+                        <span className={`delegate-acta-event-row event-kind-${eventItem.type || "event"}`} key={`${eventItem.id || eventItem.minute || index}-${index}`}>
                           <b>{getReportEventIcon(eventItem)}</b>
-                          <strong>{eventItem.minuteLabel || eventItem.minute || "--"}</strong>
-                          <small>{getReportEventLabel(eventItem)} {eventItem.playerName || eventItem.player || ""}</small>
+                          <strong>{getReportEventMinute(eventItem)}</strong>
+                          <small>
+                            <em>{getReportEventLabel(eventItem)}</em>
+                            <span>{getDelegateReportEventPlayerName(eventItem)}</span>
+                            <i>{getDelegateReportEventTeamName(activeMatch, eventItem, context)}</i>
+                          </small>
                         </span>
                       ))}
                       {!activeReportEvents.length && <small>No hay eventos registrados en el acta preliminar.</small>}
                     </div>
                   </article>
 
+                  {!activeActaReadOnly && (
                   <article className="delegate-sign-card">
                     <div className="portal-card-head">
                       <strong>Firma digital</strong>
@@ -917,6 +1189,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       </form>
                     )}
                   </article>
+                  )}
                 </>
               ) : (
                 <p className="empty">Selecciona un partido para revisar el acta.</p>
@@ -925,48 +1198,79 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
           )}
 
           {activeView === "lineup" && (
-            <div className="delegate-view-stack">
-              {activeMatch && !isDelegateMatchOperational(activeMatch) ? (
+            <div className="delegate-view-stack delegate-lineup-screen">
+              {!nextLineupMatch ? (
+                <article className="delegate-match-detail">
+                  <span className="portal-status-pill neutral">Sin convocatoria pendiente</span>
+                  <strong>No hay partidos disponibles para mandar convocatoria.</strong>
+                  <small>La convocatoria solo aplica a partidos programados, reprogramados o adelantados que todavia no tienen acta resuelta.</small>
+                  <button className="portal-primary-action" type="button" onClick={() => setActiveView("matches")}>Ver partidos</button>
+                </article>
+              ) : activeMatch && !activeLineupAvailable ? (
                 <article className="delegate-match-detail">
                   <span className={`portal-status-pill ${activeMatchStatus.tone}`}>{activeMatchStatus.label}</span>
                   <strong>{context.teamName} vs {activeMatch.opponentName}</strong>
-                  <small>{getScheduleChangeText(activeMatch) || activeMatchStatus.detail}</small>
-                  <button className="portal-primary-action" type="button" onClick={() => setActiveView("matches")}>Ver partidos</button>
+                  <small>{hasDelegateActaAvailable(activeMatch) ? "Este partido ya tiene acta disponible. Puedes revisarla en modo lectura." : getScheduleChangeText(activeMatch) || activeMatchStatus.detail}</small>
+                  <button className="portal-primary-action" type="button" onClick={() => openMatchWorkflow(hasDelegateActaAvailable(activeMatch) ? activeMatch : nextLineupMatch)}>
+                    {hasDelegateActaAvailable(activeMatch) ? "Ver acta" : "Ir a convocatoria pendiente"}
+                  </button>
                 </article>
               ) : activeMatch ? (
                 <form className="delegate-lineup-form" onSubmit={(event) => submitMatchRoster(event, activeMatch)}>
-                  <article className="delegate-match-detail">
+                  <article className="delegate-match-detail delegate-lineup-match-card">
                     <span className={`portal-status-pill ${activeMatchStatus.tone}`}>{activeMatchStatus.label}</span>
-                    <strong>{context.teamName} vs {activeMatch.opponentName}</strong>
-                    <small>{formatMatchDate(activeMatch)} | {activeMatch.venue || "Cancha por definir"}</small>
+                    <div className="delegate-lineup-versus">
+                      <span>
+                        <TeamBadge logoUrl={context.teamLogoUrl} name={context.teamName} />
+                        <strong>{context.teamName}</strong>
+                        <small>{getDelegateMatchRoleLabel(activeMatch)}</small>
+                      </span>
+                      <b>VS</b>
+                      <span>
+                        <TeamBadge name={activeMatch.opponentName} tone="away" />
+                        <strong>{activeMatch.opponentName}</strong>
+                        <small>{getDelegateOpponentRoleLabel(activeMatch)}</small>
+                      </span>
+                    </div>
+                    <div className="delegate-lineup-meta">
+                      <span><PortalNavIcon type="matches" />{formatMatchDate(activeMatch)}</span>
+                      <span><PortalNavIcon type="home" />{activeMatch.venue || "Cancha por definir"}</span>
+                      <span><RosterIcon type="all" />Jornada {activeMatch.round || "-"}</span>
+                    </div>
                   </article>
                   <div className="delegate-lineup-summary">
                     <span><b>{activeDraft.starters?.length || 0}</b> Titulares</span>
                     <span><b>{activeDraft.substitutes?.length || 0}</b> Suplentes</span>
                     <span><b>{activeDraft.playerIds?.length || 0}</b> Convocados</span>
                   </div>
-                  <label>Capitan
-                    <select
-                      value={activeDraft.captainPlayerId}
-                      onChange={(event) => updateRosterDraft(activeMatch.id, (current) => ({ ...current, captainPlayerId: event.target.value }))}
-                    >
-                      <option value="">Selecciona capitan</option>
-                      {activeAvailablePlayers.filter((player) => activeDraft.playerIds.includes(player.id)).map((player) => (
-                        <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>Portero
-                    <select
-                      value={activeDraft.goalkeeperPlayerId || ""}
-                      onChange={(event) => updateRosterDraft(activeMatch.id, (current) => ({ ...current, goalkeeperPlayerId: event.target.value }))}
-                    >
-                      <option value="">Selecciona portero</option>
-                      {activeAvailablePlayers.filter((player) => activeDraft.playerIds.includes(player.id)).map((player) => (
-                        <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="delegate-lineup-control-card">
+                    <label>Capitan
+                      <select
+                        value={activeDraft.captainPlayerId}
+                        onChange={(event) => updateRosterDraft(activeMatch.id, (current) => ({ ...current, captainPlayerId: event.target.value }))}
+                      >
+                        <option value="">Selecciona capitan</option>
+                        {activeAvailablePlayers.filter((player) => activeDraft.playerIds.includes(player.id)).map((player) => (
+                          <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>Portero
+                      <select
+                        value={activeDraft.goalkeeperPlayerId || ""}
+                        onChange={(event) => updateRosterDraft(activeMatch.id, (current) => ({ ...current, goalkeeperPlayerId: event.target.value }))}
+                      >
+                        <option value="">Selecciona portero</option>
+                        {activeAvailablePlayers.filter((player) => activeDraft.playerIds.includes(player.id)).map((player) => (
+                          <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="delegate-lineup-list-head">
+                    <strong>Jugadores disponibles</strong>
+                    <span>{activeDraft.playerIds?.length || 0}/{eligiblePlayers.length}</span>
+                  </div>
                   <div className="team-match-player-grid delegate-player-select">
                     {eligiblePlayers.map((player) => {
                       const blockedBySuspension = Boolean(player.suspension);
@@ -974,6 +1278,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       const disabled = blockedBySuspension || blockedByPlayoff;
                       const checked = activeDraft.playerIds.includes(player.id) && !disabled;
                       const rosterRole = activeDraft.starters?.includes(player.id) ? "starter" : activeDraft.substitutes?.includes(player.id) ? "substitute" : "starter";
+                      const jerseyNumber = activeDraft.jerseyNumbers?.[player.id] ?? player.number ?? "";
                       const suspensionLabel = player.suspension?.pendingReview
                         ? `Expulsado sujeto a comision: ${player.suspension.reason || "Revision disciplinaria"}`
                         : player.suspension?.indefinite
@@ -997,36 +1302,58 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                                   ? [...new Set([...(current.starters || []), player.id])]
                                   : (current.starters || []).filter((playerId) => playerId !== player.id),
                                 substitutes: (current.substitutes || []).filter((playerId) => playerId !== player.id),
+                                jerseyNumbers: {
+                                  ...(current.jerseyNumbers || {}),
+                                  [player.id]: normalizeJerseyNumberInput(current.jerseyNumbers?.[player.id] ?? player.number ?? "")
+                                },
                                 captainPlayerId: playerIds.includes(current.captainPlayerId) ? current.captainPlayerId : "",
                                 goalkeeperPlayerId: playerIds.includes(current.goalkeeperPlayerId) ? current.goalkeeperPlayerId : ""
                               };
                             })}
                           />
                           <span>
-                            <strong>#{player.number || "-"} {player.name}</strong>
-                            <small>{disabled ? suspensionLabel : player.position || "Jugador"}</small>
+                            <strong>{player.name}</strong>
+                            <small>{disabled ? suspensionLabel : `Numero base #${player.number || "-"} | ${player.position || "Jugador"}`}</small>
                           </span>
                           {checked && (
-                            <select
-                              aria-label={`Rol de ${player.name}`}
-                              value={rosterRole}
-                              onChange={(event) => updateRosterDraft(activeMatch.id, (current) => {
-                                const starters = new Set(current.starters || []);
-                                const substitutes = new Set(current.substitutes || []);
-                                starters.delete(player.id);
-                                substitutes.delete(player.id);
-                                if (event.target.value === "substitute") substitutes.add(player.id);
-                                else starters.add(player.id);
-                                return {
-                                  ...current,
-                                  starters: [...starters].filter((playerId) => current.playerIds.includes(playerId)),
-                                  substitutes: [...substitutes].filter((playerId) => current.playerIds.includes(playerId))
-                                };
-                              })}
-                            >
-                              <option value="starter">Titular</option>
-                              <option value="substitute">Suplente</option>
-                            </select>
+                            <div className="delegate-lineup-player-tools">
+                              <span className="delegate-jersey-field">
+                                <em>No. playera</em>
+                                <input
+                                  aria-label={`Numero de playera de ${player.name}`}
+                                  inputMode="numeric"
+                                  maxLength={4}
+                                  value={jerseyNumber}
+                                  onChange={(event) => updateRosterDraft(activeMatch.id, (current) => ({
+                                    ...current,
+                                    jerseyNumbers: {
+                                      ...(current.jerseyNumbers || {}),
+                                      [player.id]: normalizeJerseyNumberInput(event.target.value)
+                                    }
+                                  }))}
+                                />
+                              </span>
+                              <select
+                                aria-label={`Rol de ${player.name}`}
+                                value={rosterRole}
+                                onChange={(event) => updateRosterDraft(activeMatch.id, (current) => {
+                                  const starters = new Set(current.starters || []);
+                                  const substitutes = new Set(current.substitutes || []);
+                                  starters.delete(player.id);
+                                  substitutes.delete(player.id);
+                                  if (event.target.value === "substitute") substitutes.add(player.id);
+                                  else starters.add(player.id);
+                                  return {
+                                    ...current,
+                                    starters: [...starters].filter((playerId) => current.playerIds.includes(playerId)),
+                                    substitutes: [...substitutes].filter((playerId) => current.playerIds.includes(playerId))
+                                  };
+                                })}
+                              >
+                                <option value="starter">Titular</option>
+                                <option value="substitute">Suplente</option>
+                              </select>
+                            </div>
                           )}
                         </label>
                       );
@@ -1050,71 +1377,99 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
           )}
 
           {activeView === "roster" && (
-            <div className="delegate-view-stack">
+            <div className="delegate-view-stack delegate-roster-screen">
               <section className="delegate-roster-hero">
+                <span className="delegate-roster-crest">
+                  {context.teamLogoUrl ? <img alt="" src={context.teamLogoUrl} /> : <b>{getTeamInitials(context.teamName)}</b>}
+                </span>
                 <div>
                   <span>Plantilla del equipo</span>
-                  <strong>{players.length} jugador(es) registrados</strong>
-                  <small>Registro abierto sin limite de integrantes.</small>
+                  <strong>{players.length} jugadores</strong>
+                  <small>{canManageRoster ? "Registro abierto sin limite de integrantes." : "Registro cerrado por la liga."}</small>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
+                    if (!canManageRoster) {
+                      setNotice("");
+                      setError("El registro de plantilla esta cerrado para tu equipo.");
+                      return;
+                    }
                     setEditingPlayerId("");
                     setActiveView("newPlayer");
                   }}
-                  disabled={!context.canManageRoster}
+                  disabled={!canManageRoster}
                 >
-                  Nuevo jugador
+                  {canManageRoster ? <><RosterIcon type="plus" />Nuevo jugador</> : "Registro cerrado"}
                 </button>
               </section>
               <div className="delegate-roster-metrics">
                 <span><b>{players.length}</b> Total</span>
                 {positionCounts.map((item) => (
-                  <span key={item.position}><b>{item.count}</b> {item.position}</span>
+                  <span key={item.position}><b>{item.count}</b> {PLAYER_POSITION_LABELS[item.position]}</span>
                 ))}
               </div>
               <div className="team-portal-filters delegate-roster-tools">
-                <label className="delegate-search-field">Buscar jugador
-                  <input
-                    value={playerQuery}
-                    onChange={(event) => setPlayerQuery(event.target.value)}
-                    placeholder="Nombre o numero"
-                  />
-                </label>
-                <div className="delegate-position-tabs" role="group" aria-label="Filtrar por posicion">
-                  <button className={!positionFilter ? "active" : ""} type="button" onClick={() => setPositionFilter("")}>Todas</button>
+                <div className="delegate-roster-search-row">
+                  <label className="delegate-search-field">
+                    <span aria-hidden="true"><RosterIcon type="search" /></span>
+                    <input
+                      value={playerQuery}
+                      onChange={(event) => setPlayerQuery(event.target.value)}
+                      placeholder="Buscar jugador..."
+                    />
+                  </label>
+                  <button
+                    className={`delegate-filter-button ${rosterFiltersOpen ? "active" : ""}`}
+                    type="button"
+                    aria-expanded={rosterFiltersOpen}
+                    onClick={() => setRosterFiltersOpen((current) => !current)}
+                  >
+                    <span aria-hidden="true"><RosterIcon type="filters" /></span>
+                    Filtros
+                  </button>
+                </div>
+                <div className={`delegate-position-tabs ${rosterFiltersOpen ? "open" : ""}`} role="group" aria-label="Filtrar por posicion">
+                  <button className={!positionFilter ? "active" : ""} type="button" onClick={() => setPositionFilter("")}><span aria-hidden="true"><RosterIcon type="all" /></span>Todos</button>
                   {PLAYER_POSITION_OPTIONS.map((position) => (
                     <button className={positionFilter === position ? "active" : ""} key={position} type="button" onClick={() => setPositionFilter(position)}>
-                      {position}
+                      <span aria-hidden="true"><RosterIcon type={position === "Arquero" ? "goalkeeper" : position === "Defensor" ? "defense" : position === "Mediocampista" ? "midfield" : "forward"} /></span>{PLAYER_POSITION_LABELS[position]}
                     </button>
                   ))}
                 </div>
               </div>
+              <div className="delegate-roster-list-head">
+                <strong>Jugadores ({filteredPlayers.length})</strong>
+                <span>Ordenar: Numero</span>
+              </div>
               <div className="team-portal-player-list delegate-roster-list">
-                {filteredPlayers.map((player) => {
+                {visibleRosterPlayers.map((player) => {
                   const isEditing = editingPlayerId === player.id;
+                  const playerStatus = getDelegatePlayerStatus(player);
                   return (
                     <article className={isEditing ? "editing" : ""} key={player.id}>
                       <span className="player-avatar team-portal-avatar">
                         {player.photoAuthorized && player.photoUrl ? <img alt="" loading="lazy" src={player.photoUrl} /> : null}
                         <span>{getPlayerPhotoInitials(player.name)}</span>
                       </span>
+                      <b className="delegate-player-number">{player.number || "-"}</b>
                       <div>
                         <strong>{player.name}</strong>
-                        <small><b>#{player.number || "-"}</b> {getPlayerPositionOptionValue(player.position)}</small>
+                        <small>{getPlayerPositionOptionValue(player.position).toUpperCase()}</small>
                         <PlayoffProgress eligibility={player.playoffEligibility} />
                       </div>
+                      <span className={`delegate-player-status ${playerStatus.className}`}><i />{playerStatus.label}</span>
                       <button
                         className="delegate-player-edit-button"
                         type="button"
                         disabled={!context.canManageRoster}
+                        aria-label={`${context.canManageRoster ? "Editar" : "Registro cerrado"} ${player.name}`}
                         onClick={() => {
                           setEditingPlayerId(player.id);
                           setActiveView("player");
                         }}
                       >
-                        {context.canManageRoster ? "Editar" : "Cerrado"}
+                        ›
                       </button>
                     </article>
                   );
@@ -1125,7 +1480,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
             </div>
           )}
 
-          {activeView === "newPlayer" && (
+          {activeView === "newPlayer" && canManageRoster && (
             <div className="delegate-view-stack delegate-player-editor-screen">
               <section className="delegate-player-editor-hero delegate-player-create-hero">
                 <span className="player-avatar team-portal-avatar">
@@ -1261,7 +1616,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
       </div>
       {!isExclusiveView && <nav className="portal-bottom-nav" aria-label="Navegacion delegado">
         {navItems.map((item) => (
-          <button className={activeView === item.id ? "active" : ""} key={item.id} type="button" onClick={() => setActiveView(item.id)}>
+          <button className={activeView === item.id ? "active" : ""} key={item.id} type="button" onClick={() => openDelegateNavItem(item.id)}>
             <PortalNavIcon type={item.icon} /><span>{item.label}</span>
           </button>
         ))}
@@ -1302,25 +1657,28 @@ function buildRosterDrafts(matches, eligiblePlayers) {
       .map((entry) => typeof entry === "string" ? entry : entry.playerId)
       .filter((playerId) => availablePlayerIds.includes(playerId));
     const playerIds = rosterPlayerIds.length ? rosterPlayerIds : availablePlayerIds;
+    const jerseyNumbers = Object.fromEntries(playerIds.map((playerId) => {
+      const rosterEntry = (match.roster?.players || []).find((entry) => (typeof entry === "string" ? entry : entry.playerId) === playerId);
+      const player = eligiblePlayers.find((item) => item.id === playerId);
+      return [playerId, normalizeJerseyNumberInput(typeof rosterEntry === "object" ? rosterEntry.jerseyNumber ?? rosterEntry.rosterNumber ?? player?.number ?? "" : player?.number ?? "")];
+    }));
     const starters = (match.roster?.starters?.length ? match.roster.starters : playerIds.slice(0, 11))
       .filter((playerId) => playerIds.includes(playerId));
     const substitutes = (match.roster?.substitutes?.length ? match.roster.substitutes : playerIds.slice(11))
       .filter((playerId) => playerIds.includes(playerId) && !starters.includes(playerId));
     const captainPlayerId = playerIds.includes(match.roster?.captainPlayerId)
       ? match.roster.captainPlayerId
-      : playerIds[0] || "";
+      : "";
     const goalkeeperPlayerId = playerIds.includes(match.roster?.goalkeeperPlayerId)
       ? match.roster.goalkeeperPlayerId
-      : playerIds.find((playerId) => {
-        const player = eligiblePlayers.find((item) => item.id === playerId);
-        return getPlayerPositionOptionValue(player?.position) === "Arquero";
-      }) || playerIds[0] || "";
+      : "";
     drafts[match.id] = {
       playerIds,
       starters,
       substitutes,
       captainPlayerId,
       goalkeeperPlayerId,
+      jerseyNumbers,
       notes: match.roster?.notes || ""
     };
   }

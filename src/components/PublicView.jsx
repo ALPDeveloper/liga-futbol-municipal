@@ -531,7 +531,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
               label="Compartir"
               onClick={() => shareSuspensionsCard({ league: activeLeague, competition: activeCompetition, notices: suspensionNotices })}
             />
-            <SuspensionNotices notices={suspensionNotices} />
+            <SuspensionNotices league={activeLeague} notices={suspensionNotices} />
           </section>
 
           <section className="panel">
@@ -546,7 +546,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
               label="Compartir amarillas"
               onClick={() => shareYellowCardsCard({ league: disciplineLeague, competition: activeCompetition, rows: discipline })}
             />
-            <Discipline rows={discipline} />
+            <Discipline league={disciplineLeague} rows={discipline} />
           </section>
 
           <section className="panel">
@@ -3689,6 +3689,8 @@ function getPublicEventIcon(type) {
 }
 
 function getPublicEventDetail(event) {
+  if (event.cardDetail === "double_yellow") return "Roja por 2a amarilla";
+  if (event.cardDetail === "double_yellow_second") return "2a amarilla";
   if (event.type === "goal") return "Gol";
   if (event.type === "own_goal") return "Autogol";
   if (event.type === "yellow") return "Amonestacion";
@@ -3795,28 +3797,93 @@ function SponsorBanners({ league, fallback }) {
   );
 }
 
-function SuspensionNotices({ notices }) {
+function getPublicMatchTraceLabel(league, match) {
+  if (!match) return "";
+  const home = getTeam(league, match.homeTeamId)?.name || "Local";
+  const away = getTeam(league, match.awayTeamId)?.name || "Visitante";
+  const round = match.round ? `J${match.round}` : "Jornada";
+  const date = match.date ? formatDate(match.date) : "Fecha por definir";
+  return `${round} | ${home} vs ${away} | ${date}`;
+}
+
+function isPublicExpulsionNotice(notice) {
+  const type = normalizeSearchTerm(notice.type || "");
+  return type.includes("expulsion") || type.includes("roja");
+}
+
+function getPublicNoticeOriginMatch(league, notice) {
+  if (notice.originMatch) return notice.originMatch;
+
+  const matches = league.matches || [];
+  const originMatchId = notice.origin?.matchId || "";
+  if (originMatchId) {
+    const matchById = matches.find((match) => match.id === originMatchId);
+    if (matchById) return matchById;
+  }
+
+  if (!notice.player?.id) return null;
+
+  return matches.find((match) => (
+    (!notice.origin?.date || match.date === notice.origin.date) &&
+    (!notice.origin?.round || Number(match.round || 0) === Number(notice.origin.round || 0)) &&
+    (match.events || []).some((event) => event.type === "red" && event.playerId === notice.player.id)
+  )) || null;
+}
+
+function DisciplineTrace({ league, title, matches = [], fallback = "" }) {
+  const cleanMatches = matches.filter(Boolean).slice(0, 4);
+  if (!cleanMatches.length && !fallback) return null;
+  return (
+    <div className="public-discipline-trace">
+      <span>{title}</span>
+      {cleanMatches.map((match) => (
+        <small key={match.id}>{getPublicMatchTraceLabel(league, match)}</small>
+      ))}
+      {!cleanMatches.length && fallback && <small>{fallback}</small>}
+    </div>
+  );
+}
+
+function SuspensionNotices({ league, notices }) {
   if (!notices.length) return <p className="empty">No hay jugadores suspendidos para la siguiente jornada.</p>;
 
   return (
     <div className="suspension-notice-list">
-      {notices.map((notice) => (
-        <article className={`suspension-notice ${notice.status}`} key={notice.id}>
-          <strong>{notice.player.name}</strong>
-          <span>{notice.team?.name || "Sin equipo"}</span>
-          {notice.pendingReview ? (
-            <p>Expulsado y sujeto a revision por comision disciplinaria. No puede ser alineado hasta resolucion.</p>
-          ) : notice.indefinite ? (
-            <p>{notice.type === "Expulsion" ? "Expulsado" : "Suspendido"} con inhabilitacion indefinida hasta resolucion de la liga.</p>
-          ) : (
-            <p>
-              {notice.type === "Expulsion" ? "Expulsado" : "Suspendido"} por {notice.totalMatches} partido(s). Le restan {notice.remainingMatches} juego(s) de suspension.
-              {notice.returnRound ? ` Podra regresar en la jornada ${notice.returnRound}.` : ""}
-            </p>
-          )}
-          <small>{notice.reason}</small>
-        </article>
-      ))}
+      {notices.map((notice) => {
+        const isExpulsion = isPublicExpulsionNotice(notice);
+        const originMatch = getPublicNoticeOriginMatch(league, notice);
+        const returnLabel = notice.returnMatch ? getPublicMatchTraceLabel(league, notice.returnMatch) : "";
+        return (
+          <article className={`suspension-notice ${notice.status}`} key={notice.id}>
+            <strong>{notice.player.name}</strong>
+            <span>{notice.team?.name || "Sin equipo"}</span>
+            {notice.pendingReview ? (
+              <p>Expulsado y sujeto a revision por comision disciplinaria. No puede ser alineado hasta resolucion.</p>
+            ) : notice.indefinite ? (
+              <p>{isExpulsion ? "Expulsado" : "Suspendido"} con inhabilitacion indefinida hasta resolucion de la liga.</p>
+            ) : (
+              <p>
+                {isExpulsion ? "Expulsado" : "Suspendido"} por {notice.totalMatches} partido(s). Le restan {notice.remainingMatches} juego(s) de suspension.
+                {notice.returnRound ? ` Podra regresar en la jornada ${notice.returnRound}.` : ""}
+              </p>
+            )}
+            <small>{notice.reason}</small>
+            <DisciplineTrace
+              league={league}
+              title={isExpulsion ? "Expulsado en" : "Origen"}
+              matches={originMatch ? [originMatch] : []}
+              fallback={notice.origin?.date ? `${notice.origin.round ? `J${notice.origin.round} | ` : ""}${formatDate(notice.origin.date)}` : ""}
+            />
+            <DisciplineTrace league={league} title="Cumplidos" matches={notice.servedMatchList || []} />
+            {returnLabel && (
+              <div className="public-discipline-trace return">
+                <span>Regreso</span>
+                <small>{returnLabel}</small>
+              </div>
+            )}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -3851,23 +3918,29 @@ function InjurySupportList({ league, injuries }) {
   );
 }
 
-function Discipline({ rows }) {
+function Discipline({ league, rows }) {
   if (!rows.length) return <p className="empty">Sin amarillas vigentes registradas.</p>;
 
   return (
     <div className="discipline-list">
-      {rows.map((row) => (
-        <article className={row.status} key={row.player.id}>
-          <div className="discipline-player">
-            <strong>{row.player.name}</strong>
-            <span>Equipo: {row.team?.name || "Sin equipo"}</span>
-          </div>
-          <div className="yellow-card-progress" aria-label={`${row.yellowCards} de ${row.yellowLimit} amarillas`}>
-            <strong>{row.yellowCards}/{row.yellowLimit}</strong>
-          </div>
-          <small>{row.message}</small>
-        </article>
-      ))}
+      {rows.map((row) => {
+        const sourceMatches = (row.sources || [])
+          .map((source) => source.matchId ? league.matches.find((match) => match.id === source.matchId) : null)
+          .filter(Boolean);
+        return (
+          <article className={row.status} key={row.player.id}>
+            <div className="discipline-player">
+              <strong>{row.player.name}</strong>
+              <span>Equipo: {row.team?.name || "Sin equipo"}</span>
+            </div>
+            <div className="yellow-card-progress" aria-label={`${row.yellowCards} de ${row.yellowLimit} amarillas`}>
+              <strong>{row.yellowCards}/{row.yellowLimit}</strong>
+            </div>
+            <small>{row.message}</small>
+            <DisciplineTrace league={league} title="Amarillas en" matches={sourceMatches} />
+          </article>
+        );
+      })}
     </div>
   );
 }

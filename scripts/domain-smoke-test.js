@@ -65,10 +65,10 @@ import {
 } from "../src/lib/matchWorkflow.js";
 
 assert.equal(getCurrentDisplayRound([
-  { id: "round-7", round: 7, status: "finished", date: "2026-07-01", time: "10:00" },
-  { id: "round-10", round: 10, status: "scheduled", date: "2026-07-30", time: "10:00" },
-  { id: "round-8", round: 8, status: "scheduled", date: "2026-07-16", time: "10:00" },
-  { id: "round-9", round: 9, status: "scheduled", date: "2026-07-23", time: "10:00" }
+  { id: "round-7", round: 7, status: "finished", date: "2099-07-01", time: "10:00" },
+  { id: "round-10", round: 10, status: "scheduled", date: "2099-07-30", time: "10:00" },
+  { id: "round-8", round: 8, status: "scheduled", date: "2099-07-16", time: "10:00" },
+  { id: "round-9", round: 9, status: "scheduled", date: "2099-07-23", time: "10:00" }
 ]), 8);
 assert.equal(requiresCaptainSignatures(MATCH_CAPTURE_MODES.LIVE), true);
 assert.equal(canPublishWithoutCaptainSignatures(MATCH_CAPTURE_MODES.MANUAL), true);
@@ -1059,6 +1059,8 @@ store = addPlayerSanction(store, league.id, {
 league = getCurrentLeague(store);
 assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.pendingReview), false);
 assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.remainingMatches === 2), true);
+const commissionNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.remainingMatches === 2);
+assert.equal(commissionNotice.originMatch?.id, "m4");
 
 store = saveMatchSheet(store, league.id, {
   matchId: "m4",
@@ -1090,6 +1092,8 @@ assert.equal(league.sanctions.some((sanction) => (
   sanction.indefinite === false &&
   String(sanction.notes || "").includes("ACTA M4")
 )), true);
+const resolvedCommissionNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.remainingMatches === 3);
+assert.equal(resolvedCommissionNotice.originMatch?.id, "m4");
 
 store = saveMatchSheet(store, league.id, {
   matchId: "m3",
