@@ -39577,3 +39577,24 @@ button.arbitration-metric-card {
     min-height: 48px;
   }
 }
+
+/* Production hotfix: roster must scroll as one page, not as a nested app container. */
+.team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-phone-frame {
+  height: auto;
+  min-height: calc(100svh - 18px);
+  grid-template-rows: none;
+  overflow: visible;
+}
+
+.team-portal-page.delegate-view-roster .delegate-app-header {
+  position: relative;
+  top: auto;
+  z-index: 2;
+}
+
+.team-portal-page.delegate-view-roster .delegate-roster-screen,
+.team-portal-page.delegate-view-roster .delegate-roster-list {
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}

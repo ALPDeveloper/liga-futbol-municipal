@@ -606,6 +606,59 @@ async function canManageMunicipality(user, municipality) {
   return upperText(municipality) === await getLeagueAdminMunicipality(user);
 }
 
+function shouldUseMatchReportForDelegate(match, report) {
+  if (!report) return false;
+  const isOfficialMatch = ["finished", "walkover"].includes(match.status) || match.workflowStatus === MATCH_WORKFLOW_STATUSES.PUBLISHED;
+  if (!isOfficialMatch) return true;
+  if (match.currentReportId && report.id === match.currentReportId) return true;
+  return report.status === MATCH_REPORT_STATUSES.PUBLISHED && report.id === match.currentReportId;
+}
+
+function getDelegateEventKey(event, index = 0) {
+  return [
+    event.localUuid || event.id || "",
+    event.type || "",
+    event.playerId || "",
+    event.teamId || "",
+    event.minuteLabel || (event.minute ?? ""),
+    index
+  ].join(":");
+}
+
+function mergeDelegateEventDetails(baseEvent, detailEvent = {}) {
+  const detailMetadata = detailEvent.metadata && typeof detailEvent.metadata === "object" ? detailEvent.metadata : {};
+  const baseMetadata = baseEvent.metadata && typeof baseEvent.metadata === "object" ? baseEvent.metadata : {};
+  return {
+    ...detailEvent,
+    ...baseEvent,
+    metadata: {
+      ...detailMetadata,
+      ...baseMetadata
+    },
+    cardDetail: baseEvent.cardDetail || baseEvent.subtype || baseMetadata.cardDetail || detailEvent.cardDetail || detailEvent.subtype || detailMetadata.cardDetail || "",
+    countsForAccumulation: baseEvent.countsForAccumulation ?? baseMetadata.countsForAccumulation ?? detailEvent.countsForAccumulation ?? detailMetadata.countsForAccumulation,
+    excludedFromAccumulation: baseEvent.excludedFromAccumulation ?? baseMetadata.excludedFromAccumulation ?? detailEvent.excludedFromAccumulation ?? detailMetadata.excludedFromAccumulation,
+    sourceYellowCardMinutes: baseEvent.sourceYellowCardMinutes || baseMetadata.sourceYellowCardMinutes || detailEvent.sourceYellowCardMinutes || detailMetadata.sourceYellowCardMinutes
+  };
+}
+
+function buildDelegateReportEvents(match, reportPayload) {
+  const officialEvents = Array.isArray(match?.events) ? match.events : [];
+  const reportEvents = Array.isArray(reportPayload?.events) ? reportPayload.events : [];
+  if (!officialEvents.length) return reportEvents;
+  if (!reportEvents.length) return officialEvents;
+
+  const reportDetailsByKey = new Map(reportEvents.map((event, index) => [getDelegateEventKey(event, index), event]));
+  const officialSource = officialEvents.map((event, index) => (
+    mergeDelegateEventDetails(event, reportDetailsByKey.get(getDelegateEventKey(event, index)))
+  ));
+  if (officialEvents.length >= reportEvents.length) return officialSource;
+
+  const seen = new Set(officialEvents.map((event, index) => getDelegateEventKey(event, index)));
+  const missingReportEvents = reportEvents.filter((event, index) => !seen.has(getDelegateEventKey(event, index)));
+  return [...officialSource, ...missingReportEvents];
+}
+
 async function buildTeamPortalPayload(userId) {
   const context = await getTeamDelegateContextData(userId);
   if (!context) return null;
@@ -655,7 +708,8 @@ async function buildTeamPortalPayload(userId) {
       const opponent = (league.teams || []).find((team) => team.id === opponentTeamId);
       const roster = rosterByMatchTeam.get(`${match.id}:${context.teamId}`);
       const opponentRoster = rosterByMatchTeam.get(`${match.id}:${opponentTeamId}`);
-      const report = await getLatestMatchReportForMatchData(match.id);
+      const latestReport = await getLatestMatchReportForMatchData(match.id);
+      const report = shouldUseMatchReportForDelegate(match, latestReport) ? latestReport : null;
       const signatures = report?.id ? await listMatchReportSignaturesData(report.id) : [];
       const mySignature = signatures.find((signature) => signature.teamId === context.teamId) || null;
       const opponentSignature = signatures.find((signature) => signature.teamId === opponentTeamId) || null;
@@ -663,17 +717,14 @@ async function buildTeamPortalPayload(userId) {
       const awayTeam = getTeam(league, match.awayTeamId);
       const playerById = new Map([...(league.players || []), ...(league.allPlayers || [])].map((player) => [player.id, player]));
       const reportPayload = report?.payload && typeof report.payload === "object" ? report.payload : null;
-      const sourceEvents = Array.isArray(reportPayload?.events) && reportPayload.events.length
-        ? reportPayload.events
-        : Array.isArray(match.events)
-        ? match.events
-        : [];
+      const sourceEvents = buildDelegateReportEvents(match, reportPayload);
       const enrichedEvents = sourceEvents.map((event) => {
         const eventTeam = getTeam(league, event.teamId);
         const player = playerById.get(event.playerId);
         const playerTeam = player?.teamId ? getTeam(league, player.teamId) : null;
         return {
           ...event,
+          cardDetail: event.cardDetail || event.subtype || event.metadata?.cardDetail || "",
           teamName: event.teamName || playerTeam?.name || eventTeam?.name || "",
           playerName: event.playerName || player?.name || "",
           playerNumber: event.playerNumber || player?.number || ""
@@ -703,6 +754,7 @@ async function buildTeamPortalPayload(userId) {
         captureMode: report?.captureMode || match.captureMode || "",
         homeGoals: report?.homeGoals ?? match.homeGoals,
         awayGoals: report?.awayGoals ?? match.awayGoals,
+        observations: reportPayload?.observations || match.observations || "",
         publishedAt: match.publishedAt || "",
         finalizedAt: match.finalizedAt || "",
         reportStatus: report?.status || "",
@@ -919,6 +971,7 @@ function buildOfficialSheetPayloadFromReport(report) {
   }, { home: 0, away: 0 });
   return {
     matchId: report.matchId,
+    reportId: report.id,
     homeGoals: report.homeGoals ?? payload.homeGoals ?? 0,
     awayGoals: report.awayGoals ?? payload.awayGoals ?? 0,
     extraTimeHomeGoals: payload.extraTimeEnabled && !hasScoreValue(payload.extraTimeHomeGoals) ? extraTimeSummary.home : payload.extraTimeHomeGoals,

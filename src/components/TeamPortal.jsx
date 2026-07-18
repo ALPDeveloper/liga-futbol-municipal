@@ -106,8 +106,9 @@ function getReportEventIcon(event) {
 }
 
 function getReportEventLabel(event) {
-  if (event.cardDetail === "double_yellow") return "Roja por 2a amarilla";
-  if (event.cardDetail === "double_yellow_second") return "2a amarilla";
+  const cardDetail = event.cardDetail || event.subtype || event.metadata?.cardDetail || "";
+  if (cardDetail === "double_yellow") return "Roja por 2a amarilla";
+  if (cardDetail === "double_yellow_second") return "2a amarilla";
   if (event.type === "own_goal") return "Autogol";
   if (event.type === "yellow" || event.type === "yellow_card") return "Amarilla";
   if (event.type === "red" || event.type === "red_card") return "Roja";
@@ -767,6 +768,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const activeHomeTeamName = activeMatch ? (activeMatch.isHome ? context.teamName : activeMatch.opponentName) : "";
   const activeAwayTeamName = activeMatch ? (activeMatch.isHome ? activeMatch.opponentName : context.teamName) : "";
   const activeReportPayload = activeMatch?.reportPayload && typeof activeMatch.reportPayload === "object" ? activeMatch.reportPayload : {};
+  const activeReportObservations = String(activeReportPayload.observations || activeMatch?.observations || "").trim();
   const activeReportEvents = getReportEvents(activeMatch);
   const activeReportCanSign = Boolean(
     activeMatch?.roster &&
@@ -1111,7 +1113,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       <span><small>Tiempo extra</small><strong>{activeReportPayload.extraTimeEnabled ? `${activeReportPayload.extraTimeHomeGoals ?? 0} - ${activeReportPayload.extraTimeAwayGoals ?? 0}` : "No"}</strong></span>
                       <span><small>Penales</small><strong>{activeReportPayload.penaltiesEnabled ? `${activeReportPayload.penaltyHomeGoals ?? 0} - ${activeReportPayload.penaltyAwayGoals ?? 0}` : "No"}</strong></span>
                     </div>
-                    <p>{activeMatch.reportPayload?.observations || "Sin observaciones registradas por ahora."}</p>
+                    {activeReportObservations && <p>{activeReportObservations}</p>}
                   </article>
 
                   <article className="delegate-match-detail delegate-acta-details">

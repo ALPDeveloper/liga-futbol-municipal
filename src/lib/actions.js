@@ -1,5 +1,6 @@
 import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { ACTIVE_SCHEDULE_MATCH_STATUSES, calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, isPlayerEligibleForTeam, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
+import { MATCH_CAPTURE_MODES, normalizeCaptureMode } from "./matchWorkflow.js";
 
 function isActiveScheduleMatch(match) {
   return ACTIVE_SCHEDULE_MATCH_STATUSES.includes(match?.status || "scheduled");
@@ -1246,6 +1247,9 @@ export function saveResult(store, leagueId, payload) {
         homeGoals: Number(payload.homeGoals),
         awayGoals: Number(payload.awayGoals),
         status: "finished",
+        workflowStatus: "published",
+        captureMode: MATCH_CAPTURE_MODES.ADMIN,
+        currentReportId: "",
         events
       };
     })
@@ -1319,6 +1323,9 @@ export function saveMatchSheet(store, leagueId, payload) {
           homeGoals,
           awayGoals,
           status: "walkover",
+          workflowStatus: "published",
+          captureMode: normalizeCaptureMode(payload.captureMode || MATCH_CAPTURE_MODES.ADMIN),
+          currentReportId: payload.reportId || "",
           resolutionType: payload.resolutionType || "no_show",
           resolutionNote: upperText(payload.resolutionNote || `Default administrativo ${maxGoals}-0`),
           observations: upperText(payload.observations || ""),
@@ -1342,6 +1349,9 @@ export function saveMatchSheet(store, leagueId, payload) {
         homeGoals,
         awayGoals,
         status: "finished",
+        workflowStatus: "published",
+        captureMode: normalizeCaptureMode(payload.captureMode || MATCH_CAPTURE_MODES.ADMIN),
+        currentReportId: payload.reportId || "",
         resolutionType: payload.resolutionType || "normal",
         resolutionNote: "",
         observations: upperText(payload.observations || ""),

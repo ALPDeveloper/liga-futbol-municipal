@@ -1716,8 +1716,9 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
           extra_time_home_goals = $9,
           extra_time_away_goals = $10,
           penalty_home_goals = $11,
-          penalty_away_goals = $12
-      WHERE id = $13 AND league_id = $14
+          penalty_away_goals = $12,
+          capture_mode = $13
+      WHERE id = $14 AND league_id = $15
     `, [
       match.status || "finished",
       reportId || null,
@@ -1731,29 +1732,39 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
       match.extraTimeAwayGoals ?? null,
       match.penaltyHomeGoals ?? null,
       match.penaltyAwayGoals ?? null,
+      match.captureMode || "admin",
       match.id,
       leagueId
     ]);
     for (const event of events) {
+      const eventMetadata = {
+        ...(event.metadata && typeof event.metadata === "object" ? event.metadata : {}),
+        ...(event.cardDetail ? { cardDetail: event.cardDetail } : {}),
+        ...(event.countsForAccumulation !== undefined ? { countsForAccumulation: event.countsForAccumulation } : {}),
+        ...(event.excludedFromAccumulation !== undefined ? { excludedFromAccumulation: event.excludedFromAccumulation } : {}),
+        ...(Array.isArray(event.sourceYellowCardMinutes) ? { sourceYellowCardMinutes: event.sourceYellowCardMinutes } : {})
+      };
       await pgQuery(`
         INSERT INTO match_events (
-          match_id, type, player_id, team_id, period, minute, minute_label,
+          match_id, type, player_id, team_id, subtype, period, minute, minute_label,
           suspension_matches, suspension_indefinite, disciplinary_pending, reason,
-          is_official, sync_status, version
+          metadata_json, is_official, sync_status, version
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, 'synced', 1)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, true, 'synced', 1)
       `, [
         match.id,
         event.type,
         event.playerId || null,
         event.teamId || null,
+        event.subtype || event.cardDetail || "",
         event.period || "",
         event.minute ?? null,
         event.minuteLabel || "",
         event.suspensionMatches ?? null,
         toBoolean(event.suspensionIndefinite),
         toBoolean(event.disciplinaryPending),
-        event.reason || ""
+        event.reason || "",
+        JSON.stringify(eventMetadata)
       ]);
     }
     if (reportId) {
@@ -1786,7 +1797,8 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
           extra_time_home_goals = ?,
           extra_time_away_goals = ?,
           penalty_home_goals = ?,
-          penalty_away_goals = ?
+          penalty_away_goals = ?,
+          capture_mode = ?
       WHERE id = ? AND league_id = ?
     `).run(
       match.status || "finished",
@@ -1802,29 +1814,39 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
       match.extraTimeAwayGoals ?? null,
       match.penaltyHomeGoals ?? null,
       match.penaltyAwayGoals ?? null,
+      match.captureMode || "admin",
       match.id,
       leagueId
     );
     for (const event of events) {
+      const eventMetadata = {
+        ...(event.metadata && typeof event.metadata === "object" ? event.metadata : {}),
+        ...(event.cardDetail ? { cardDetail: event.cardDetail } : {}),
+        ...(event.countsForAccumulation !== undefined ? { countsForAccumulation: event.countsForAccumulation } : {}),
+        ...(event.excludedFromAccumulation !== undefined ? { excludedFromAccumulation: event.excludedFromAccumulation } : {}),
+        ...(Array.isArray(event.sourceYellowCardMinutes) ? { sourceYellowCardMinutes: event.sourceYellowCardMinutes } : {})
+      };
       db.prepare(`
         INSERT INTO match_events (
-          match_id, type, player_id, team_id, period, minute, minute_label,
+          match_id, type, player_id, team_id, subtype, period, minute, minute_label,
           suspension_matches, suspension_indefinite, disciplinary_pending, reason,
-          is_official, sync_status, version
+          metadata_json, is_official, sync_status, version
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced', 1)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced', 1)
       `).run(
         match.id,
         event.type,
         event.playerId || null,
         event.teamId || null,
+        event.subtype || event.cardDetail || "",
         event.period || "",
         event.minute ?? null,
         event.minuteLabel || "",
         event.suspensionMatches ?? null,
         event.suspensionIndefinite ? 1 : 0,
         event.disciplinaryPending ? 1 : 0,
-        event.reason || ""
+        event.reason || "",
+        JSON.stringify(eventMetadata)
       );
     }
     if (reportId) {
