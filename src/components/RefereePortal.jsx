@@ -275,8 +275,12 @@ function RefereeTinyIcon({ type }) {
   return <svg {...common}><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4" /><path d="M16 3v4" /><path d="M4 10h16" /></svg>;
 }
 
-function RefereeTeamMark({ name, tone = "home" }) {
-  return <span className={`portal-team-badge ${tone}`}><b>{getTeamInitials(name)}</b></span>;
+function RefereeTeamMark({ logoUrl = "", name, tone = "home" }) {
+  return (
+    <span className={`portal-team-badge ${tone}`}>
+      {logoUrl ? <img alt="" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
+    </span>
+  );
 }
 
 function RefereeFilterIcon() {
@@ -391,13 +395,13 @@ function RefereeAssignmentCard({ match, onCapture }) {
       </div>
       <div className="referee-assignment-teams">
         <div className="referee-assignment-team home">
-          <RefereeTeamMark name={match.homeTeamName} />
+          <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
           <strong>{match.homeTeamName}</strong>
           <small>Local</small>
         </div>
         <b className="referee-assignment-versus">VS</b>
         <div className="referee-assignment-team away">
-          <RefereeTeamMark name={match.awayTeamName} tone="away" />
+          <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
           <strong>{match.awayTeamName}</strong>
           <small>Visitante</small>
         </div>
@@ -606,13 +610,13 @@ function RefereeAssignmentHero({ match, onOpen }) {
       </div>
       <div className="referee-home-versus">
         <div className="local">
-          <RefereeTeamMark name={match.homeTeamName} />
+          <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
           <strong>{match.homeTeamName}</strong>
           <small>Local</small>
         </div>
         <b>VS</b>
         <div className="away">
-          <RefereeTeamMark name={match.awayTeamName} tone="away" />
+          <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
           <strong>{match.awayTeamName}</strong>
           <small>Visitante</small>
         </div>
@@ -711,13 +715,13 @@ function NextMatchCard({ match, onOpen }) {
       </div>
       <div className="portal-match-teams">
         <div>
-          <RefereeTeamMark name={match.homeTeamName} />
+          <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
           <strong>{match.homeTeamName}</strong>
           <small>Local</small>
         </div>
         <b>VS</b>
         <div>
-          <RefereeTeamMark name={match.awayTeamName} tone="away" />
+          <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
           <strong>{match.awayTeamName}</strong>
           <small>Visitante</small>
         </div>
@@ -809,13 +813,13 @@ function RefereeMatchPreparation({ match, onBack, onChooseMode }) {
           <span className="portal-match-date">{formatDate(match.date)} | {match.time || "Hora por definir"}</span>
           <div className="portal-match-teams">
             <div>
-              <RefereeTeamMark name={match.homeTeamName} />
+              <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
               <strong>{match.homeTeamName}</strong>
               <small>Local</small>
             </div>
             <b>VS</b>
             <div>
-              <RefereeTeamMark name={match.awayTeamName} tone="away" />
+              <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
               <strong>{match.awayTeamName}</strong>
               <small>Visitante</small>
             </div>
@@ -892,7 +896,7 @@ function MatchCard({ match, history = false, onCapture }) {
       </div>
       <div className="referee-match-main">
         <div>
-          <RefereeTeamMark name={match.homeTeamName} />
+          <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
           <strong>{match.homeTeamName}</strong>
           <small>Local</small>
         </div>
@@ -900,7 +904,7 @@ function MatchCard({ match, history = false, onCapture }) {
           {history || match.sheetReviewStatus === "pending_review" ? scoreLabel : "VS"}
         </div>
         <div>
-          <RefereeTeamMark name={match.awayTeamName} tone="away" />
+          <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
           <strong>{match.awayTeamName}</strong>
           <small>Visitante</small>
         </div>
@@ -972,7 +976,7 @@ function RefereeHistoryMatchCard({ match, onOpenActa }) {
       <div className="referee-history-card-main">
         <div className="referee-history-score-row">
           <div className="referee-history-team home">
-            <RefereeTeamMark name={match.homeTeamName} />
+            <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
             <strong>{match.homeTeamName}</strong>
             <small>Local</small>
           </div>
@@ -981,7 +985,7 @@ function RefereeHistoryMatchCard({ match, onOpenActa }) {
             <b>{score}</b>
           </div>
           <div className="referee-history-team away">
-            <RefereeTeamMark name={match.awayTeamName} tone="away" />
+            <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
             <strong>{match.awayTeamName}</strong>
             <small>Visitante</small>
           </div>
@@ -1042,13 +1046,13 @@ function RefereeReadOnlyActa({ match, reportState, loading, error, onBack }) {
               <span className="referee-readonly-kicker">{match?.competitionName || "Torneo"} · Jornada {match?.round || "-"}</span>
               <div className="referee-readonly-teams">
                 <span>
-                  <RefereeTeamMark name={match?.homeTeamName} />
+                  <RefereeTeamMark logoUrl={match?.homeTeamLogoUrl} name={match?.homeTeamName} />
                   <strong>{match?.homeTeamName || "Local"}</strong>
                   <small>Local</small>
                 </span>
                 <b>{homeGoals} - {awayGoals}</b>
                 <span>
-                  <RefereeTeamMark name={match?.awayTeamName} tone="away" />
+                  <RefereeTeamMark logoUrl={match?.awayTeamLogoUrl} name={match?.awayTeamName} tone="away" />
                   <strong>{match?.awayTeamName || "Visitante"}</strong>
                   <small>Visitante</small>
                 </span>
@@ -2848,13 +2852,13 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
           </div>
           <div className="referee-post-scoreline">
             <div>
-              <RefereeTeamMark name={match.homeTeamName} />
+              <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
               <strong>{match.homeTeamName}</strong>
               <small>Local</small>
             </div>
             <b>{homeGoals || 0} - {awayGoals || 0}</b>
             <div>
-              <RefereeTeamMark name={match.awayTeamName} tone="away" />
+              <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
               <strong>{match.awayTeamName}</strong>
               <small>Visitante</small>
             </div>
@@ -3056,7 +3060,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
               onClick={() => setSelectedEventTeam(match.homeTeamId)}
               aria-pressed={selectedEventTeam === match.homeTeamId}
             >
-              <RefereeTeamMark name={match.homeTeamName} />
+              <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
               <strong>{match.homeTeamName}</strong>
               <small>Local</small>
             </button>
@@ -3071,7 +3075,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
               onClick={() => setSelectedEventTeam(match.awayTeamId)}
               aria-pressed={selectedEventTeam === match.awayTeamId}
             >
-              <RefereeTeamMark name={match.awayTeamName} tone="away" />
+              <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
               <strong>{match.awayTeamName}</strong>
               <small>Visitante</small>
             </button>
@@ -3249,7 +3253,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
             type="button"
             onClick={() => setSelectedEventTeam(match.homeTeamId)}
           >
-            <RefereeTeamMark name={match.homeTeamName} />
+            <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
             <strong>{getTeamInitials(match.homeTeamName)}</strong>
             <small>Local</small>
           </button>
@@ -3258,7 +3262,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
             type="button"
             onClick={() => setSelectedEventTeam(match.awayTeamId)}
           >
-            <RefereeTeamMark name={match.awayTeamName} tone="away" />
+            <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
             <strong>{getTeamInitials(match.awayTeamName)}</strong>
             <small>Visitante</small>
           </button>

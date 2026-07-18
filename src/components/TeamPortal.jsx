@@ -88,7 +88,11 @@ function getTeamScore(match) {
 }
 
 function getReportEvents(match) {
-  const events = Array.isArray(match?.reportPayload?.events) ? match.reportPayload.events : [];
+  const events = Array.isArray(match?.reportPayload?.events) && match.reportPayload.events.length
+    ? match.reportPayload.events
+    : Array.isArray(match?.events)
+    ? match.events
+    : [];
   return events.slice().reverse();
 }
 
@@ -1031,7 +1035,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                               </div>
                               <b>VS</b>
                               <div>
-                                <TeamBadge name={match.opponentName} tone="away" />
+                                <TeamBadge logoUrl={match.opponentLogoUrl} name={match.opponentName} tone="away" />
                                 <strong>{match.opponentName}</strong>
                                 <small>{context.competitionName || "Categoria"}</small>
                                 <em>{getDelegateOpponentRoleLabel(match)}</em>
@@ -1227,7 +1231,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       </span>
                       <b>VS</b>
                       <span>
-                        <TeamBadge name={activeMatch.opponentName} tone="away" />
+                        <TeamBadge logoUrl={activeMatch.opponentLogoUrl} name={activeMatch.opponentName} tone="away" />
                         <strong>{activeMatch.opponentName}</strong>
                         <small>{getDelegateOpponentRoleLabel(activeMatch)}</small>
                       </span>

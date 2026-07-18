@@ -28949,7 +28949,7 @@ button.arbitration-metric-card {
   height: 62px;
   place-items: center;
   border: 2px solid rgba(91, 255, 137, 0.46);
-  border-radius: 8px;
+  border-radius: 999px;
   background:
     radial-gradient(circle at 35% 20%, rgba(255, 255, 255, 0.2), transparent 34%),
     linear-gradient(135deg, #0f7c49, #7ff04b);
@@ -28968,7 +28968,14 @@ button.arbitration-metric-card {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 6px;
+  padding: 5px;
+  border-radius: 999px;
+}
+
+.portal-team-badge:has(img) {
+  border-color: rgba(148, 255, 191, 0.28);
+  background: rgba(4, 16, 25, 0.18);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
 }
 
 .portal-team-badge b {

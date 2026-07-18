@@ -663,22 +663,27 @@ async function buildTeamPortalPayload(userId) {
       const awayTeam = getTeam(league, match.awayTeamId);
       const playerById = new Map([...(league.players || []), ...(league.allPlayers || [])].map((player) => [player.id, player]));
       const reportPayload = report?.payload && typeof report.payload === "object" ? report.payload : null;
-      const enrichedReportPayload = reportPayload
+      const sourceEvents = Array.isArray(reportPayload?.events) && reportPayload.events.length
+        ? reportPayload.events
+        : Array.isArray(match.events)
+        ? match.events
+        : [];
+      const enrichedEvents = sourceEvents.map((event) => {
+        const eventTeam = getTeam(league, event.teamId);
+        const player = playerById.get(event.playerId);
+        const playerTeam = player?.teamId ? getTeam(league, player.teamId) : null;
+        return {
+          ...event,
+          teamName: event.teamName || playerTeam?.name || eventTeam?.name || "",
+          playerName: event.playerName || player?.name || "",
+          playerNumber: event.playerNumber || player?.number || ""
+        };
+      });
+      const enrichedReportPayload = reportPayload || enrichedEvents.length || match.observations
         ? {
-            ...reportPayload,
-            events: Array.isArray(reportPayload.events)
-              ? reportPayload.events.map((event) => {
-                  const eventTeam = getTeam(league, event.teamId);
-                  const player = playerById.get(event.playerId);
-                  const playerTeam = player?.teamId ? getTeam(league, player.teamId) : null;
-                  return {
-                    ...event,
-                    teamName: event.teamName || playerTeam?.name || eventTeam?.name || "",
-                    playerName: event.playerName || player?.name || "",
-                    playerNumber: event.playerNumber || player?.number || ""
-                  };
-                })
-              : []
+            ...(reportPayload || {}),
+            events: enrichedEvents,
+            observations: reportPayload?.observations || match.observations || ""
           }
         : null;
       return {
@@ -712,7 +717,11 @@ async function buildTeamPortalPayload(userId) {
         awayTeamId: match.awayTeamId,
         homeTeamName: homeTeam?.name || "LOCAL",
         awayTeamName: awayTeam?.name || "VISITANTE",
+        homeTeamLogoUrl: homeTeam?.logoUrl || "",
+        awayTeamLogoUrl: awayTeam?.logoUrl || "",
         opponentName: opponent?.name || "RIVAL",
+        opponentLogoUrl: opponent?.logoUrl || "",
+        events: enrichedEvents,
         centralRefereeName: getRefereeName(match.centralRefereeUserId),
         assistantReferee1Name: getRefereeName(match.assistantReferee1UserId),
         assistantReferee2Name: getRefereeName(match.assistantReferee2UserId),
@@ -1031,6 +1040,8 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         awayTeamId: match.awayTeamId,
         homeTeamName: homeTeam?.name || "LOCAL",
         awayTeamName: awayTeam?.name || "VISITANTE",
+        homeTeamLogoUrl: homeTeam?.logoUrl || "",
+        awayTeamLogoUrl: awayTeam?.logoUrl || "",
         homePlayers: buildRosterPlayers(homeEligiblePlayers, homeRoster),
         awayPlayers: buildRosterPlayers(awayEligiblePlayers, awayRoster),
         homeRosterSubmitted: Boolean(homeRoster),
