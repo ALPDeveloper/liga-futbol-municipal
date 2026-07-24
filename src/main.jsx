@@ -91,6 +91,17 @@ function findLeague(store, leagueId) {
   return store.leagues.find((item) => item.id === leagueId) || null;
 }
 
+function canAccessLeague(user, leagueId) {
+  if (!user || !leagueId || ["disabled", "suspended", "deleted"].includes(user.status)) return false;
+  if (user.role === "super_admin") return true;
+  if (user.leagueId === leagueId && ["league_admin", "admin_limited"].includes(user.role)) return true;
+  return (user.accesses || []).some((access) => (
+    access.status === "active" &&
+    access.leagueId === leagueId &&
+    ["super_admin", "league_admin", "admin_limited", "team_delegate", "referee"].includes(access.role)
+  ));
+}
+
 function buildAccessOptions(user, store) {
   if (!user || ["disabled", "suspended", "deleted"].includes(user.status)) return [];
   const rawAccesses = Array.isArray(user.accesses)
@@ -553,6 +564,22 @@ function LeagueDirectoryPage({ onNavigate, store }) {
   );
 }
 
+function PrivateLeagueGate({ onNavigate }) {
+  return (
+    <main className="page landing-page private-league-gate-page">
+      <section className="private-league-gate">
+        <span className="auth-pill"><span className="access-lock-icon" />Modo privado</span>
+        <h1>Liga privada temporalmente</h1>
+        <p>Esta liga esta en modo pruebas o mantenimiento y no esta disponible para consulta publica.</p>
+        <div className="private-league-gate-actions">
+          <button className="primary" type="button" onClick={() => onNavigate("/acceso")}>Acceso LIGATEC</button>
+          <button className="secondary" type="button" onClick={() => onNavigate("/")}>Ir al inicio</button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function LandingPage({ onNavigate, store }) {
   const whatsappUrl = "https://wa.me/523541073146?text=Hola%2C%20quiero%20informaci%C3%B3n%20sobre%20LIGATEC.";
   const activeLeagues = useMemo(
@@ -807,7 +834,7 @@ function App() {
   const routeLeagueId = publicLeagueId || legalLeagueId;
   const league = useMemo(() => {
     if (!store.leagues.length) return null;
-    if (routeLeagueId) return store.leagues.find((item) => item.id === routeLeagueId) || getCurrentLeague(store);
+    if (routeLeagueId) return store.leagues.find((item) => item.id === routeLeagueId) || null;
     return getCurrentLeague(store);
   }, [routeLeagueId, store]);
   const currentUser = auth.user;
@@ -839,6 +866,13 @@ function App() {
   const legalPublicReturnPath = legalLeagueId ? publicLeaguePath : "/";
   const privatePublicReturnPath = isAccessRoute || isAccessSelectionRoute ? accessReturnPath : publicLeaguePath;
   const legalNavPath = isLandingRoute || isLeagueDirectoryRoute ? "/legal" : legalLeaguePath;
+  const isPrivatePublicLeague = !isPrivateRoute && routeLeagueId && league?.publicVisibility === "private";
+  const canPreviewPrivateLeague = isPrivatePublicLeague && canAccessLeague(currentUser, league.id);
+  const shouldBlockPrivateLeague = isPrivatePublicLeague && !canPreviewPrivateLeague;
+  const shouldShowUnavailablePrivateLeague = !isPrivateRoute &&
+    Boolean(routeLeagueId) &&
+    initialApiLoaded &&
+    !league;
 
   useEffect(() => {
     if (!publicLeagueId) setPublicEntryMode(false);
@@ -1081,7 +1115,7 @@ function App() {
     );
   }
 
-  if (!league && !isPrivateRoute && !isLegalRoute && !isDelegateActivationRoute && !isRefereeActivationRoute && !isAdminActivationRoute) {
+  if (!league && !routeLeagueId && !isPrivateRoute && !isLegalRoute && !isDelegateActivationRoute && !isRefereeActivationRoute && !isAdminActivationRoute) {
     return (
       <main className="startup-screen">
         <div className="startup-card">
@@ -1095,6 +1129,10 @@ function App() {
 
   if (!league && isAdminRoute && canUseAdmin) {
     return <RouteFallback label="Cargando datos reales" />;
+  }
+
+  if (shouldBlockPrivateLeague || shouldShowUnavailablePrivateLeague) {
+    return <PrivateLeagueGate onNavigate={navigateTo} />;
   }
 
   if (shouldRedirectAdminToTeamPortal || shouldRedirectAdminToRefereePortal || shouldRedirectTeamPortalToOwnPanel || shouldRedirectRefereePortalToOwnPanel) {

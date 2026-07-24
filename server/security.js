@@ -130,10 +130,13 @@ export function validateStorePayload(payload) {
   return payload && typeof payload === "object" && Array.isArray(payload.leagues);
 }
 
-export function sanitizePublicStore(store) {
+export function sanitizePublicStore(store, options = {}) {
+  const excludePrivateLeagues = Boolean(options.excludePrivateLeagues);
   return {
     ...store,
-    leagues: (store.leagues || []).map((league) => ({
+    leagues: (store.leagues || [])
+      .filter((league) => !excludePrivateLeagues || (league.publicVisibility || "visible") !== "private")
+      .map((league) => ({
       ...league,
       ownerEmail: "",
       renewalDate: "",
@@ -166,7 +169,7 @@ export function sanitizePublicStore(store) {
 }
 
 export function scopeStoreForUser(store, user) {
-  if (!user) return sanitizePublicStore(store);
+  if (!user) return sanitizePublicStore(store, { excludePrivateLeagues: true });
   if (user.role === "super_admin") return store;
   const adminAccesses = (user.accesses || []).filter((access) => ["super_admin", "league_admin", "admin_limited"].includes(access.role));
   if (adminAccesses.some((access) => access.role === "super_admin")) return store;
@@ -181,7 +184,20 @@ export function scopeStoreForUser(store, user) {
       leagues: sanitizePublicStore({ ...store, leagues }).leagues
     };
   }
-  if (user.role === "referee") return sanitizePublicStore(store);
+  const portalLeagueAccessIds = [
+    ...new Set((user.accesses || [])
+      .filter((access) => access.status === "active" && ["team_delegate", "referee"].includes(access.role) && access.leagueId)
+      .map((access) => access.leagueId))
+  ];
+  if (portalLeagueAccessIds.length) {
+    const leagues = (store.leagues || []).filter((league) => portalLeagueAccessIds.includes(league.id));
+    return {
+      ...store,
+      currentLeagueId: portalLeagueAccessIds[0],
+      leagues: sanitizePublicStore({ ...store, leagues }).leagues
+    };
+  }
+  if (user.role === "referee") return sanitizePublicStore(store, { excludePrivateLeagues: true });
   if (user.role !== "league_admin" || !user.leagueId) return sanitizePublicStore(store);
 
   const leagues = (store.leagues || []).filter((league) => league.id === user.leagueId);

@@ -6781,6 +6781,16 @@ function SuperAdminLeagueList({
     if (!normalizedQuery) return true;
     return `${league.name} ${league.city} ${league.ownerEmail || ""}`.toLowerCase().includes(normalizedQuery);
   });
+  const getVisibilityClass = (visibility) => {
+    if (visibility === "private") return "private";
+    if (visibility === "hidden") return "hidden";
+    return "active";
+  };
+  const getVisibilityLabel = (visibility) => {
+    if (visibility === "private") return "Privada";
+    if (visibility === "hidden") return "Oculta";
+    return "Publica";
+  };
 
   return (
     <section className="panel super-module-panel">
@@ -6822,8 +6832,8 @@ function SuperAdminLeagueList({
                   <em><strong>{summary.tournaments}</strong> Torneos</em>
                 </span>
                 <span className={`status ${league.status}`}>{league.status === "active" ? "Activa" : "Suspendida"}</span>
-                <span className={`status ${league.publicVisibility === "hidden" ? "hidden" : "active"}`}>
-                  {(league.publicVisibility || "visible") === "hidden" ? "Oculta" : "Publica"}
+                <span className={`status ${getVisibilityClass(league.publicVisibility || "visible")}`}>
+                  {getVisibilityLabel(league.publicVisibility || "visible")}
                 </span>
                 <span className="super-detail-chevron">Editar</span>
               </summary>
@@ -6860,6 +6870,7 @@ function SuperAdminLeagueList({
                   <select name="publicVisibility" defaultValue={league.publicVisibility || "visible"}>
                     <option value="visible">Visible en directorio publico</option>
                     <option value="hidden">Oculta en directorio publico</option>
+                    <option value="private">Modo privado / pruebas</option>
                   </select>
                 </label>
                 <input type="hidden" name="renewalDate" value={league.renewalDate || ""} />
@@ -6930,7 +6941,8 @@ function SuperAdminCreateLeagueSheet({ onClose, onSubmit }) {
             <label>Visibilidad
               <select name="publicVisibility" defaultValue="visible">
                 <option value="visible">Visible al publico</option>
-                <option value="hidden">Oculta al publico</option>
+                <option value="hidden">Oculta del directorio publico</option>
+                <option value="private">Modo privado / pruebas</option>
               </select>
             </label>
           </fieldset>

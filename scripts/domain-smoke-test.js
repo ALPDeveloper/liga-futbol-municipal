@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { seedData } from "../src/data/seedData.js";
+import { sanitizePublicStore, scopeStoreForUser } from "../server/security.js";
 import {
   addCompetition,
   addAppearanceAdjustment,
@@ -569,6 +570,25 @@ league = getCurrentLeague(store);
 assert.equal(league.plan, "Sin limite");
 assert.equal(league.status, "suspended");
 assert.equal(league.membershipNotes, "PAGO PENDIENTE");
+
+store = updateLeagueMembership(store, league.id, {
+  plan: "Sin limite",
+  status: "active",
+  publicVisibility: "private",
+  ownerEmail: "admin.tinguindin@demo.com",
+  renewalDate: "2026-08-01",
+  membershipNotes: "Liga de pruebas"
+});
+league = getCurrentLeague(store);
+assert.equal(league.publicVisibility, "private");
+assert.equal(sanitizePublicStore(store, { excludePrivateLeagues: true }).leagues.some((item) => item.id === league.id), false);
+assert.equal(scopeStoreForUser(store, null).leagues.some((item) => item.id === league.id), false);
+assert.equal(scopeStoreForUser(store, { role: "super_admin", status: "active", accesses: [] }).leagues.some((item) => item.id === league.id), true);
+assert.equal(scopeStoreForUser(store, {
+  role: "team_delegate",
+  status: "active",
+  accesses: [{ role: "team_delegate", leagueId: league.id, status: "active" }]
+}).leagues.some((item) => item.id === league.id), true);
 
 store = updateLeagueRules(store, league.id, {
   withdrawalPolicy: "award_walkover",
