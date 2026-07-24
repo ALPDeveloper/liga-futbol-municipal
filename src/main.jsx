@@ -995,7 +995,12 @@ function App() {
   }
 
   function applyApiStore(apiStore) {
-    const normalized = normalizeStore(apiStore);
+    const currentLeagueId = store.currentLeagueId || "";
+    const shouldPreserveCurrentLeague = currentLeagueId && (apiStore.leagues || []).some((item) => item.id === currentLeagueId);
+    const normalized = normalizeStore({
+      ...apiStore,
+      currentLeagueId: shouldPreserveCurrentLeague ? currentLeagueId : apiStore.currentLeagueId
+    });
     setStore(normalized);
     saveStore(normalized);
   }
