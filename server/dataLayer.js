@@ -1093,7 +1093,7 @@ export async function listTeamPortalPlayersData(teamId) {
     const rows = await pgQuery(`
       SELECT id, league_id, competition_id, team_id, name, number, position, photo_url, photo_authorized, status
       FROM players
-      WHERE team_id = $1
+      WHERE team_id = $1 AND COALESCE(status, 'active') <> 'historical'
       ORDER BY number, name
     `, [teamId]);
     return rows.map(normalizePlayerRow);
@@ -1101,7 +1101,7 @@ export async function listTeamPortalPlayersData(teamId) {
   return db.prepare(`
     SELECT id, league_id, competition_id, team_id, name, number, position, photo_url, photo_authorized, status
     FROM players
-    WHERE team_id = ?
+    WHERE team_id = ? AND COALESCE(status, 'active') <> 'historical'
     ORDER BY number, name
   `).all(teamId).map(normalizePlayerRow);
 }
@@ -2256,6 +2256,24 @@ export async function updateTeamPortalPlayerData(playerId, { teamId, name, numbe
       SET name = ?, number = ?, position = ?, photo_url = ?, photo_authorized = ?
       WHERE id = ? AND team_id = ?
     `).run(...values);
+  }
+  return listTeamPortalPlayersData(teamId);
+}
+
+export async function updateTeamPortalPlayerNumberData(playerId, { teamId, number }) {
+  const normalizedNumber = Number(number || 0);
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE players
+      SET number = $1
+      WHERE id = $2 AND team_id = $3
+    `, [normalizedNumber, playerId, teamId]);
+  } else {
+    db.prepare(`
+      UPDATE players
+      SET number = ?
+      WHERE id = ? AND team_id = ?
+    `).run(normalizedNumber, playerId, teamId);
   }
   return listTeamPortalPlayersData(teamId);
 }

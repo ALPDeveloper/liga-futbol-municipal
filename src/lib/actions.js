@@ -1,5 +1,5 @@
 import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
-import { ACTIVE_SCHEDULE_MATCH_STATUSES, calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, getTeam, isPlayerEligibleForTeam, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
+import { ACTIVE_SCHEDULE_MATCH_STATUSES, PLAYER_HISTORICAL_STATUS, calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
 import { MATCH_CAPTURE_MODES, normalizeCaptureMode } from "./matchWorkflow.js";
 
 function isActiveScheduleMatch(match) {
@@ -11,6 +11,10 @@ function updateLeague(store, leagueId, updater) {
     ...store,
     leagues: store.leagues.map((league) => (league.id === leagueId ? updater(league) : league))
   };
+}
+
+function normalizePlayerStatus(value) {
+  return value === PLAYER_HISTORICAL_STATUS ? PLAYER_HISTORICAL_STATUS : "active";
 }
 
 export function addTeam(store, leagueId, payload) {
@@ -136,7 +140,8 @@ export function addPlayer(store, leagueId, payload) {
         number: Number(payload.number || 0),
         position: upperText(payload.position || "Jugador"),
         photoUrl: sanitizeImageUrl(payload.photoUrl),
-        photoAuthorized: checkboxValue(payload.photoAuthorized)
+        photoAuthorized: checkboxValue(payload.photoAuthorized),
+        status: normalizePlayerStatus(payload.status)
       }
     ]
   }));
@@ -157,7 +162,8 @@ export function updatePlayer(store, leagueId, playerId, payload) {
         number: Number(payload.number || 0),
         position: upperText(payload.position || "Jugador"),
         photoUrl: payload.photoUrl === undefined ? sanitizeImageUrl(player.photoUrl) : sanitizeImageUrl(payload.photoUrl),
-        photoAuthorized: checkboxValue(payload.photoAuthorized)
+        photoAuthorized: checkboxValue(payload.photoAuthorized),
+        status: normalizePlayerStatus(payload.status || player.status)
       };
     })
   }));
@@ -1203,6 +1209,7 @@ function optionalMatchScore(value) {
 
 function findPlayerByNumber(league, number, teamIds = []) {
   const directPlayer = league.players.find((player) => (
+    !isPlayerHistoricalOnly(player) &&
     Number(player.number) === Number(number) &&
     (!teamIds.length || teamIds.includes(player.teamId))
   ));
@@ -1213,7 +1220,7 @@ function findPlayerByNumber(league, number, teamIds = []) {
       .find((item) => Number(getPlayerNumberForTeam(league, item.id, teamId)) === Number(number));
     if (player) return { ...player, eventTeamId: teamId };
   }
-  return league.players.find((player) => Number(player.number) === Number(number));
+  return league.players.find((player) => !isPlayerHistoricalOnly(player) && Number(player.number) === Number(number));
 }
 
 export function saveResult(store, leagueId, payload) {
@@ -1286,7 +1293,12 @@ export function saveMatchSheet(store, leagueId, payload) {
           const playerTeamId = event.type === "own_goal"
             ? eventTeamId === match.homeTeamId ? match.awayTeamId : match.homeTeamId
             : eventTeamId;
-          if (!isPlayerEligibleForTeam(league, player.id, playerTeamId)) return null;
+          const isExistingHistoricalEvent = isPlayerHistoricalOnly(player) && (match.events || []).some((existingEvent) => (
+            existingEvent.playerId === player.id &&
+            existingEvent.teamId === eventTeamId &&
+            existingEvent.type === event.type
+          ));
+          if (!isExistingHistoricalEvent && !isPlayerEligibleForTeam(league, player.id, playerTeamId)) return null;
           const { minute, minuteLabel } = parseMatchEventMinute(event.minute, event.minuteLabel);
           if (event.type === "red" && !String(event.reason || "").trim()) {
             throw new Error("Toda tarjeta roja debe tener motivo.");

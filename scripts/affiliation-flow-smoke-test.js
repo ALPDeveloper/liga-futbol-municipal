@@ -26,6 +26,7 @@ const {
   importStoreData,
   initializeData,
   listMatchParticipationsForLeagueData,
+  setTeamRosterPermissionData,
   updateMatchRefereesData
 } = await import("../server/dataLayer.js");
 const {
@@ -228,12 +229,43 @@ async function login({ email, password }) {
 
 async function runApiScenario() {
   const delegateToken = await login(credentials.delegate);
+  await setTeamRosterPermissionData({
+    leagueId: ids.league,
+    teamId: ids.teamPrimary,
+    registrationEnabled: false,
+    notes: "Registro cerrado para validar edicion limitada de numeros."
+  });
+  await apiFetch(`/team-portal/players/${ids.playerPrimaryWing}`, {
+    token: delegateToken,
+    method: "PATCH",
+    body: { number: 17 }
+  });
+  await assert.rejects(
+    apiFetch(`/team-portal/players/${ids.playerAffiliate}`, {
+      token: delegateToken,
+      method: "PATCH",
+      body: {
+        name: "AFILIADO EDITADO INDEBIDO",
+        number: 99,
+        position: "ARQUERO"
+      }
+    }),
+    /Jugador no encontrado en tu equipo|403|404/,
+    "El delegado receptor no debe editar datos completos de un jugador afiliado."
+  );
+  await apiFetch(`/team-portal/affiliated-players/${ids.playerAffiliate}/number`, {
+    token: delegateToken,
+    method: "PATCH",
+    body: { number: 28 }
+  });
   const delegatePayload = await apiFetch("/team-portal/me", { token: delegateToken });
+  const ownWing = delegatePayload.eligiblePlayers.find((player) => player.id === ids.playerPrimaryWing);
+  assert.equal(Number(ownWing?.number), 17, "Con registro cerrado el delegado debe poder editar solo numero de jugador propio.");
   const affiliate = delegatePayload.eligiblePlayers.find((player) => player.id === ids.playerAffiliate);
   assert.ok(affiliate, "El afiliado debe aparecer como elegible para el delegado del equipo receptor.");
   assert.equal(affiliate.isAffiliate, true);
   assert.equal(affiliate.originTeamName, "EQUIPO A SEGUNDA");
-  assert.equal(Number(affiliate.number), 21);
+  assert.equal(Number(affiliate.number), 28);
 
   await apiFetch(`/team-portal/matches/${ids.matchPrimary}/participation`, {
     token: delegateToken,
@@ -241,9 +273,19 @@ async function runApiScenario() {
     body: {
       playerIds: [ids.playerPrimaryCaptain, ids.playerPrimaryWing, ids.playerAffiliate],
       captainPlayerId: ids.playerPrimaryCaptain,
+      jerseyNumbers: {
+        [ids.playerPrimaryWing]: 71,
+        [ids.playerAffiliate]: 29
+      },
       notes: "Prueba QA con jugador afiliado de Segunda."
     }
   });
+  const delegateAfterParticipation = await apiFetch("/team-portal/me", { token: delegateToken });
+  const affiliateAfterParticipation = delegateAfterParticipation.eligiblePlayers.find((player) => player.id === ids.playerAffiliate);
+  assert.equal(Number(affiliateAfterParticipation?.number), 28, "El numero temporal de convocatoria no debe modificar la plantilla/afiliacion.");
+  const matchAfterParticipation = delegateAfterParticipation.matches.find((match) => match.id === ids.matchPrimary);
+  const participationAffiliate = matchAfterParticipation?.participation?.players?.find((player) => player.playerId === ids.playerAffiliate);
+  assert.equal(Number(participationAffiliate?.playerNumberSnapshot), 29, "La convocatoria debe conservar el numero temporal como snapshot del partido.");
 
   const refereeToken = await login(credentials.referee);
   const refereePayload = await apiFetch("/referee-portal/me", { token: refereeToken });
@@ -253,7 +295,7 @@ async function runApiScenario() {
   assert.ok(refereeAffiliate, "El afiliado debe aparecer en jugadores del arbitro.");
   assert.equal(refereeAffiliate.isAffiliate, true);
   assert.equal(refereeAffiliate.originTeamName, "EQUIPO A SEGUNDA");
-  assert.equal(Number(refereeAffiliate.number), 21);
+  assert.equal(Number(refereeAffiliate.number), 29);
 
   const reportPayload = {
     homeGoals: 2,

@@ -27,6 +27,7 @@ import {
   resolveMatchEventDiscipline,
   saveMatchSheet,
   saveResult,
+  updatePlayer,
   updatePlayerInjury,
   updateTeamAffiliationPlayerNumber,
   updateLeagueMembership,
@@ -275,6 +276,17 @@ assert.equal(affiliationLeague.disciplineLinks.length, 1);
 assert.deepEqual(new Set(affiliationLeague.disciplineLinks[0].playerIds), new Set(["juan-guascuaro", "juan-fresno"]));
 const blockedCrossCompetitionMerge = mergeDuplicatePlayer(affiliationStore, "liga-afiliacion", { targetPlayerId: "juan-guascuaro", duplicatePlayerId: "juan-fresno" });
 assert.equal(getCurrentLeague(blockedCrossCompetitionMerge).players.some((player) => player.id === "juan-fresno"), true);
+affiliationStore = updatePlayer(affiliationStore, "liga-afiliacion", "juan-fresno", {
+  teamId: "fresno",
+  competitionId: "primera",
+  name: "#15 Juan Afiliado",
+  number: 15,
+  position: "Jugador",
+  status: "historical"
+});
+affiliationLeague = getCurrentLeague(affiliationStore);
+assert.equal(getEligiblePlayersForTeam(affiliationLeague, "fresno").some((player) => player.id === "juan-fresno"), false);
+assert.equal(getEligiblePlayersForTeam(affiliationLeague, "fresno").some((player) => player.id === "juan-guascuaro"), true);
 const primeraAffiliationStats = calculatePlayerStats(scopeLeagueToCompetition(affiliationLeague, "primera")).find((row) => row.player.id === "juan-fresno");
 const segundaAffiliationStats = calculatePlayerStats(scopeLeagueToCompetition(affiliationLeague, "segunda")).find((row) => row.player.id === "juan-guascuaro");
 assert.equal(primeraAffiliationStats.goals, 1);

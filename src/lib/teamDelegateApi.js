@@ -110,6 +110,18 @@ export async function updateTeamPortalPlayer(token, playerId, payload) {
   return parseResponse(response, "No se pudo actualizar el jugador");
 }
 
+export async function updateTeamPortalAffiliateNumber(token, playerId, payload) {
+  const response = await fetch(`${API_BASE_URL}/team-portal/affiliated-players/${playerId}/number`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo actualizar el numero del afiliado");
+}
+
 export async function updateTeamPortalLogo(token, payload) {
   const response = await fetch(`${API_BASE_URL}/team-portal/team-logo`, {
     method: "PATCH",

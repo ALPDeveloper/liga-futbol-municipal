@@ -9,6 +9,7 @@ import {
 export const YELLOW_SUSPENSION_LIMIT = 3;
 export const MAX_IMAGE_DATA_URL_LENGTH = 1_800_000;
 export const ACTIVE_SCHEDULE_MATCH_STATUSES = ["scheduled", "rescheduled", "advanced"];
+export const PLAYER_HISTORICAL_STATUS = "historical";
 
 const ALLOWED_IMAGE_DATA_URL_PATTERN = /^data:image\/(png|jpe?g|webp);base64,[a-z0-9+/=\s]+$/i;
 
@@ -87,6 +88,10 @@ function deriveVenuesFromMatches(matches = []) {
   }
 
   return [...venues.values()];
+}
+
+export function isPlayerHistoricalOnly(player) {
+  return (player?.status || "active") === PLAYER_HISTORICAL_STATUS;
 }
 
 export function defaultCompetitionForLeague(league) {
@@ -199,7 +204,8 @@ export function normalizeStore(data) {
           name: upperText(player.name),
           position: upperText(player.position || "Jugador"),
           photoUrl: sanitizeImageUrl(player.photoUrl),
-          photoAuthorized: player.photoAuthorized === true
+          photoAuthorized: player.photoAuthorized === true,
+          status: player.status === PLAYER_HISTORICAL_STATUS ? PLAYER_HISTORICAL_STATUS : "active"
         })),
         teamAffiliations: (league.teamAffiliations || []).map((affiliation) => ({
           ...affiliation,
@@ -454,7 +460,7 @@ export function getPlayerNumberForTeam(league, playerId, teamId) {
 export function getEligiblePlayersForTeam(league, teamId) {
   const sourceTeamIds = new Set(getTeamAffiliationsForTarget(league, teamId).map((affiliation) => affiliation.sourceTeamId));
   return (league.allPlayers || league.players || [])
-    .filter((player) => player.teamId === teamId || sourceTeamIds.has(player.teamId))
+    .filter((player) => !isPlayerHistoricalOnly(player) && (player.teamId === teamId || sourceTeamIds.has(player.teamId)))
     .sort((a, b) => (
       (a.teamId === teamId ? 0 : 1) - (b.teamId === teamId ? 0 : 1) ||
       Number(getPlayerNumberForTeam(league, a.id, teamId) || 999) - Number(getPlayerNumberForTeam(league, b.id, teamId) || 999) ||
@@ -900,7 +906,8 @@ export function calculateYellowCardDiscipline(league) {
     if (movement.movementType === "yellow") {
       const { event, match } = movement;
       const player = getPlayer(league, event.playerId);
-      if (!player || !involvesTeam(match, event.teamId) || !isPlayerEligibleForTeam(league, event.playerId, event.teamId)) continue;
+      const isHistoricalRecordedEvent = isPlayerHistoricalOnly(player) && involvesTeam(match, event.teamId);
+      if (!player || !involvesTeam(match, event.teamId) || (!isHistoricalRecordedEvent && !isPlayerEligibleForTeam(league, event.playerId, event.teamId))) continue;
 
       const state = discipline.getState(states, event.playerId, match.competitionId || player.competitionId || "");
       if (state.suspensionOrigin) continue;

@@ -91,6 +91,7 @@ import {
   updateMatchRosterPinData,
   updatePasswordData,
   updateTeamPortalPlayerData,
+  updateTeamPortalPlayerNumberData,
   upsertMatchRosterData,
   upsertMatchSessionData,
   upsertMatchTeamPinData,
@@ -117,7 +118,7 @@ import {
 } from "./security.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getPlayerNumberForTeam, getTeam, upperText } from "../src/lib/domain.js";
-import { addPlayer, deletePlayer, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer } from "../src/lib/actions.js";
+import { addPlayer, deletePlayer, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
 import {
   MATCH_CAPTURE_MODES,
   MATCH_REPORT_STATUSES,
@@ -691,6 +692,9 @@ async function buildTeamPortalPayload(userId) {
       number: getPlayerNumberForTeam(league, player.id, context.teamId),
       registeredNumber: player.number,
       position: player.position,
+      photoUrl: player.photoUrl || "",
+      photoAuthorized: player.photoAuthorized === true,
+      status: player.status || "active",
       teamId: player.teamId,
       originTeamName: originTeam?.name || "",
       isAffiliate: affiliate,
@@ -1103,17 +1107,18 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
           .filter((notice) => notice.status === "active" && notice.player?.id)
           .map((notice) => notice.player.id)
       );
-      const buildRosterPlayers = (players, roster, teamId) => {
+      const buildRosterPlayers = (players, roster, teamId, participation) => {
         const rosterEntries = (roster?.players || []).map((entry) => (typeof entry === "string" ? { playerId: entry } : entry));
         const rosterPlayerIds = new Set(rosterEntries.map((entry) => entry.playerId).filter(Boolean));
         const rosterNumberByPlayerId = new Map(rosterEntries.map((entry) => [entry.playerId, normalizeJerseyNumber(entry.jerseyNumber ?? entry.rosterNumber)]));
+        const participationNumberByPlayerId = new Map((participation?.players || []).map((entry) => [entry.playerId, normalizeJerseyNumber(entry.playerNumberSnapshot)]));
         const starterIds = new Set(roster?.starters || roster?.lineup?.starters || []);
         const substituteIds = new Set(roster?.substitutes || roster?.lineup?.substitutes || []);
         const source = players;
         return source.map((player) => ({
           id: player.id,
           name: player.name,
-          number: rosterNumberByPlayerId.get(player.id) || getPlayerNumberForTeam(league, player.id, teamId),
+          number: participationNumberByPlayerId.get(player.id) || rosterNumberByPlayerId.get(player.id) || getPlayerNumberForTeam(league, player.id, teamId),
           registeredNumber: player.number,
           position: player.position,
           teamId: player.teamId,
@@ -1164,8 +1169,8 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         awayTeamName: awayTeam?.name || "VISITANTE",
         homeTeamLogoUrl: homeTeam?.logoUrl || "",
         awayTeamLogoUrl: awayTeam?.logoUrl || "",
-        homePlayers: buildRosterPlayers(homeEligiblePlayers, homeRoster, match.homeTeamId),
-        awayPlayers: buildRosterPlayers(awayEligiblePlayers, awayRoster, match.awayTeamId),
+        homePlayers: buildRosterPlayers(homeEligiblePlayers, homeRoster, match.homeTeamId, homeParticipation),
+        awayPlayers: buildRosterPlayers(awayEligiblePlayers, awayRoster, match.awayTeamId, awayParticipation),
         homeParticipationSubmitted: Boolean(homeParticipation),
         awayParticipationSubmitted: Boolean(awayParticipation),
         homeParticipation: homeParticipation || null,
@@ -1820,7 +1825,8 @@ function getPlayerPayloadFromRequest(body) {
     number: body.number,
     position: body.position,
     photoUrl: body.photoUrl,
-    photoAuthorized: body.photoAuthorized === true || body.photoAuthorized === "true"
+    photoAuthorized: body.photoAuthorized === true || body.photoAuthorized === "true",
+    status: body.status === "historical" ? "historical" : "active"
   };
 }
 
@@ -3684,8 +3690,29 @@ app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, res
   }
   const context = await getTeamDelegateContextData(request.user.id);
   if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const player = league?.players?.find((item) => item.id === request.params.playerId);
+  if (!player || player.teamId !== context.teamId) {
+    return response.status(404).json({ error: "Jugador no encontrado en tu equipo." });
+  }
+
   if (!context.canManageRoster) {
-    return response.status(403).json({ error: "El registro de plantilla esta cerrado para tu equipo." });
+    await updateTeamPortalPlayerNumberData(player.id, {
+      teamId: context.teamId,
+      number: request.body.number
+    });
+    await logAudit({
+      user: request.user,
+      leagueId: context.leagueId,
+      action: "team_portal_player_number_update",
+      entityType: "player",
+      entityId: player.id,
+      detail: `Delegado actualizo numero de jugador en ${context.teamName}`
+    });
+    clearPublicCache();
+    return response.json(await buildTeamPortalPayload(request.user.id));
   }
 
   const payload = {
@@ -3698,12 +3725,6 @@ app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, res
   const nameCheck = validatePlayerFullName(payload.name);
   if (!nameCheck.valid) return response.status(400).json({ error: nameCheck.message });
 
-  const store = await getStoreData();
-  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
-  const player = league?.players?.find((item) => item.id === request.params.playerId);
-  if (!player || player.teamId !== context.teamId) {
-    return response.status(404).json({ error: "Jugador no encontrado en tu equipo." });
-  }
   const duplicate = league ? findDuplicatePlayer(league, payload, player.id) : null;
   if (duplicate) return response.status(409).json({ error: `Este jugador ya esta registrado como ${duplicate.name}.` });
 
@@ -3722,6 +3743,52 @@ app.patch("/api/team-portal/players/:playerId", requireAuth, async (request, res
   });
 
   clearPublicCache();
+  response.json(await buildTeamPortalPayload(request.user.id));
+});
+
+app.patch("/api/team-portal/affiliated-players/:playerId/number", requireAuth, async (request, response) => {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  const context = await getTeamDelegateContextData(request.user.id);
+  if (!context) return response.status(404).json({ error: "No tienes equipo asignado" });
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const player = league?.players?.find((item) => item.id === request.params.playerId);
+  if (!league || !player || player.teamId === context.teamId) {
+    return response.status(404).json({ error: "Jugador afiliado no encontrado." });
+  }
+  const affiliation = (league.teamAffiliations || []).find((item) => (
+    item.status !== "revoked" &&
+    item.status !== "inactive" &&
+    item.sourceTeamId === player.teamId &&
+    item.targetTeamId === context.teamId
+  ));
+  if (!affiliation) {
+    return response.status(403).json({ error: "Este jugador no pertenece a una afiliacion activa de tu equipo." });
+  }
+
+  const number = Number(request.body.number || 0);
+  if (!Number.isInteger(number) || number < 0 || number > 9999) {
+    return response.status(400).json({ error: "Numero invalido para el jugador afiliado." });
+  }
+
+  await importStoreData(updateTeamAffiliationPlayerNumber(store, league.id, affiliation.id, {
+    playerId: player.id,
+    number
+  }));
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.leagueId,
+    action: "team_portal_affiliate_number_update",
+    entityType: "player",
+    entityId: player.id,
+    detail: `Delegado actualizo numero afiliado ${player.name} en ${context.teamName}`
+  });
+
   response.json(await buildTeamPortalPayload(request.user.id));
 });
 
@@ -3847,7 +3914,7 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
   const playerById = new Map((league.players || []).map((player) => [player.id, player]));
   const rosterPlayers = requestedPlayerIds.map((playerId) => {
     const player = playerById.get(playerId);
-    const jerseyNumber = normalizeJerseyNumber(jerseyNumbers[playerId] ?? player?.number ?? "");
+    const jerseyNumber = normalizeJerseyNumber(jerseyNumbers[playerId] ?? getPlayerNumberForTeam(league, playerId, context.teamId));
     return { playerId, ...(jerseyNumber ? { jerseyNumber } : {}) };
   });
 
@@ -3919,6 +3986,7 @@ app.post("/api/team-portal/matches/:matchId/participation", requireAuth, async (
   const playerById = new Map(eligiblePlayers.map((player) => [player.id, player]));
   const invalidPlayerId = requestedPlayerIds.find((playerId) => !playerById.has(playerId));
   if (invalidPlayerId) return response.status(400).json({ error: "El reporte incluye un jugador que no pertenece a este equipo." });
+  const jerseyNumbers = request.body.jerseyNumbers && typeof request.body.jerseyNumbers === "object" ? request.body.jerseyNumbers : {};
 
   const participationResult = await createMatchParticipationData({
     id: `match-participation-${crypto.randomUUID()}`,
@@ -3929,10 +3997,11 @@ app.post("/api/team-portal/matches/:matchId/participation", requireAuth, async (
     submittedByUserId: request.user.id,
     players: requestedPlayerIds.map((playerId) => {
       const player = playerById.get(playerId);
+      const playerNumberSnapshot = normalizeJerseyNumber(jerseyNumbers[playerId] ?? getPlayerNumberForTeam(context.league, playerId, context.context.teamId));
       return {
         playerId,
         name: player?.name || "",
-        number: player?.number || "",
+        number: playerNumberSnapshot,
         photoUrl: player?.photoUrl || ""
       };
     }),

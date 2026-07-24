@@ -17609,6 +17609,30 @@ th {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
+.player-row.historical-player-row {
+  border-color: rgba(37, 99, 235, 0.28);
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.08), rgba(255, 255, 255, 0.94) 34%),
+    #f8fbff;
+}
+
+.player-row.historical-player-row::before {
+  content: "Solo historial";
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .squad-toolbar {
   display: grid;
   grid-template-columns: minmax(min(100%, 320px), 420px);
@@ -30624,6 +30648,20 @@ button.arbitration-metric-card {
 .delegate-player-edit-form select {
   min-height: 46px;
   border-radius: 12px;
+}
+
+.delegate-number-edit-note {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(53, 139, 255, 0.24);
+  border-radius: 14px;
+  color: rgba(226, 241, 255, 0.82);
+  background:
+    linear-gradient(135deg, rgba(53, 139, 255, 0.14), rgba(34, 231, 188, 0.06)),
+    rgba(5, 18, 31, 0.78);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .team-portal-page .delegate-player-edit-form .player-photo-uploader.compact {

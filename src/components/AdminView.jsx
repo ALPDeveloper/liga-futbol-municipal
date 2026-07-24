@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
 import { createBackup, downloadBackup, fetchBackups, verifyBackup } from "../lib/backupApi.js";
-import { MAX_IMAGE_DATA_URL_LENGTH, calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, scopeLeagueToCompetition } from "../lib/domain.js";
+import { MAX_IMAGE_DATA_URL_LENGTH, calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, scopeLeagueToCompetition } from "../lib/domain.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
@@ -23,6 +23,10 @@ const PLAYOFF_PHASE_OPTIONS = [
 ];
 
 const PLAYER_POSITION_OPTIONS = ["Arquero", "Defensor", "Mediocampista", "Delantero"];
+const PLAYER_STATUS_OPTIONS = [
+  { value: "active", label: "Activo" },
+  { value: "historical", label: "Solo historial" }
+];
 const ALLOWED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const IMAGE_UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp";
 const MAX_UPLOAD_SIZE_MB = Math.round((MAX_IMAGE_DATA_URL_LENGTH / 1024 / 1024) * 10) / 10;
@@ -4029,6 +4033,7 @@ function ManagementBoard({
   const [listSearch, setListSearch] = useState("");
   const [teamStatusFilter, setTeamStatusFilter] = useState("all");
   const [playerPositionFilter, setPlayerPositionFilter] = useState("all");
+  const [playerStatusFilter, setPlayerStatusFilter] = useState("all");
   const [matchListStatusFilter, setMatchListStatusFilter] = useState("active");
   const showingAllCompetitions = selectedCompetitionId === "all";
   const selectedCompetition = showingAllCompetitions ? null : getCompetition(league, selectedCompetitionId);
@@ -4050,11 +4055,14 @@ function ManagementBoard({
     return activeCompetitionLeague.players.filter((player) => {
       const team = getTeam(league, player.teamId);
       const position = getPlayerPositionOptionValue(player.position);
+      const status = player.status || "active";
       if (playerPositionFilter !== "all" && position !== playerPositionFilter) return false;
+      if (playerStatusFilter !== "all" && status !== playerStatusFilter) return false;
       if (!query) return true;
-      return normalizeAdminSearchTerm(`${player.number || ""} ${player.name} ${position} ${team?.name || ""}`).includes(query);
+      const statusLabel = PLAYER_STATUS_OPTIONS.find((item) => item.value === status)?.label || "Activo";
+      return normalizeAdminSearchTerm(`${player.number || ""} ${player.name} ${position} ${team?.name || ""} ${statusLabel}`).includes(query);
     });
-  }, [activeCompetitionLeague.players, league, listSearch, playerPositionFilter]);
+  }, [activeCompetitionLeague.players, league, listSearch, playerPositionFilter, playerStatusFilter]);
   const competitionMatches = useMemo(() => {
     const query = normalizeAdminSearchTerm(listSearch);
     return activeCompetitionLeague.matches.filter((match) => {
@@ -4293,12 +4301,20 @@ function ManagementBoard({
           </label>
         )}
         {activeList === "players" && (
-          <label>Posicion
-            <select value={playerPositionFilter} onChange={(event) => setPlayerPositionFilter(event.target.value)}>
-              <option value="all">Todas</option>
-              {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
-            </select>
-          </label>
+          <>
+            <label>Posicion
+              <select value={playerPositionFilter} onChange={(event) => setPlayerPositionFilter(event.target.value)}>
+                <option value="all">Todas</option>
+                {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
+              </select>
+            </label>
+            <label>Estatus
+              <select value={playerStatusFilter} onChange={(event) => setPlayerStatusFilter(event.target.value)}>
+                <option value="all">Todos</option>
+                {PLAYER_STATUS_OPTIONS.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+              </select>
+            </label>
+          </>
         )}
         {activeList === "matches" && (
           <label>Estado
@@ -4388,7 +4404,7 @@ function ManagementBoard({
                 <div className="editable-list">
                   {players.map((player) => (
                     <form
-                      className="editable-row player-row"
+                      className={`editable-row player-row ${isPlayerHistoricalOnly(player) ? "historical-player-row" : ""}`}
                       key={player.id}
                       onSubmit={(event) => {
                         event.preventDefault();
@@ -4401,6 +4417,9 @@ function ManagementBoard({
                       <input name="name" defaultValue={player.name} aria-label={`Jugador ${player.name}`} required pattern=".*\S+\s+\S+.*" title="Registra nombre(s) y apellido(s)" />
                       <input name="number" defaultValue={player.number} aria-label={`Numero de ${player.name}`} type="number" min="0" max="9999" />
                       <PlayerPositionSelect name="position" defaultValue={getPlayerPositionOptionValue(player.position)} ariaLabel={`Posicion de ${player.name}`} />
+                      <select name="status" defaultValue={player.status || "active"} aria-label={`Estatus de ${player.name}`}>
+                        {PLAYER_STATUS_OPTIONS.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                      </select>
                       <PlayerPhotoUploader
                         compact
                         defaultAuthorized={player.photoAuthorized === true}

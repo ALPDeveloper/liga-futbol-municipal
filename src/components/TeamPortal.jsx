@@ -9,6 +9,7 @@ import {
   fetchTeamPortal,
   signTeamMatchReport,
   submitTeamMatchParticipation,
+  updateTeamPortalAffiliateNumber,
   updateTeamPortalLogo,
   updateTeamPortalPlayer
 } from "../lib/teamDelegateApi.js";
@@ -426,15 +427,20 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const [selectedMatchId, setSelectedMatchId] = useState("");
   const [signingMatchId, setSigningMatchId] = useState("");
   const canManageRoster = Boolean(context?.canManageRoster);
+  const rosterPlayers = useMemo(() => (
+    eligiblePlayers.length
+      ? eligiblePlayers
+      : players.map((player) => ({ ...player, isAffiliate: false, originTeamName: context?.teamName || "" }))
+  ), [context?.teamName, eligiblePlayers, players]);
   const filteredPlayers = useMemo(() => {
     const query = normalizeSearch(playerQuery);
-    return players.filter((player) => {
-      const matchesQuery = !query || normalizeSearch(`${player.name} ${player.number || ""}`).includes(query);
+    return rosterPlayers.filter((player) => {
+      const matchesQuery = !query || normalizeSearch(`${player.name} ${player.number || ""} ${player.originTeamName || ""} ${player.isAffiliate ? "afiliado" : "propio"}`).includes(query);
       const playerPosition = getPlayerPositionOptionValue(player.position);
       const matchesPosition = !positionFilter || playerPosition === positionFilter;
       return matchesQuery && matchesPosition;
     });
-  }, [playerQuery, players, positionFilter]);
+  }, [playerQuery, positionFilter, rosterPlayers]);
   const visibleRosterPlayers = useMemo(() => {
     return [...filteredPlayers].sort((a, b) => {
       const numberA = Number(a.number || 9999);
@@ -474,8 +480,8 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
     return [...groups.entries()].map(([date, groupMatches]) => ({ date, matches: groupMatches }));
   }, [visibleMatchItems]);
   const selectedEditingPlayer = useMemo(
-    () => players.find((player) => player.id === editingPlayerId) || null,
-    [editingPlayerId, players]
+    () => rosterPlayers.find((player) => player.id === editingPlayerId) || null,
+    [editingPlayerId, rosterPlayers]
   );
 
   useEffect(() => {
@@ -579,26 +585,29 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
 
   async function submitPlayerEdit(event, player) {
     event.preventDefault();
-    if (!context?.canManageRoster || busyPlayerId) return;
+    if (busyPlayerId) return;
 
     const payload = getFormPayload(event.currentTarget);
     setBusyPlayerId(player.id);
-    setNotice("Actualizando jugador...");
+    setNotice(player.isAffiliate || !context?.canManageRoster ? "Actualizando numero..." : "Actualizando jugador...");
     setError("");
 
     try {
-      const photoPayload = await buildImageUploadPayload(payload, player.photoUrl || "", authToken, context.leagueId, "player-photos");
-      const response = await updateTeamPortalPlayer(authToken, player.id, {
-        name: payload.name,
-        number: payload.number,
-        position: payload.position,
-        ...photoPayload
-      });
+      const response = player.isAffiliate
+        ? await updateTeamPortalAffiliateNumber(authToken, player.id, { number: payload.number })
+        : !context?.canManageRoster
+          ? await updateTeamPortalPlayer(authToken, player.id, { number: payload.number })
+          : await updateTeamPortalPlayer(authToken, player.id, {
+              name: payload.name,
+              number: payload.number,
+              position: payload.position,
+              ...(await buildImageUploadPayload(payload, player.photoUrl || "", authToken, context.leagueId, "player-photos"))
+            });
       applyPortalPayload(response);
       writeTeamPortalCache(currentUser?.id, response);
       setEditingPlayerId("");
       setActiveView("roster");
-      setNotice("Jugador actualizado correctamente.");
+      setNotice(player.isAffiliate ? "Numero de afiliado actualizado correctamente." : "Jugador actualizado correctamente.");
     } catch (saveError) {
       setNotice("");
       setError(saveError.message || "No se pudo actualizar el jugador.");
@@ -656,6 +665,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
       const response = await submitTeamMatchParticipation(authToken, match.id, {
         playerIds: draft.playerIds,
         captainPlayerId: draft.captainPlayerId,
+        jerseyNumbers: draft.jerseyNumbers || {},
         notes: draft.notes || ""
       });
       applyPortalPayload(response);
@@ -715,8 +725,10 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const openRosterMatches = matches.filter((match) => !match.participationSubmitted).length;
   const positionCounts = PLAYER_POSITION_OPTIONS.map((position) => ({
     position,
-    count: players.filter((player) => getPlayerPositionOptionValue(player.position) === position).length
+    count: rosterPlayers.filter((player) => getPlayerPositionOptionValue(player.position) === position).length
   }));
+  const ownRosterCount = rosterPlayers.filter((player) => !player.isAffiliate).length;
+  const affiliateRosterCount = rosterPlayers.filter((player) => player.isAffiliate).length;
   const nextMatchStatus = getDelegateMatchStatus(nextMatch);
   const activeMatch = selectedMatch || nextMatch;
   const activeMatchStatus = getDelegateMatchStatus(activeMatch);
@@ -753,6 +765,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
         return !blockedBySuspension && !blockedByPlayoff;
       })
     : [];
+  const selectedEditingPlayerCanEditFull = Boolean(selectedEditingPlayer && !selectedEditingPlayer.isAffiliate && canManageRoster);
   const navItems = [
     { id: "home", label: "Inicio", icon: "home" },
     { id: "roster", label: "Plantilla", icon: "teams" },
@@ -1334,8 +1347,8 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                 </span>
                 <div>
                   <span>Plantilla del equipo</span>
-                  <strong>{players.length} jugadores</strong>
-                  <small>{canManageRoster ? "Registro abierto sin limite de integrantes." : "Registro cerrado por la liga."}</small>
+                  <strong>{rosterPlayers.length} jugadores</strong>
+                  <small>{canManageRoster ? "Registro abierto sin limite de integrantes." : "Registro cerrado. Numeros disponibles para edicion."}</small>
                 </div>
                 <button
                   type="button"
@@ -1354,7 +1367,9 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                 </button>
               </section>
               <div className="delegate-roster-metrics">
-                <span><b>{players.length}</b> Total</span>
+                <span><b>{rosterPlayers.length}</b> Total</span>
+                <span><b>{ownRosterCount}</b> Propios</span>
+                <span><b>{affiliateRosterCount}</b> Afiliados</span>
                 {positionCounts.map((item) => (
                   <span key={item.position}><b>{item.count}</b> {PLAYER_POSITION_LABELS[item.position]}</span>
                 ))}
@@ -1405,15 +1420,14 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       <b className="delegate-player-number">{player.number || "-"}</b>
                       <div>
                         <strong>{player.name}</strong>
-                        <small>{getPlayerPositionOptionValue(player.position).toUpperCase()}</small>
+                        <small>{player.isAffiliate ? `AFILIADO | ORIGEN: ${player.originTeamName || "EQUIPO ORIGEN"}` : getPlayerPositionOptionValue(player.position).toUpperCase()}</small>
                         <PlayoffProgress eligibility={player.playoffEligibility} />
                       </div>
                       <span className={`delegate-player-status ${playerStatus.className}`}><i />{playerStatus.label}</span>
                       <button
                         className="delegate-player-edit-button"
                         type="button"
-                        disabled={!context.canManageRoster}
-                        aria-label={`${context.canManageRoster ? "Editar" : "Registro cerrado"} ${player.name}`}
+                        aria-label={`${player.isAffiliate || !context.canManageRoster ? "Editar numero" : "Editar"} ${player.name}`}
                         onClick={() => {
                           setEditingPlayerId(player.id);
                           setActiveView("player");
@@ -1424,8 +1438,8 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                     </article>
                   );
                 })}
-                {!players.length && <p className="empty">Aun no hay jugadores registrados en este equipo.</p>}
-                {players.length > 0 && !filteredPlayers.length && <p className="empty">No hay jugadores con esos filtros.</p>}
+                {!rosterPlayers.length && <p className="empty">Aun no hay jugadores registrados o afiliados en este equipo.</p>}
+                {rosterPlayers.length > 0 && !filteredPlayers.length && <p className="empty">No hay jugadores con esos filtros.</p>}
               </div>
             </div>
           )}
@@ -1486,34 +1500,51 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       <span>{getPlayerPhotoInitials(selectedEditingPlayer.name)}</span>
                     </span>
                     <div>
-                      <span>Ficha de jugador</span>
+                      <span>{selectedEditingPlayer.isAffiliate ? "Jugador afiliado" : "Ficha de jugador"}</span>
                       <strong>{selectedEditingPlayer.name}</strong>
-                      <small>#{selectedEditingPlayer.number || "-"} | {getPlayerPositionOptionValue(selectedEditingPlayer.position)}</small>
+                      <small>
+                        #{selectedEditingPlayer.number || "-"} | {selectedEditingPlayer.isAffiliate
+                          ? `Origen: ${selectedEditingPlayer.originTeamName || "Equipo afiliado"}`
+                          : getPlayerPositionOptionValue(selectedEditingPlayer.position)}
+                      </small>
                     </div>
                   </section>
                   <div className="delegate-player-editor-stats">
                     <span><small>Numero</small><strong>#{selectedEditingPlayer.number || "-"}</strong></span>
-                    <span><small>Posicion</small><strong>{getPlayerPositionOptionValue(selectedEditingPlayer.position)}</strong></span>
-                    <span><small>Foto</small><strong>{selectedEditingPlayer.photoAuthorized && selectedEditingPlayer.photoUrl ? "Activa" : "Pendiente"}</strong></span>
+                    <span><small>Tipo</small><strong>{selectedEditingPlayer.isAffiliate ? "Afiliado" : "Propio"}</strong></span>
+                    <span><small>Edicion</small><strong>{selectedEditingPlayerCanEditFull ? "Completa" : "Numero"}</strong></span>
                   </div>
                   <form className="delegate-player-edit-form" onSubmit={(event) => submitPlayerEdit(event, selectedEditingPlayer)}>
-                    <label>Nombre completo
-                      <input name="name" required pattern=".*\S+\s+\S+.*" defaultValue={selectedEditingPlayer.name} title="Registra nombre(s) y apellido(s)" />
-                    </label>
+                    {selectedEditingPlayerCanEditFull && (
+                      <label>Nombre completo
+                        <input name="name" required pattern=".*\S+\s+\S+.*" defaultValue={selectedEditingPlayer.name} title="Registra nombre(s) y apellido(s)" />
+                      </label>
+                    )}
                     <div className="delegate-player-edit-grid">
                       <label>Numero
                         <input name="number" type="number" min="0" max="9999" defaultValue={selectedEditingPlayer.number || ""} />
                       </label>
-                      <label>Posicion
-                        <select name="position" defaultValue={getPlayerPositionOptionValue(selectedEditingPlayer.position)}>
-                          {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
-                        </select>
-                      </label>
+                      {selectedEditingPlayerCanEditFull && (
+                        <label>Posicion
+                          <select name="position" defaultValue={getPlayerPositionOptionValue(selectedEditingPlayer.position)}>
+                            {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
+                          </select>
+                        </label>
+                      )}
                     </div>
-                    <PlayerPhotoUploader compact defaultAuthorized={selectedEditingPlayer.photoAuthorized === true} existingPhotoUrl={selectedEditingPlayer.photoUrl || ""} playerName={selectedEditingPlayer.name} />
+                    {!selectedEditingPlayerCanEditFull && (
+                      <p className="delegate-number-edit-note">
+                        {selectedEditingPlayer.isAffiliate
+                          ? "Solo puedes ajustar el numero con el que este afiliado aparece en tu equipo. Nombre, posicion y foto pertenecen al equipo origen."
+                          : "El registro esta cerrado. Por ahora solo puedes ajustar el numero del jugador."}
+                      </p>
+                    )}
+                    {selectedEditingPlayerCanEditFull && (
+                      <PlayerPhotoUploader compact defaultAuthorized={selectedEditingPlayer.photoAuthorized === true} existingPhotoUrl={selectedEditingPlayer.photoUrl || ""} playerName={selectedEditingPlayer.name} />
+                    )}
                     <div className="delegate-player-edit-actions">
                       <button className="portal-primary-action" type="submit" disabled={busyPlayerId === selectedEditingPlayer.id}>
-                        {busyPlayerId === selectedEditingPlayer.id ? "Guardando..." : "Guardar cambios"}
+                        {busyPlayerId === selectedEditingPlayer.id ? "Guardando..." : selectedEditingPlayerCanEditFull ? "Guardar cambios" : "Guardar numero"}
                       </button>
                       <button type="button" onClick={() => {
                         setEditingPlayerId("");
