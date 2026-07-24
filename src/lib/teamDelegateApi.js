@@ -134,6 +134,18 @@ export async function submitTeamMatchRoster(token, matchId, payload) {
   return parseResponse(response, "No se pudo enviar la convocatoria");
 }
 
+export async function submitTeamMatchParticipation(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/team-portal/matches/${matchId}/participation`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo enviar participantes");
+}
+
 export async function revealTeamMatchPin(token, matchId, payload) {
   const response = await fetch(`${API_BASE_URL}/team-portal/matches/${matchId}/pin/reveal`, {
     method: "POST",

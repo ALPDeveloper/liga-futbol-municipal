@@ -259,13 +259,22 @@ affiliationStore = saveMatchSheet(affiliationStore, "liga-afiliacion", {
     { type: "yellow", playerId: "juan-fresno", teamId: "fresno", minute: 50 }
   ]
 });
-affiliationStore = mergeDuplicatePlayer(affiliationStore, "liga-afiliacion", { targetPlayerId: "juan-guascuaro", duplicatePlayerId: "juan-fresno" });
+affiliationStore = addDisciplineLink(affiliationStore, "liga-afiliacion", {
+  playerId: "juan-guascuaro",
+  linkedPlayerId: "juan-fresno",
+  notes: "Misma persona, historial separado por categoria"
+});
 affiliationLeague = getCurrentLeague(affiliationStore);
-assert.equal(affiliationLeague.players.some((player) => player.id === "juan-fresno"), false);
-assert.equal(getPlayerNumberForTeam(affiliationLeague, "juan-guascuaro", "fresno"), 15);
-assert.equal(affiliationLeague.matches.find((match) => match.id === "aff-primera").events[0].playerId, "juan-guascuaro");
+assert.equal(affiliationLeague.players.some((player) => player.id === "juan-fresno"), true);
+assert.equal(getPlayerNumberForTeam(affiliationLeague, "juan-guascuaro", "fresno"), 14);
+assert.equal(affiliationLeague.matches.find((match) => match.id === "aff-segunda").events[0].playerId, "juan-guascuaro");
+assert.equal(affiliationLeague.matches.find((match) => match.id === "aff-primera").events[0].playerId, "juan-fresno");
 assert.equal(affiliationLeague.matches.find((match) => match.id === "aff-primera").events[0].teamId, "fresno");
-const primeraAffiliationStats = calculatePlayerStats(scopeLeagueToCompetition(affiliationLeague, "primera")).find((row) => row.player.id === "juan-guascuaro");
+assert.equal(affiliationLeague.disciplineLinks.length, 1);
+assert.deepEqual(new Set(affiliationLeague.disciplineLinks[0].playerIds), new Set(["juan-guascuaro", "juan-fresno"]));
+const blockedCrossCompetitionMerge = mergeDuplicatePlayer(affiliationStore, "liga-afiliacion", { targetPlayerId: "juan-guascuaro", duplicatePlayerId: "juan-fresno" });
+assert.equal(getCurrentLeague(blockedCrossCompetitionMerge).players.some((player) => player.id === "juan-fresno"), true);
+const primeraAffiliationStats = calculatePlayerStats(scopeLeagueToCompetition(affiliationLeague, "primera")).find((row) => row.player.id === "juan-fresno");
 const segundaAffiliationStats = calculatePlayerStats(scopeLeagueToCompetition(affiliationLeague, "segunda")).find((row) => row.player.id === "juan-guascuaro");
 assert.equal(primeraAffiliationStats.goals, 1);
 assert.equal(primeraAffiliationStats.team.id, "fresno");
@@ -273,12 +282,16 @@ assert.equal(segundaAffiliationStats.goals, 1);
 assert.equal(segundaAffiliationStats.team.id, "guascuaro");
 const affiliationBreakdown = getPlayerSeasonBreakdown(affiliationLeague, "juan-guascuaro");
 assert.equal(affiliationBreakdown.hasAffiliation, true);
-assert.equal(affiliationBreakdown.totals.goals, 2);
-assert.equal(affiliationBreakdown.totals.yellowCards, 3);
+assert.equal(affiliationBreakdown.totals.goals, 1);
+assert.equal(affiliationBreakdown.totals.yellowCards, 2);
 let affiliationDisciplineRows = calculateYellowCardDiscipline(affiliationLeague);
 assert.equal(affiliationDisciplineRows.length, 2);
-assert.equal(affiliationDisciplineRows.find((row) => row.competition?.id === "segunda").status, "warning");
-assert.equal(affiliationDisciplineRows.find((row) => row.competition?.id === "primera").status, "tracking");
+const linkedSegundaRow = affiliationDisciplineRows.find((row) => row.competition?.id === "segunda");
+const linkedPrimeraRow = affiliationDisciplineRows.find((row) => row.competition?.id === "primera");
+assert.equal(linkedSegundaRow.status, "warning");
+assert.equal(linkedPrimeraRow.status, "tracking");
+assert.equal(linkedSegundaRow.player.id, "juan-guascuaro");
+assert.equal(linkedPrimeraRow.player.id, "juan-fresno");
 affiliationStore = addDisciplineAdjustment(affiliationStore, "liga-afiliacion", {
   playerId: "juan-guascuaro",
   competitionId: "segunda",
@@ -1139,6 +1152,35 @@ assert.equal(league.sanctions.some((sanction) => sanction.playerId === "p5"), fa
 assert.equal(league.matches.find((match) => match.id === "m4").events.some((event) => event.playerId === "p5"), false);
 
 store = updateLeagueRules(store, league.id, { ...league.rules, minimumPlayoffAppearances: 3 });
+league = getCurrentLeague(store);
+let legacyRosterEligibility = calculatePlayerAppearanceEligibility({
+  ...league,
+  matchRosters: [
+    {
+      id: "legacy-roster-smoke",
+      matchId: "m1",
+      teamId: "halcones",
+      status: "submitted",
+      players: [{ playerId: "p1" }]
+    }
+  ],
+  matchParticipations: []
+}).get("p1");
+assert.equal(legacyRosterEligibility.officialAppearances, 0);
+let participationEligibility = calculatePlayerAppearanceEligibility({
+  ...league,
+  matchParticipations: [
+    {
+      id: "participation-smoke",
+      matchId: "m1",
+      teamId: "halcones",
+      status: "submitted",
+      active: true,
+      players: [{ playerId: "p1" }]
+    }
+  ]
+}).get("p1");
+assert.equal(participationEligibility.officialAppearances, 1);
 store = addAppearanceAdjustment(store, league.id, { playerId: "p1", value: 2, reason: "Correccion de asistencia" });
 league = getCurrentLeague(store);
 let appearanceEligibility = calculatePlayerAppearanceEligibility(league).get("p1");

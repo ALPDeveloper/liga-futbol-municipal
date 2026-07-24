@@ -13744,8 +13744,28 @@ th {
 }
 
 .team-portal-page.delegate-view-lineup .team-match-player-grid strong {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
   color: #fff;
   font-size: 0.82rem;
+}
+
+.delegate-affiliate-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 7px;
+  border: 1px solid rgba(47, 140, 255, 0.38);
+  border-radius: 999px;
+  color: #74b9ff;
+  background: rgba(47, 140, 255, 0.13);
+  font-size: 0.56rem;
+  font-style: normal;
+  font-weight: 1000;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .team-portal-page.delegate-view-lineup .team-match-player-grid small {
@@ -16395,7 +16415,7 @@ th {
 
 .affiliation-hero-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -16525,6 +16545,21 @@ th {
   padding: 14px;
 }
 
+.affiliation-workspace .merge-risk-card {
+  grid-column: 2;
+}
+
+.merge-risk-card {
+  border-color: rgba(239, 63, 69, 0.22);
+  background:
+    radial-gradient(circle at 92% 0%, rgba(239, 63, 69, 0.08), transparent 30%),
+    rgba(255, 255, 255, 0.05);
+}
+
+.identity-link-form textarea {
+  min-height: 74px;
+}
+
 .admin-affiliations-panel .duplicate-merge-form {
   grid-template-columns: 1fr;
   gap: 10px;
@@ -16535,6 +16570,51 @@ th {
 
 .admin-affiliations-panel .duplicate-merge-form button {
   min-height: 42px;
+}
+
+.identity-links-section {
+  border-color: rgba(35, 180, 255, 0.18);
+}
+
+.identity-link-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.identity-link-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.identity-link-list span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 13px;
+  background: rgba(2, 10, 17, 0.38);
+}
+
+.identity-link-list strong,
+.identity-link-list small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.identity-link-list strong {
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.identity-link-list small {
+  color: rgba(220, 232, 240, 0.64);
+  font-size: 0.64rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .affiliation-active-section {
@@ -16675,9 +16755,13 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .affiliation-workspace .merge-risk-card {
+    grid-column: auto;
+  }
+
   .affiliation-hero-metrics,
   .affiliation-card-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-affiliations-panel .affiliation-card > .danger {
@@ -16699,7 +16783,8 @@ th {
     border-radius: 15px;
   }
 
-  .affiliation-hero-metrics {
+  .affiliation-hero-metrics,
+  .identity-link-card {
     grid-template-columns: 1fr;
   }
 

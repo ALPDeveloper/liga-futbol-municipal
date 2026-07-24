@@ -1,5 +1,5 @@
 import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
-import { ACTIVE_SCHEDULE_MATCH_STATUSES, calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, isPlayerEligibleForTeam, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
+import { ACTIVE_SCHEDULE_MATCH_STATUSES, calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, getTeam, isPlayerEligibleForTeam, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
 import { MATCH_CAPTURE_MODES, normalizeCaptureMode } from "./matchWorkflow.js";
 
 function isActiveScheduleMatch(match) {
@@ -283,6 +283,10 @@ export function resolveMatchEventDiscipline(store, leagueId, payload) {
 }
 
 export function addDisciplineLink(store, leagueId, payload) {
+  return linkPlayerIdentity(store, leagueId, payload);
+}
+
+export function linkPlayerIdentity(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => {
     const playerIds = [...new Set([payload.playerId, payload.linkedPlayerId].filter(Boolean))];
     if (playerIds.length < 2 || playerIds.some((playerId) => !getPlayer(league, playerId))) return league;
@@ -463,6 +467,9 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
     const targetPlayer = getPlayer(league, payload.targetPlayerId);
     const duplicatePlayer = getPlayer(league, payload.duplicatePlayerId);
     if (!targetPlayer || !duplicatePlayer || targetPlayer.id === duplicatePlayer.id) return league;
+    const targetCompetitionId = targetPlayer.competitionId || getTeam(league, targetPlayer.teamId)?.competitionId || getDefaultCompetitionId(league);
+    const duplicateCompetitionId = duplicatePlayer.competitionId || getTeam(league, duplicatePlayer.teamId)?.competitionId || getDefaultCompetitionId(league);
+    if (targetCompetitionId !== duplicateCompetitionId) return league;
 
     const replacePlayerId = (playerId) => (playerId === duplicatePlayer.id ? targetPlayer.id : playerId);
     const affiliationForDuplicateTeam = (league.teamAffiliations || []).find((affiliation) => (

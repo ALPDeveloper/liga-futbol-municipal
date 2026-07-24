@@ -307,6 +307,40 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS lineup_json JSONB NOT NULL DEFAULT '{}'::jsonb");
   await pool.query("ALTER TABLE IF EXISTS match_rosters ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1");
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_participations (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'submitted',
+      captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      locked_at TIMESTAMPTZ,
+      corrected_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      corrected_at TIMESTAMPTZ,
+      correction_reason TEXT,
+      source TEXT NOT NULL DEFAULT 'delegate_portal',
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      active BOOLEAN NOT NULL DEFAULT true,
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS match_participation_players (
+      id TEXT PRIMARY KEY,
+      match_participation_id TEXT NOT NULL REFERENCES match_participations(id) ON DELETE CASCADE,
+      player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      player_name_snapshot TEXT NOT NULL,
+      player_number_snapshot TEXT,
+      player_photo_snapshot TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(match_participation_id, player_id)
+    )
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS match_team_pins (
       id TEXT PRIMARY KEY,
       league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
@@ -404,6 +438,10 @@ async function runPostgresMigrations(pool) {
       UNIQUE(report_id, team_id)
     )
   `);
+  await pool.query("ALTER TABLE IF EXISTS match_report_signatures ADD COLUMN IF NOT EXISTS act_version INTEGER");
+  await pool.query("ALTER TABLE IF EXISTS match_report_signatures ADD COLUMN IF NOT EXISTS act_hash TEXT");
+  await pool.query("ALTER TABLE IF EXISTS match_report_signatures ADD COLUMN IF NOT EXISTS act_snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb");
+  await pool.query("ALTER TABLE IF EXISTS match_report_signatures ADD COLUMN IF NOT EXISTS invalidated_at TIMESTAMPTZ");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS match_report_disputes (
       id TEXT PRIMARY KEY,
@@ -472,6 +510,9 @@ async function runPostgresMigrations(pool) {
   await pool.query("CREATE INDEX IF NOT EXISTS idx_players_league_team ON players(league_id, team_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_matches_league_competition_round ON matches(league_id, competition_id, round)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_match_events_match ON match_events(match_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_participations_match_team ON match_participations(match_id, team_id)");
+  await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_match_participations_active_team ON match_participations(match_id, team_id) WHERE active = true");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_match_participation_players_report ON match_participation_players(match_participation_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_match_team_pins_match ON match_team_pins(match_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_match_sessions_match ON match_sessions(match_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_match_session_operations_match ON match_session_operations(match_id)");
@@ -571,7 +612,8 @@ export async function getPostgresStore() {
       appearanceAdjustmentRows,
       sponsorRows,
       matchRows,
-      rosterRows
+      rosterRows,
+      participationRows
     ] = await Promise.all([
       pool.query("SELECT * FROM league_identities WHERE league_id = $1", [leagueRow.id]),
       pool.query("SELECT * FROM league_rules WHERE league_id = $1", [leagueRow.id]),
@@ -589,7 +631,8 @@ export async function getPostgresStore() {
       pool.query("SELECT * FROM player_appearance_adjustments WHERE league_id = $1 ORDER BY date DESC NULLS LAST, id DESC", [leagueRow.id]),
       pool.query("SELECT * FROM sponsors WHERE league_id = $1 ORDER BY sort_order, name", [leagueRow.id]),
       pool.query("SELECT * FROM matches WHERE league_id = $1 ORDER BY round, date, time", [leagueRow.id]),
-      pool.query("SELECT * FROM match_rosters WHERE league_id = $1 ORDER BY submitted_at DESC", [leagueRow.id])
+      pool.query("SELECT * FROM match_rosters WHERE league_id = $1 ORDER BY submitted_at DESC", [leagueRow.id]),
+      pool.query("SELECT * FROM match_participations WHERE league_id = $1 ORDER BY submitted_at DESC, version DESC", [leagueRow.id])
     ]);
     const identity = identityRows.rows[0] || {};
     const rules = ruleRows.rows[0] || {};
@@ -805,6 +848,42 @@ export async function getPostgresStore() {
       updatedAt: rowDate(row, "updated_at"),
       version: row.version || 1
     }));
+    const participationIds = participationRows.rows.map((row) => row.id);
+    const participationPlayerRows = participationIds.length
+      ? (await pool.query("SELECT * FROM match_participation_players WHERE match_participation_id = ANY($1::text[]) ORDER BY created_at ASC", [participationIds])).rows
+      : [];
+    const participationPlayersById = new Map();
+    for (const row of participationPlayerRows) {
+      if (!participationPlayersById.has(row.match_participation_id)) participationPlayersById.set(row.match_participation_id, []);
+      participationPlayersById.get(row.match_participation_id).push({
+        id: row.id,
+        playerId: row.player_id,
+        playerNameSnapshot: row.player_name_snapshot || "",
+        playerNumberSnapshot: row.player_number_snapshot || "",
+        playerPhotoSnapshot: row.player_photo_snapshot || "",
+        createdAt: toDateTimeValue(row.created_at) || ""
+      });
+    }
+    const matchParticipations = participationRows.rows.map((row) => ({
+      id: row.id,
+      matchId: row.match_id,
+      teamId: row.team_id,
+      status: row.status || "submitted",
+      captainPlayerId: row.captain_player_id || "",
+      submittedByUserId: row.submitted_by_user_id || "",
+      submittedAt: toDateTimeValue(row.submitted_at) || "",
+      lockedAt: toDateTimeValue(row.locked_at) || "",
+      correctedByUserId: row.corrected_by_user_id || "",
+      correctedAt: toDateTimeValue(row.corrected_at) || "",
+      correctionReason: row.correction_reason || "",
+      source: row.source || "delegate_portal",
+      metadata: row.metadata_json || {},
+      active: row.active !== false,
+      version: row.version || 1,
+      createdAt: toDateTimeValue(row.created_at) || "",
+      updatedAt: toDateTimeValue(row.updated_at) || "",
+      players: participationPlayersById.get(row.id) || []
+    }));
 
     return {
       id: leagueRow.id,
@@ -853,7 +932,8 @@ export async function getPostgresStore() {
       appearanceAdjustments,
       sponsors,
       matches,
-      matchRosters
+      matchRosters,
+      matchParticipations
     };
   }));
 
@@ -926,6 +1006,8 @@ export async function importPostgresStore(store) {
     const preservedMatchReportSignatures = (await query(client, "SELECT * FROM match_report_signatures")).rows;
     const preservedMatchReportDisputes = (await query(client, "SELECT * FROM match_report_disputes")).rows;
     const preservedMatchSyncQueue = (await query(client, "SELECT * FROM match_sync_queue")).rows;
+    const preservedMatchParticipations = (await query(client, "SELECT * FROM match_participations")).rows;
+    const preservedMatchParticipationPlayers = (await query(client, "SELECT * FROM match_participation_players")).rows;
     const nextLeagueIds = new Set(normalized.leagues.map((league) => league.id));
     const nextTeamIds = new Set(normalized.leagues.flatMap((league) => (league.teams || []).map((team) => team.id)));
     const removedLeagueIds = new Set(
@@ -949,6 +1031,8 @@ export async function importPostgresStore(store) {
     }
 
     for (const table of [
+      "match_participation_players",
+      "match_participations",
       "match_events",
       "match_rosters",
       "discipline_resets",
@@ -1201,6 +1285,47 @@ export async function importPostgresStore(store) {
         roster.updatedAt || roster.submittedAt || new Date().toISOString(),
         roster.version || 1
       ]));
+
+      await insertRows(client, "match_participations", [
+        "id", "league_id", "match_id", "team_id", "status", "captain_player_id",
+        "submitted_by_user_id", "submitted_at", "locked_at", "corrected_by_user_id",
+        "corrected_at", "correction_reason", "source", "metadata_json", "active",
+        "version", "created_at", "updated_at"
+      ], (league.matchParticipations || []).map((participation) => [
+        participation.id,
+        league.id,
+        participation.matchId,
+        participation.teamId,
+        participation.status || "submitted",
+        participation.captainPlayerId || null,
+        participation.submittedByUserId || null,
+        participation.submittedAt || new Date().toISOString(),
+        participation.lockedAt || participation.submittedAt || new Date().toISOString(),
+        participation.correctedByUserId || null,
+        participation.correctedAt || null,
+        participation.correctionReason || "",
+        participation.source || "delegate_portal",
+        JSON.stringify(participation.metadata || {}),
+        participation.active !== false,
+        participation.version || 1,
+        participation.createdAt || participation.submittedAt || new Date().toISOString(),
+        participation.updatedAt || participation.submittedAt || new Date().toISOString()
+      ]));
+
+      await insertRows(client, "match_participation_players", [
+        "id", "match_participation_id", "player_id", "player_name_snapshot",
+        "player_number_snapshot", "player_photo_snapshot", "created_at"
+      ], (league.matchParticipations || []).flatMap((participation) => (
+        (participation.players || []).map((player) => [
+          player.id || `match-participation-player-${participation.id}-${player.playerId}`,
+          participation.id,
+          player.playerId,
+          player.playerNameSnapshot || "",
+          player.playerNumberSnapshot || "",
+          player.playerPhotoSnapshot || "",
+          player.createdAt || participation.submittedAt || new Date().toISOString()
+        ])
+      )));
     }
 
     const userIds = new Set((await query(client, "SELECT id FROM users")).rows.map((user) => user.id));
@@ -1208,8 +1333,56 @@ export async function importPostgresStore(store) {
     const teamIds = new Set((await query(client, "SELECT id FROM teams")).rows.map((team) => team.id));
     const playerIds = new Set((await query(client, "SELECT id FROM players")).rows.map((player) => player.id));
     const rosterIds = new Set((await query(client, "SELECT id FROM match_rosters")).rows.map((roster) => roster.id));
+    const participationIds = new Set((await query(client, "SELECT id FROM match_participations")).rows.map((participation) => participation.id));
     const restoredSessionIds = new Set();
     const restoredReportIds = new Set();
+
+    await insertRows(client, "match_participations", [
+      "id", "league_id", "match_id", "team_id", "status", "captain_player_id",
+      "submitted_by_user_id", "submitted_at", "locked_at", "corrected_by_user_id",
+      "corrected_at", "correction_reason", "source", "metadata_json", "active",
+      "version", "created_at", "updated_at"
+    ], preservedMatchParticipations
+      .filter((participation) => nextLeagueIds.has(participation.league_id) && matchIds.has(participation.match_id) && teamIds.has(participation.team_id))
+      .filter((participation) => !participationIds.has(participation.id))
+      .map((participation) => {
+        participationIds.add(participation.id);
+        return [
+          participation.id,
+          participation.league_id,
+          participation.match_id,
+          participation.team_id,
+          participation.status || "submitted",
+          participation.captain_player_id && playerIds.has(participation.captain_player_id) ? participation.captain_player_id : null,
+          participation.submitted_by_user_id && userIds.has(participation.submitted_by_user_id) ? participation.submitted_by_user_id : null,
+          participation.submitted_at || new Date().toISOString(),
+          participation.locked_at || participation.submitted_at || new Date().toISOString(),
+          participation.corrected_by_user_id && userIds.has(participation.corrected_by_user_id) ? participation.corrected_by_user_id : null,
+          participation.corrected_at || null,
+          participation.correction_reason || "",
+          participation.source || "delegate_portal",
+          toJsonValue(participation.metadata_json, {}),
+          participation.active !== false,
+          Number(participation.version || 1),
+          participation.created_at || participation.submitted_at || new Date().toISOString(),
+          participation.updated_at || participation.submitted_at || new Date().toISOString()
+        ];
+      }));
+
+    await insertRows(client, "match_participation_players", [
+      "id", "match_participation_id", "player_id", "player_name_snapshot",
+      "player_number_snapshot", "player_photo_snapshot", "created_at"
+    ], preservedMatchParticipationPlayers
+      .filter((player) => participationIds.has(player.match_participation_id) && playerIds.has(player.player_id))
+      .map((player) => [
+        player.id,
+        player.match_participation_id,
+        player.player_id,
+        player.player_name_snapshot || "",
+        player.player_number_snapshot || "",
+        player.player_photo_snapshot || "",
+        player.created_at || new Date().toISOString()
+      ]));
 
     await insertRows(client, "match_team_pins", [
       "id", "league_id", "match_id", "team_id", "roster_id", "pin_hash", "pin_salt", "status",
@@ -1299,7 +1472,8 @@ export async function importPostgresStore(store) {
 
     await insertRows(client, "match_report_signatures", [
       "id", "report_id", "league_id", "match_id", "team_id", "captain_player_id",
-      "signed_by_user_id", "method", "status", "signed_at", "ip_address", "user_agent", "metadata_json"
+      "signed_by_user_id", "method", "status", "signed_at", "act_version", "act_hash",
+      "act_snapshot_json", "invalidated_at", "ip_address", "user_agent", "metadata_json"
     ], preservedMatchReportSignatures
       .filter((signature) => restoredReportIds.has(signature.report_id))
       .filter((signature) => nextLeagueIds.has(signature.league_id) && matchIds.has(signature.match_id) && teamIds.has(signature.team_id))
@@ -1314,6 +1488,10 @@ export async function importPostgresStore(store) {
         signature.method || "pin",
         signature.status || "signed",
         signature.signed_at || new Date().toISOString(),
+        signature.act_version ?? null,
+        signature.act_hash || "",
+        toJsonValue(signature.act_snapshot_json, {}),
+        signature.invalidated_at || null,
         signature.ip_address || "",
         signature.user_agent || "",
         toJsonValue(signature.metadata_json, {})

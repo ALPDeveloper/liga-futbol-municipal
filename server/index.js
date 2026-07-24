@@ -18,6 +18,7 @@ import {
   createMatchReportSignatureData,
   createMatchSessionOperationData,
   countTeamDelegateAssignmentsData,
+  createMatchParticipationData,
   createRefereeMatchSheetData,
   createRefereeActivationData,
   createRefereeProfileData,
@@ -40,6 +41,7 @@ import {
   getMatchReportData,
   getMatchSessionOperationData,
   getMatchTeamPinData,
+  getActiveMatchParticipationData,
   getRefereeActivationByHashData,
   getRefereeMatchSheetData,
   getRefereeProfileData,
@@ -55,6 +57,7 @@ import {
   listRefereeMatchSheetsData,
   listRefereeMatchSheetsForRefereeData,
   listMatchReportsData,
+  listMatchParticipationsForLeagueData,
   listMatchRostersForLeagueData,
   listRefereesData,
   listMatchSessionsForRefereeData,
@@ -66,6 +69,7 @@ import {
   markMatchTeamPinSignedData,
   markAdminActivationUsedData,
   markPasswordResetUsed,
+  invalidateMatchReportSignaturesData,
   markRefereeActivationUsedData,
   markTeamDelegateActivationUsedData,
   removeRefereeRoleData,
@@ -112,7 +116,7 @@ import {
   validateUserStatus
 } from "./security.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
-import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getTeam, upperText } from "../src/lib/domain.js";
+import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getPlayerNumberForTeam, getTeam, upperText } from "../src/lib/domain.js";
 import { addPlayer, deletePlayer, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer } from "../src/lib/actions.js";
 import {
   MATCH_CAPTURE_MODES,
@@ -666,33 +670,42 @@ async function buildTeamPortalPayload(userId) {
   const store = await getStoreData();
   const league = (store.leagues || []).find((item) => item.id === context.leagueId);
   const matchRosters = league ? await listMatchRostersForLeagueData(league.id) : [];
-  const leagueWithRosters = league ? { ...league, matchRosters } : null;
-  const eligibilityByPlayerId = leagueWithRosters ? calculatePlayerAppearanceEligibility(leagueWithRosters) : new Map();
+  const matchParticipations = league ? await listMatchParticipationsForLeagueData(league.id) : [];
+  const leagueWithParticipations = league ? { ...league, matchParticipations } : null;
+  const eligibilityByPlayerId = leagueWithParticipations ? calculatePlayerAppearanceEligibility(leagueWithParticipations) : new Map();
   const activeSuspensionByPlayerId = new Map();
   if (league) {
     for (const notice of calculateSuspensionNotices(league)) {
       if (notice.status === "active" && notice.player?.id) activeSuspensionByPlayerId.set(notice.player.id, notice);
     }
   }
-  const eligiblePlayers = league ? getEligiblePlayersForTeam(league, context.teamId).map((player) => ({
-    id: player.id,
-    name: player.name,
-    number: player.number,
-    position: player.position,
-    teamId: player.teamId,
-    playoffEligibility: eligibilityByPlayerId.get(player.id) || null,
-    suspension: activeSuspensionByPlayerId.has(player.id)
-      ? {
-        type: activeSuspensionByPlayerId.get(player.id).type,
-        reason: activeSuspensionByPlayerId.get(player.id).reason,
-        pendingReview: Boolean(activeSuspensionByPlayerId.get(player.id).pendingReview),
-        indefinite: Boolean(activeSuspensionByPlayerId.get(player.id).indefinite),
-        remainingMatches: activeSuspensionByPlayerId.get(player.id).remainingMatches,
-        returnRound: activeSuspensionByPlayerId.get(player.id).returnRound
-      }
-      : null
-  })) : [];
+  const eligiblePlayers = league ? getEligiblePlayersForTeam(league, context.teamId).map((player) => {
+    const originTeam = getTeam(league, player.teamId);
+    const affiliate = player.teamId !== context.teamId;
+    return {
+      id: player.id,
+      name: player.name,
+      number: getPlayerNumberForTeam(league, player.id, context.teamId),
+      registeredNumber: player.number,
+      position: player.position,
+      teamId: player.teamId,
+      originTeamName: originTeam?.name || "",
+      isAffiliate: affiliate,
+      playoffEligibility: eligibilityByPlayerId.get(player.id) || null,
+      suspension: activeSuspensionByPlayerId.has(player.id)
+        ? {
+          type: activeSuspensionByPlayerId.get(player.id).type,
+          reason: activeSuspensionByPlayerId.get(player.id).reason,
+          pendingReview: Boolean(activeSuspensionByPlayerId.get(player.id).pendingReview),
+          indefinite: Boolean(activeSuspensionByPlayerId.get(player.id).indefinite),
+          remainingMatches: activeSuspensionByPlayerId.get(player.id).remainingMatches,
+          returnRound: activeSuspensionByPlayerId.get(player.id).returnRound
+        }
+        : null
+    };
+  }) : [];
   const rosterByMatchTeam = new Map(matchRosters.map((roster) => [`${roster.matchId}:${roster.teamId}`, roster]));
+  const participationByMatchTeam = new Map(matchParticipations.map((participation) => [`${participation.matchId}:${participation.teamId}`, participation]));
   const users = await listUsersData();
   const userById = new Map(users.map((user) => [user.id, user]));
   const getRefereeName = (userId) => userById.get(userId)?.name || "";
@@ -708,11 +721,13 @@ async function buildTeamPortalPayload(userId) {
       const opponent = (league.teams || []).find((team) => team.id === opponentTeamId);
       const roster = rosterByMatchTeam.get(`${match.id}:${context.teamId}`);
       const opponentRoster = rosterByMatchTeam.get(`${match.id}:${opponentTeamId}`);
+      const participation = participationByMatchTeam.get(`${match.id}:${context.teamId}`);
+      const opponentParticipation = participationByMatchTeam.get(`${match.id}:${opponentTeamId}`);
       const latestReport = await getLatestMatchReportForMatchData(match.id);
       const report = shouldUseMatchReportForDelegate(match, latestReport) ? latestReport : null;
       const signatures = report?.id ? await listMatchReportSignaturesData(report.id) : [];
-      const mySignature = signatures.find((signature) => signature.teamId === context.teamId) || null;
-      const opponentSignature = signatures.find((signature) => signature.teamId === opponentTeamId) || null;
+      const mySignature = signatures.find((signature) => signature.teamId === context.teamId && signature.status === "signed") || null;
+      const opponentSignature = signatures.find((signature) => signature.teamId === opponentTeamId && signature.status === "signed") || null;
       const homeTeam = getTeam(league, match.homeTeamId);
       const awayTeam = getTeam(league, match.awayTeamId);
       const playerById = new Map([...(league.players || []), ...(league.allPlayers || [])].map((player) => [player.id, player]));
@@ -763,6 +778,9 @@ async function buildTeamPortalPayload(userId) {
         myTeamSigned: Boolean(mySignature),
         opponentSigned: Boolean(opponentSignature),
         signaturesCount: signatures.length,
+        participation: participation || null,
+        participationSubmitted: Boolean(participation),
+        opponentParticipationSubmitted: Boolean(opponentParticipation),
         isPlayoff: match.stage === "playoff" || Boolean(match.playoffRound),
         isHome: match.homeTeamId === context.teamId,
         homeTeamId: match.homeTeamId,
@@ -800,6 +818,14 @@ async function listMatchRostersForStore(store) {
     rosters.push(...await listMatchRostersForLeagueData(league.id));
   }
   return rosters;
+}
+
+async function listMatchParticipationsForStore(store) {
+  const participations = [];
+  for (const league of store.leagues || []) {
+    participations.push(...await listMatchParticipationsForLeagueData(league.id));
+  }
+  return participations;
 }
 
 function generateCaptainPin() {
@@ -876,6 +902,21 @@ async function getTeamPortalRosterContext(user, matchId) {
   return { context, store, league, match, roster };
 }
 
+async function getTeamPortalMatchContext(user, matchId) {
+  const context = await getTeamDelegateContextData(user.id);
+  if (!context) return { error: { status: 404, message: "No tienes equipo asignado" } };
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === context.leagueId);
+  const match = league?.matches?.find((item) => item.id === matchId);
+  if (!league || !match) return { error: { status: 404, message: "Partido no encontrado." } };
+  if (match.homeTeamId !== context.teamId && match.awayTeamId !== context.teamId) {
+    return { error: { status: 403, message: "Solo puedes administrar partidos de tu propio equipo." } };
+  }
+
+  return { context, store, league, match };
+}
+
 async function getRefereeMatchCaptureContext(user, matchId) {
   if (!hasActiveRoleAccess(user, "referee")) {
     return { error: { status: 403, message: "Permiso de arbitro requerido" } };
@@ -909,14 +950,15 @@ async function buildRefereePortalResponse(referee, userId) {
   const store = await getStoreData();
   const refereeSheets = await listRefereeMatchSheetsForRefereeData(userId, { status: "all" });
   const matchRosters = await listMatchRostersForStore(store);
+  const matchParticipations = await listMatchParticipationsForStore(store);
   const matchSessions = await listMatchSessionsForRefereeData(userId);
-  return buildRefereePortalPayload(store, referee, userId, refereeSheets, matchRosters, matchSessions);
+  return buildRefereePortalPayload(store, referee, userId, refereeSheets, matchRosters, matchSessions, matchParticipations);
 }
 
 async function buildPreliminaryReportResponse({ report, match }) {
   const signatures = report ? await listMatchReportSignaturesData(report.id) : [];
-  const homeSignature = signatures.find((signature) => signature.teamId === match.homeTeamId) || null;
-  const awaySignature = signatures.find((signature) => signature.teamId === match.awayTeamId) || null;
+  const homeSignature = signatures.find((signature) => signature.teamId === match.homeTeamId && signature.status === "signed") || null;
+  const awaySignature = signatures.find((signature) => signature.teamId === match.awayTeamId && signature.status === "signed") || null;
   const signatureIssue = report?.payload && typeof report.payload === "object" ? report.payload.signatureIssue : null;
   const hasPublishableSignatureIssue = Boolean(signatureIssue?.status === "pending_admin_attention");
   return {
@@ -925,9 +967,28 @@ async function buildPreliminaryReportResponse({ report, match }) {
     homeSigned: Boolean(homeSignature),
     awaySigned: Boolean(awaySignature),
     readyToFinalize: Boolean(homeSignature && awaySignature),
-    readyToPublish: Boolean((homeSignature && awaySignature) || hasPublishableSignatureIssue),
+    readyToPublish: Boolean(report && ![MATCH_REPORT_STATUSES.FINALIZED, MATCH_REPORT_STATUSES.PUBLISHED].includes(report.status)),
     signatureIssue: hasPublishableSignatureIssue ? signatureIssue : null
   };
+}
+
+function buildActSignatureSnapshot(report, match) {
+  const payload = report?.payload && typeof report.payload === "object" ? report.payload : {};
+  const snapshot = {
+    reportId: report?.id || "",
+    reportVersion: Number(report?.version || 1),
+    matchId: match?.id || report?.matchId || "",
+    homeTeamId: match?.homeTeamId || "",
+    awayTeamId: match?.awayTeamId || "",
+    homeGoals: report?.homeGoals ?? payload.homeGoals ?? match?.homeGoals ?? null,
+    awayGoals: report?.awayGoals ?? payload.awayGoals ?? match?.awayGoals ?? null,
+    status: report?.status || "",
+    events: Array.isArray(payload.events) ? payload.events : Array.isArray(match?.events) ? match.events : [],
+    observations: payload.observations || match?.observations || "",
+    resolutionNote: payload.resolutionNote || match?.resolutionNote || ""
+  };
+  const hash = crypto.createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+  return { snapshot, hash };
 }
 
 async function enrichMatchReportForAdmin(report, store) {
@@ -993,7 +1054,7 @@ function buildOfficialSheetPayloadFromReport(report) {
   };
 }
 
-function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], matchRosters = [], matchSessions = []) {
+function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], matchRosters = [], matchSessions = [], matchParticipations = []) {
   const sheetByMatchId = new Map();
   for (const sheet of refereeSheets.filter((item) => item.status === "pending_review" || item.status === "rejected")) {
     if (!sheetByMatchId.has(sheet.matchId)) sheetByMatchId.set(sheet.matchId, sheet);
@@ -1006,6 +1067,7 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
     }
   }
   const rosterByMatchTeam = new Map(matchRosters.map((roster) => [`${roster.matchId}:${roster.teamId}`, roster]));
+  const participationByMatchTeam = new Map(matchParticipations.map((participation) => [`${participation.matchId}:${participation.teamId}`, participation]));
   const assignedMatches = [];
   for (const league of store.leagues || []) {
     if (upperText(league.city || "") !== upperText(referee.municipality)) continue;
@@ -1028,6 +1090,8 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
       const hasPendingReview = reviewSheet?.status === "pending_review";
       const homeRoster = rosterByMatchTeam.get(`${match.id}:${match.homeTeamId}`);
       const awayRoster = rosterByMatchTeam.get(`${match.id}:${match.awayTeamId}`);
+      const homeParticipation = participationByMatchTeam.get(`${match.id}:${match.homeTeamId}`);
+      const awayParticipation = participationByMatchTeam.get(`${match.id}:${match.awayTeamId}`);
       const activeSession = sessionByMatchId.get(match.id);
       const homeEligiblePlayers = getEligiblePlayersForTeam(league, match.homeTeamId);
       const awayEligiblePlayers = getEligiblePlayersForTeam(league, match.awayTeamId);
@@ -1036,20 +1100,22 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
           .filter((notice) => notice.status === "active" && notice.player?.id)
           .map((notice) => notice.player.id)
       );
-      const buildRosterPlayers = (players, roster) => {
+      const buildRosterPlayers = (players, roster, teamId) => {
         const rosterEntries = (roster?.players || []).map((entry) => (typeof entry === "string" ? { playerId: entry } : entry));
         const rosterPlayerIds = new Set(rosterEntries.map((entry) => entry.playerId).filter(Boolean));
         const rosterNumberByPlayerId = new Map(rosterEntries.map((entry) => [entry.playerId, normalizeJerseyNumber(entry.jerseyNumber ?? entry.rosterNumber)]));
         const starterIds = new Set(roster?.starters || roster?.lineup?.starters || []);
         const substituteIds = new Set(roster?.substitutes || roster?.lineup?.substitutes || []);
-        const source = roster ? players.filter((player) => rosterPlayerIds.has(player.id)) : players;
+        const source = players;
         return source.map((player) => ({
           id: player.id,
           name: player.name,
-          number: rosterNumberByPlayerId.get(player.id) || player.number,
+          number: rosterNumberByPlayerId.get(player.id) || getPlayerNumberForTeam(league, player.id, teamId),
           registeredNumber: player.number,
           position: player.position,
           teamId: player.teamId,
+          originTeamName: getTeam(league, player.teamId)?.name || "",
+          isAffiliate: player.teamId !== teamId,
           isCaptain: roster?.captainPlayerId === player.id,
           isGoalkeeper: roster?.goalkeeperPlayerId === player.id,
           rosterRole: starterIds.has(player.id) ? "starter" : substituteIds.has(player.id) ? "substitute" : "",
@@ -1095,8 +1161,12 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         awayTeamName: awayTeam?.name || "VISITANTE",
         homeTeamLogoUrl: homeTeam?.logoUrl || "",
         awayTeamLogoUrl: awayTeam?.logoUrl || "",
-        homePlayers: buildRosterPlayers(homeEligiblePlayers, homeRoster),
-        awayPlayers: buildRosterPlayers(awayEligiblePlayers, awayRoster),
+        homePlayers: buildRosterPlayers(homeEligiblePlayers, homeRoster, match.homeTeamId),
+        awayPlayers: buildRosterPlayers(awayEligiblePlayers, awayRoster, match.awayTeamId),
+        homeParticipationSubmitted: Boolean(homeParticipation),
+        awayParticipationSubmitted: Boolean(awayParticipation),
+        homeParticipation: homeParticipation || null,
+        awayParticipation: awayParticipation || null,
         homeRosterSubmitted: Boolean(homeRoster),
         awayRosterSubmitted: Boolean(awayRoster),
         homePinRequired: Boolean(homeRoster?.captainPin),
@@ -1912,6 +1982,80 @@ app.post("/api/leagues/:leagueId/matches/:matchId/discipline-resolution", requir
     detail: `Resolvio expulsion jornada ${match.round || "-"}`
   });
   response.json(nextStore);
+});
+
+app.post("/api/leagues/:leagueId/matches/:matchId/participations/:teamId/correction", requireAuth, async (request, response) => {
+  const { matchId, teamId } = request.params;
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "match_sheets")) {
+    return response.status(403).json({ error: "Permiso de actas requerido" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  const match = league?.matches?.find((item) => item.id === matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado." });
+  if (![match.homeTeamId, match.awayTeamId].includes(teamId)) {
+    return response.status(400).json({ error: "Equipo invalido para este partido." });
+  }
+
+  const reason = upperText(request.body.reason || "");
+  if (reason.length < 8) return response.status(400).json({ error: "Indica un motivo de correccion claro." });
+
+  const requestedPlayerIds = [...new Set((Array.isArray(request.body.playerIds) ? request.body.playerIds : [])
+    .map((playerId) => String(playerId || "").trim())
+    .filter(Boolean))];
+  if (!requestedPlayerIds.length) return response.status(400).json({ error: "Selecciona al menos un jugador participante." });
+  if (requestedPlayerIds.length > 40) return response.status(400).json({ error: "El reporte no puede exceder 40 jugadores participantes." });
+
+  const captainPlayerId = String(request.body.captainPlayerId || "").trim();
+  if (!captainPlayerId || !requestedPlayerIds.includes(captainPlayerId)) {
+    return response.status(400).json({ error: "Selecciona un capitan dentro de los participantes." });
+  }
+
+  const eligiblePlayers = getEligiblePlayersForTeam(league, teamId);
+  const playerById = new Map(eligiblePlayers.map((player) => [player.id, player]));
+  const invalidPlayerId = requestedPlayerIds.find((playerId) => !playerById.has(playerId));
+  if (invalidPlayerId) return response.status(400).json({ error: "El reporte incluye un jugador que no pertenece a este equipo." });
+
+  const participationResult = await createMatchParticipationData({
+    id: `match-participation-${crypto.randomUUID()}`,
+    leagueId,
+    matchId,
+    teamId,
+    captainPlayerId,
+    submittedByUserId: request.user.id,
+    players: requestedPlayerIds.map((playerId) => {
+      const player = playerById.get(playerId);
+      return {
+        playerId,
+        name: player?.name || "",
+        number: player?.number || "",
+        photoUrl: player?.photoUrl || ""
+      };
+    }),
+    source: "admin_correction",
+    metadata: {
+      competitionId: match.competitionId || "",
+      round: match.round || "",
+      matchDate: match.date || "",
+      matchTime: match.time || ""
+    },
+    allowCorrection: true,
+    correctedByUserId: request.user.id,
+    correctionReason: reason
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "admin_match_participation_correction",
+    entityType: "match_participation",
+    entityId: participationResult.participation?.id || matchId,
+    detail: `Admin corrigio participantes de equipo ${teamId} en partido ${matchId}: ${reason}`
+  });
+
+  response.status(201).json({ participation: participationResult.participation });
 });
 
 app.delete("/api/leagues/:leagueId", requireSuperAdmin, async (request, response) => {
@@ -2828,7 +2972,8 @@ app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
   const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
   const matchRosters = await listMatchRostersForStore(store);
   const matchSessions = await listMatchSessionsForRefereeData(request.user.id);
-  response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets, matchRosters, matchSessions));
+  const matchParticipations = await listMatchParticipationsForStore(store);
+  response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets, matchRosters, matchSessions, matchParticipations));
 });
 
 app.get("/api/referee-portal/matches/:matchId/live-state", requireAuth, async (request, response) => {
@@ -3198,6 +3343,10 @@ app.patch("/api/referee-portal/matches/:matchId/report", requireAuth, async (req
     homeGoals: request.body.homeGoals ?? report.homeGoals,
     awayGoals: request.body.awayGoals ?? report.awayGoals
   });
+  await invalidateMatchReportSignaturesData({
+    reportId: report.id,
+    reason: "acta_actualizada_por_arbitro"
+  });
 
   await logAudit({
     user: request.user,
@@ -3238,6 +3387,7 @@ app.post("/api/referee-portal/matches/:matchId/report/sign", requireAuth, async 
     : Boolean(roster?.captainPin && pin === normalizePin(roster.captainPin));
   if (!pinIsValid) return response.status(400).json({ error: "PIN de capitan incorrecto." });
 
+  const actSignature = buildActSignatureSnapshot(report, context.match);
   await createMatchReportSignatureData({
     id: `match-report-signature-${crypto.randomUUID()}`,
     reportId: report.id,
@@ -3249,6 +3399,9 @@ app.post("/api/referee-portal/matches/:matchId/report/sign", requireAuth, async 
     method: "pin",
     ipAddress: request.ip || "",
     userAgent: request.get("user-agent") || "",
+    actVersion: report.version,
+    actHash: actSignature.hash,
+    actSnapshot: actSignature.snapshot,
     metadata: { teamSide }
   });
   await markMatchTeamPinSignedData({ matchId: context.match.id, teamId });
@@ -3295,10 +3448,6 @@ app.post("/api/referee-portal/matches/:matchId/report/finalize", requireAuth, as
     ? reportPayload.signatureIssue
     : null;
   const canPublishBySignatureIssue = Boolean(signatureIssue?.status === "pending_admin_attention");
-  if (report.captureMode === MATCH_CAPTURE_MODES.LIVE && !reportState.readyToFinalize && !canPublishBySignatureIssue) {
-    return response.status(400).json({ error: "Se requiere firma de ambos capitanes o una incidencia de firma documentada antes de publicar el acta." });
-  }
-
   const finalizedAt = new Date().toISOString();
   const store = await getStoreData();
   const signatureIssueNote = canPublishBySignatureIssue
@@ -3395,14 +3544,13 @@ app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (reque
   const homeSecurePin = await getMatchTeamPinData(match.id, match.homeTeamId);
   const awaySecurePin = await getMatchTeamPinData(match.id, match.awayTeamId);
   const captureMode = normalizeCaptureMode(request.body.captureMode || MATCH_CAPTURE_MODES.LIVE);
-  const requiresDigitalSignature = captureMode === MATCH_CAPTURE_MODES.LIVE;
   const isCaptainPinValid = (roster, securePin, value) => {
     const pin = normalizePin(value);
     if (securePin?.pinHash) return verifyPassword(pin, securePin.pinHash);
     return !roster?.captainPin || pin === normalizePin(roster.captainPin);
   };
   const approvals = request.body.approvals && typeof request.body.approvals === "object" ? request.body.approvals : {};
-  if (requiresDigitalSignature && !isWalkoverSheet) {
+  if (request.body.enforceLegacyCaptainPins === true && !isWalkoverSheet) {
     if (homeRoster?.captainPin && !isCaptainPinValid(homeRoster, homeSecurePin, approvals.homePin)) {
       return response.status(400).json({ error: "PIN de capitan incorrecto para equipo local." });
     }
@@ -3746,6 +3894,71 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
   response.status(201).json(await buildTeamPortalPayload(request.user.id));
 });
 
+app.post("/api/team-portal/matches/:matchId/participation", requireAuth, async (request, response) => {
+  if (!hasActiveTeamDelegateAccess(request.user)) {
+    return response.status(403).json({ error: "Permiso de delegado requerido" });
+  }
+  const context = await getTeamPortalMatchContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const requestedPlayerIds = [...new Set((Array.isArray(request.body.playerIds) ? request.body.playerIds : [])
+    .map((playerId) => String(playerId || "").trim())
+    .filter(Boolean))];
+  if (!requestedPlayerIds.length) return response.status(400).json({ error: "Selecciona al menos un jugador participante." });
+  if (requestedPlayerIds.length > 40) return response.status(400).json({ error: "El reporte no puede exceder 40 jugadores participantes." });
+
+  const captainPlayerId = String(request.body.captainPlayerId || "").trim();
+  if (!captainPlayerId || !requestedPlayerIds.includes(captainPlayerId)) {
+    return response.status(400).json({ error: "Selecciona un capitan dentro de los participantes." });
+  }
+
+  const eligiblePlayers = getEligiblePlayersForTeam(context.league, context.context.teamId);
+  const playerById = new Map(eligiblePlayers.map((player) => [player.id, player]));
+  const invalidPlayerId = requestedPlayerIds.find((playerId) => !playerById.has(playerId));
+  if (invalidPlayerId) return response.status(400).json({ error: "El reporte incluye un jugador que no pertenece a este equipo." });
+
+  const participationResult = await createMatchParticipationData({
+    id: `match-participation-${crypto.randomUUID()}`,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    teamId: context.context.teamId,
+    captainPlayerId,
+    submittedByUserId: request.user.id,
+    players: requestedPlayerIds.map((playerId) => {
+      const player = playerById.get(playerId);
+      return {
+        playerId,
+        name: player?.name || "",
+        number: player?.number || "",
+        photoUrl: player?.photoUrl || ""
+      };
+    }),
+    source: "delegate_portal",
+    metadata: {
+      competitionId: context.match.competitionId || "",
+      round: context.match.round || "",
+      matchDate: context.match.date || "",
+      matchTime: context.match.time || "",
+      notes: request.body.notes || ""
+    }
+  });
+
+  if (participationResult.duplicate) {
+    return response.status(409).json({ error: "Los participantes de este partido ya fueron enviados y quedaron bloqueados." });
+  }
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "team_match_participation_submit",
+    entityType: "match_participation",
+    entityId: participationResult.participation?.id || context.match.id,
+    detail: `Delegado envio participantes de ${context.context.teamName} para partido ${context.match.id}`
+  });
+
+  response.status(201).json(await buildTeamPortalPayload(request.user.id));
+});
+
 app.post("/api/team-portal/matches/:matchId/pin/reveal", requireAuth, async (request, response) => {
   if (!hasActiveTeamDelegateAccess(request.user)) {
     return response.status(403).json({ error: "Permiso de delegado requerido" });
@@ -3838,40 +4051,34 @@ app.post("/api/team-portal/matches/:matchId/report/sign", requireAuth, async (re
     return response.status(403).json({ error: "Permiso de delegado requerido" });
   }
 
-  const context = await getTeamPortalRosterContext(request.user, request.params.matchId);
+  const context = await getTeamPortalMatchContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
 
   const report = await getLatestMatchReportForMatchData(context.match.id);
   if (!report) return response.status(404).json({ error: "Aun no hay acta preliminar para firmar." });
-  if (report.captureMode !== MATCH_CAPTURE_MODES.LIVE) {
-    return response.status(400).json({ error: "Las actas manuales se firman en el documento fisico." });
-  }
-  if (![MATCH_REPORT_STATUSES.PENDING_CAPTAIN_REVIEW, MATCH_REPORT_STATUSES.CORRECTION_REQUESTED, MATCH_REPORT_STATUSES.BOTH_SIGNED].includes(report.status)) {
+  if (![MATCH_REPORT_STATUSES.PENDING_CAPTAIN_REVIEW, MATCH_REPORT_STATUSES.CORRECTION_REQUESTED, MATCH_REPORT_STATUSES.BOTH_SIGNED, MATCH_REPORT_STATUSES.FINALIZED, MATCH_REPORT_STATUSES.PUBLISHED].includes(report.status)) {
     return response.status(400).json({ error: "Esta acta no esta disponible para firma." });
   }
 
-  const pin = normalizePin(request.body.pin);
-  const securePin = await getMatchTeamPinData(context.match.id, context.context.teamId);
-  const pinIsValid = securePin?.pinHash
-    ? verifyPassword(pin, securePin.pinHash)
-    : Boolean(context.roster?.captainPin && pin === normalizePin(context.roster.captainPin));
-  if (!pinIsValid) return response.status(400).json({ error: "PIN de capitan incorrecto." });
-
   const teamSide = context.match.homeTeamId === context.context.teamId ? "home" : "away";
+  const participation = await getActiveMatchParticipationData(context.match.id, context.context.teamId);
+  const actSignature = buildActSignatureSnapshot(report, context.match);
   await createMatchReportSignatureData({
     id: `match-report-signature-${crypto.randomUUID()}`,
     reportId: report.id,
     leagueId: context.league.id,
     matchId: context.match.id,
     teamId: context.context.teamId,
-    captainPlayerId: context.roster?.captainPlayerId || "",
+    captainPlayerId: participation?.captainPlayerId || "",
     signedByUserId: request.user.id,
-    method: "delegate_remote_pin",
+    method: "delegate_remote",
     ipAddress: request.ip || "",
     userAgent: request.get("user-agent") || "",
-    metadata: { teamSide, source: "team_portal" }
+    actVersion: report.version,
+    actHash: actSignature.hash,
+    actSnapshot: actSignature.snapshot,
+    metadata: { teamSide, source: "team_portal", participationId: participation?.id || "" }
   });
-  await markMatchTeamPinSignedData({ matchId: context.match.id, teamId: context.context.teamId });
 
   const reportState = await buildPreliminaryReportResponse({ report, match: context.match });
   let nextReport = report;

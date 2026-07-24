@@ -472,6 +472,38 @@ function runMigrations() {
   });
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS match_participations (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'submitted',
+      captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+      submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      submitted_at TEXT NOT NULL,
+      locked_at TEXT,
+      corrected_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      corrected_at TEXT,
+      correction_reason TEXT,
+      source TEXT NOT NULL DEFAULT 'delegate_portal',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      active INTEGER NOT NULL DEFAULT 1,
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS match_participation_players (
+      id TEXT PRIMARY KEY,
+      match_participation_id TEXT NOT NULL REFERENCES match_participations(id) ON DELETE CASCADE,
+      player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      player_name_snapshot TEXT NOT NULL,
+      player_number_snapshot TEXT,
+      player_photo_snapshot TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(match_participation_id, player_id)
+    );
+
     CREATE TABLE IF NOT EXISTS match_team_pins (
       id TEXT PRIMARY KEY,
       league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
@@ -559,6 +591,10 @@ function runMigrations() {
       method TEXT NOT NULL DEFAULT 'pin',
       status TEXT NOT NULL DEFAULT 'signed',
       signed_at TEXT NOT NULL,
+      act_version INTEGER,
+      act_hash TEXT,
+      act_snapshot_json TEXT NOT NULL DEFAULT '{}',
+      invalidated_at TEXT,
       ip_address TEXT,
       user_agent TEXT,
       metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -602,7 +638,22 @@ function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_match_reports_status ON match_reports(status);
     CREATE INDEX IF NOT EXISTS idx_match_report_signatures_report ON match_report_signatures(report_id);
     CREATE INDEX IF NOT EXISTS idx_match_sync_queue_match_status ON match_sync_queue(match_id, status);
+    CREATE INDEX IF NOT EXISTS idx_match_participations_match_team ON match_participations(match_id, team_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_match_participations_active_team ON match_participations(match_id, team_id) WHERE active = 1;
+    CREATE INDEX IF NOT EXISTS idx_match_participation_players_report ON match_participation_players(match_participation_id);
   `);
+
+  const matchReportSignatureColumns = db.prepare("PRAGMA table_info(match_report_signatures)").all().map((column) => column.name);
+  [
+    ["act_version", "INTEGER"],
+    ["act_hash", "TEXT"],
+    ["act_snapshot_json", "TEXT NOT NULL DEFAULT '{}'"],
+    ["invalidated_at", "TEXT"]
+  ].forEach(([name, definition]) => {
+    if (matchReportSignatureColumns.length && !matchReportSignatureColumns.includes(name)) {
+      db.prepare(`ALTER TABLE match_report_signatures ADD COLUMN ${name} ${definition}`).run();
+    }
+  });
 
   seedMissingCompetitions();
 }
@@ -879,6 +930,34 @@ export function getStore() {
       updatedAt: row.updated_at,
       version: row.version || 1
     }));
+    const participationRows = db.prepare("SELECT * FROM match_participations WHERE league_id = ? ORDER BY submitted_at DESC, version DESC").all(leagueRow.id);
+    const matchParticipations = participationRows.map((row) => ({
+      id: row.id,
+      matchId: row.match_id,
+      teamId: row.team_id,
+      status: row.status || "submitted",
+      captainPlayerId: row.captain_player_id || "",
+      submittedByUserId: row.submitted_by_user_id || "",
+      submittedAt: row.submitted_at || "",
+      lockedAt: row.locked_at || "",
+      correctedByUserId: row.corrected_by_user_id || "",
+      correctedAt: row.corrected_at || "",
+      correctionReason: row.correction_reason || "",
+      source: row.source || "delegate_portal",
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : {},
+      active: row.active !== 0,
+      version: row.version || 1,
+      createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
+      players: db.prepare("SELECT * FROM match_participation_players WHERE match_participation_id = ? ORDER BY created_at ASC").all(row.id).map((playerRow) => ({
+        id: playerRow.id,
+        playerId: playerRow.player_id,
+        playerNameSnapshot: playerRow.player_name_snapshot || "",
+        playerNumberSnapshot: playerRow.player_number_snapshot || "",
+        playerPhotoSnapshot: playerRow.player_photo_snapshot || "",
+        createdAt: playerRow.created_at || ""
+      }))
+    }));
 
     return {
       id: leagueRow.id,
@@ -927,7 +1006,8 @@ export function getStore() {
       appearanceAdjustments,
       sponsors,
       matches,
-      matchRosters
+      matchRosters,
+      matchParticipations
     };
   });
 
@@ -966,6 +1046,8 @@ export function importStore(store) {
   const preservedMatchReportSignatures = db.prepare("SELECT * FROM match_report_signatures").all();
   const preservedMatchReportDisputes = db.prepare("SELECT * FROM match_report_disputes").all();
   const preservedMatchSyncQueue = db.prepare("SELECT * FROM match_sync_queue").all();
+  const preservedMatchParticipations = db.prepare("SELECT * FROM match_participations").all();
+  const preservedMatchParticipationPlayers = db.prepare("SELECT * FROM match_participation_players").all();
   const nextLeagueIds = new Set(normalized.leagues.map((league) => league.id));
   const nextTeamIds = new Set(normalized.leagues.flatMap((league) => (league.teams || []).map((team) => team.id)));
   const removedLeagueIds = new Set(
@@ -980,6 +1062,8 @@ export function importStore(store) {
     }
 
     db.exec(`
+      DELETE FROM match_participation_players;
+      DELETE FROM match_participations;
       DELETE FROM match_events;
       DELETE FROM match_rosters;
       DELETE FROM discipline_resets;
@@ -1335,6 +1419,54 @@ export function importStore(store) {
           roster.version || 1
         );
       }
+
+      for (const participation of league.matchParticipations || []) {
+        const participationId = participation.id || `match-participation-${Date.now()}`;
+        db.prepare(`
+          INSERT OR IGNORE INTO match_participations (
+            id, league_id, match_id, team_id, status, captain_player_id, submitted_by_user_id,
+            submitted_at, locked_at, corrected_by_user_id, corrected_at, correction_reason,
+            source, metadata_json, active, version, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          participationId,
+          league.id,
+          participation.matchId,
+          participation.teamId,
+          participation.status || "submitted",
+          participation.captainPlayerId || null,
+          participation.submittedByUserId || null,
+          participation.submittedAt || new Date().toISOString(),
+          participation.lockedAt || participation.submittedAt || new Date().toISOString(),
+          participation.correctedByUserId || null,
+          participation.correctedAt || null,
+          participation.correctionReason || "",
+          participation.source || "delegate_portal",
+          JSON.stringify(participation.metadata || {}),
+          participation.active === false ? 0 : 1,
+          participation.version || 1,
+          participation.createdAt || participation.submittedAt || new Date().toISOString(),
+          participation.updatedAt || participation.submittedAt || new Date().toISOString()
+        );
+        for (const player of participation.players || []) {
+          db.prepare(`
+            INSERT OR IGNORE INTO match_participation_players (
+              id, match_participation_id, player_id, player_name_snapshot,
+              player_number_snapshot, player_photo_snapshot, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            player.id || `match-participation-player-${Date.now()}-${player.playerId}`,
+            participationId,
+            player.playerId,
+            player.playerNameSnapshot || "",
+            player.playerNumberSnapshot || "",
+            player.playerPhotoSnapshot || "",
+            player.createdAt || participation.submittedAt || new Date().toISOString()
+          );
+        }
+      }
     }
 
     const userIds = new Set(db.prepare("SELECT id FROM users").all().map((user) => user.id));
@@ -1342,8 +1474,60 @@ export function importStore(store) {
     const teamIds = new Set(db.prepare("SELECT id FROM teams").all().map((team) => team.id));
     const playerIds = new Set(db.prepare("SELECT id FROM players").all().map((player) => player.id));
     const rosterIds = new Set(db.prepare("SELECT id FROM match_rosters").all().map((roster) => roster.id));
+    const participationIds = new Set(db.prepare("SELECT id FROM match_participations").all().map((participation) => participation.id));
     const restoredSessionIds = new Set();
     const restoredReportIds = new Set();
+
+    for (const participation of preservedMatchParticipations) {
+      if (!nextLeagueIds.has(participation.league_id) || !matchIds.has(participation.match_id) || !teamIds.has(participation.team_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_participations (
+          id, league_id, match_id, team_id, status, captain_player_id, submitted_by_user_id,
+          submitted_at, locked_at, corrected_by_user_id, corrected_at, correction_reason,
+          source, metadata_json, active, version, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        participation.id,
+        participation.league_id,
+        participation.match_id,
+        participation.team_id,
+        participation.status || "submitted",
+        participation.captain_player_id && playerIds.has(participation.captain_player_id) ? participation.captain_player_id : null,
+        participation.submitted_by_user_id && userIds.has(participation.submitted_by_user_id) ? participation.submitted_by_user_id : null,
+        participation.submitted_at || new Date().toISOString(),
+        participation.locked_at || participation.submitted_at || new Date().toISOString(),
+        participation.corrected_by_user_id && userIds.has(participation.corrected_by_user_id) ? participation.corrected_by_user_id : null,
+        participation.corrected_at || null,
+        participation.correction_reason || "",
+        participation.source || "delegate_portal",
+        participation.metadata_json || "{}",
+        participation.active === 0 ? 0 : 1,
+        Number(participation.version || 1),
+        participation.created_at || participation.submitted_at || new Date().toISOString(),
+        participation.updated_at || participation.submitted_at || new Date().toISOString()
+      );
+      participationIds.add(participation.id);
+    }
+
+    for (const player of preservedMatchParticipationPlayers) {
+      if (!participationIds.has(player.match_participation_id) || !playerIds.has(player.player_id)) continue;
+      db.prepare(`
+        INSERT OR IGNORE INTO match_participation_players (
+          id, match_participation_id, player_id, player_name_snapshot,
+          player_number_snapshot, player_photo_snapshot, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        player.id,
+        player.match_participation_id,
+        player.player_id,
+        player.player_name_snapshot || "",
+        player.player_number_snapshot || "",
+        player.player_photo_snapshot || "",
+        player.created_at || new Date().toISOString()
+      );
+    }
 
     for (const pin of preservedMatchTeamPins) {
       if (!nextLeagueIds.has(pin.league_id) || !matchIds.has(pin.match_id) || !teamIds.has(pin.team_id)) continue;
@@ -1444,9 +1628,10 @@ export function importStore(store) {
       db.prepare(`
         INSERT OR IGNORE INTO match_report_signatures (
           id, report_id, league_id, match_id, team_id, captain_player_id,
-          signed_by_user_id, method, status, signed_at, ip_address, user_agent, metadata_json
+          signed_by_user_id, method, status, signed_at, act_version, act_hash,
+          act_snapshot_json, invalidated_at, ip_address, user_agent, metadata_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         signature.id,
         signature.report_id,
@@ -1458,6 +1643,10 @@ export function importStore(store) {
         signature.method || "pin",
         signature.status || "signed",
         signature.signed_at || new Date().toISOString(),
+        signature.act_version ?? null,
+        signature.act_hash || "",
+        signature.act_snapshot_json || "{}",
+        signature.invalidated_at || null,
         signature.ip_address || "",
         signature.user_agent || "",
         signature.metadata_json || "{}"

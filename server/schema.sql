@@ -346,6 +346,38 @@ CREATE TABLE IF NOT EXISTS match_rosters (
   UNIQUE(match_id, team_id)
 );
 
+CREATE TABLE IF NOT EXISTS match_participations (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'submitted',
+  captain_player_id TEXT REFERENCES players(id) ON DELETE SET NULL,
+  submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  submitted_at TEXT NOT NULL,
+  locked_at TEXT,
+  corrected_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  corrected_at TEXT,
+  correction_reason TEXT,
+  source TEXT NOT NULL DEFAULT 'delegate_portal',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  active INTEGER NOT NULL DEFAULT 1,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS match_participation_players (
+  id TEXT PRIMARY KEY,
+  match_participation_id TEXT NOT NULL REFERENCES match_participations(id) ON DELETE CASCADE,
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  player_name_snapshot TEXT NOT NULL,
+  player_number_snapshot TEXT,
+  player_photo_snapshot TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(match_participation_id, player_id)
+);
+
 CREATE TABLE IF NOT EXISTS match_team_pins (
   id TEXT PRIMARY KEY,
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
@@ -433,6 +465,10 @@ CREATE TABLE IF NOT EXISTS match_report_signatures (
   method TEXT NOT NULL DEFAULT 'pin',
   status TEXT NOT NULL DEFAULT 'signed',
   signed_at TEXT NOT NULL,
+  act_version INTEGER,
+  act_hash TEXT,
+  act_snapshot_json TEXT NOT NULL DEFAULT '{}',
+  invalidated_at TEXT,
   ip_address TEXT,
   user_agent TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -539,6 +575,9 @@ CREATE TABLE IF NOT EXISTS backup_records (
 );
 
 CREATE INDEX IF NOT EXISTS idx_backup_records_created ON backup_records(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_match_participations_match_team ON match_participations(match_id, team_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_match_participations_active_team ON match_participations(match_id, team_id) WHERE active = 1;
+CREATE INDEX IF NOT EXISTS idx_match_participation_players_report ON match_participation_players(match_participation_id);
 
 CREATE TABLE IF NOT EXISTS password_reset_requests (
   id TEXT PRIMARY KEY,

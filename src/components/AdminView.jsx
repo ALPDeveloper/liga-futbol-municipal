@@ -649,6 +649,8 @@ function LeagueAdmin({
                 league={league}
                 onAddTeamAffiliation={onAddTeamAffiliation}
                 onDeleteTeamAffiliation={onDeleteTeamAffiliation}
+                onLinkPlayerIdentity={onAddDisciplineLink}
+                onDeletePlayerIdentityLink={onDeleteDisciplineLink}
                 onMergeDuplicatePlayer={onMergeDuplicatePlayer}
                 onUpdateTeamAffiliationPlayerNumber={onUpdateTeamAffiliationPlayerNumber}
               />
@@ -2717,7 +2719,15 @@ function groupDelegateItemsByCompetition(items, league, getCompetitionId) {
   return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliation, onMergeDuplicatePlayer, onUpdateTeamAffiliationPlayerNumber }) {
+function AffiliationsPanel({
+  league,
+  onAddTeamAffiliation,
+  onDeleteTeamAffiliation,
+  onLinkPlayerIdentity,
+  onDeletePlayerIdentityLink,
+  onMergeDuplicatePlayer,
+  onUpdateTeamAffiliationPlayerNumber
+}) {
   const teams = useMemo(() => [...league.teams].sort((a, b) => a.name.localeCompare(b.name)), [league.teams]);
   const players = useMemo(() => [...league.players].sort((a, b) => a.name.localeCompare(b.name)), [league.players]);
   const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
@@ -2741,6 +2751,10 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
   const activeAffiliations = useMemo(
     () => (league.teamAffiliations || []).filter((affiliation) => !affiliation.status || affiliation.status === "active"),
     [league.teamAffiliations]
+  );
+  const activeIdentityLinks = useMemo(
+    () => (league.disciplineLinks || []).filter((link) => (link.playerIds || []).length > 1),
+    [league.disciplineLinks]
   );
   const affiliatedPlayerCount = useMemo(() => activeAffiliations.reduce((total, affiliation) => (
     total + league.players.filter((player) => player.teamId === affiliation.sourceTeamId).length
@@ -2811,6 +2825,12 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
     if (!target || !duplicate) return;
     const targetTeam = getTeam(league, target.teamId);
     const duplicateTeam = getTeam(league, duplicate.teamId);
+    const targetCompetitionId = target.competitionId || targetTeam?.competitionId || getDefaultCompetitionId(league);
+    const duplicateCompetitionId = duplicate.competitionId || duplicateTeam?.competitionId || getDefaultCompetitionId(league);
+    if (targetCompetitionId !== duplicateCompetitionId) {
+      setNotice("No fusione jugadores de categorias distintas. Usa Vincular misma persona para conservar cada historial en su torneo.");
+      return;
+    }
     const hasAffiliation = (league.teamAffiliations || []).some((affiliation) => (
       affiliation.sourceTeamId === target.teamId && affiliation.targetTeamId === duplicate.teamId
     ));
@@ -2818,6 +2838,35 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
     if (!window.confirm(`¿Fusionar el duplicado ${duplicate.name} (${duplicateTeam?.name || "sin equipo"}) dentro de ${target.name} (${targetTeam?.name || "sin equipo"})?\n\nSe moveran actas, goles, tarjetas, sanciones y movimientos manuales al jugador principal.${affiliationWarning}`)) return;
     onMergeDuplicatePlayer(payload);
     setNotice("Jugador duplicado fusionado. Revisa estadisticas y actas del jugador principal.");
+    event.currentTarget.reset();
+  }
+
+  function submitIdentityLink(event) {
+    event.preventDefault();
+    const payload = getFormPayload(event.currentTarget);
+    if (payload.playerId === payload.linkedPlayerId) {
+      setNotice("Selecciona dos registros distintos de la misma persona.");
+      return;
+    }
+    const player = getPlayer(league, payload.playerId);
+    const linkedPlayer = getPlayer(league, payload.linkedPlayerId);
+    if (!player || !linkedPlayer) return;
+    const alreadyLinked = activeIdentityLinks.some((link) => (
+      (link.playerIds || []).includes(player.id) && (link.playerIds || []).includes(linkedPlayer.id)
+    ));
+    if (alreadyLinked) {
+      setNotice("Estos registros ya estan vinculados.");
+      return;
+    }
+    const playerTeam = getTeam(league, player.teamId);
+    const linkedTeam = getTeam(league, linkedPlayer.teamId);
+    if (!window.confirm(`¿Vincular ${player.name} (${playerTeam?.name || "sin equipo"}) con ${linkedPlayer.name} (${linkedTeam?.name || "sin equipo"})?\n\nNo se moveran goles, tarjetas, sanciones ni actas. Cada registro conservara su historial en su categoria.`)) return;
+    onLinkPlayerIdentity({
+      playerId: player.id,
+      linkedPlayerId: linkedPlayer.id,
+      notes: payload.notes || "VINCULO DE IDENTIDAD DEPORTIVA"
+    });
+    setNotice("Identidad vinculada. Los historiales por torneo se conservan separados.");
     event.currentTarget.reset();
   }
 
@@ -2832,6 +2881,7 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
         <div className="affiliation-hero-metrics">
           <span><b>{activeAffiliations.length}</b> Activas</span>
           <span><b>{affiliatedPlayerCount}</b> Jugadores vinculados</span>
+          <span><b>{activeIdentityLinks.length}</b> Identidades</span>
           <span><b>{competitions.length}</b> Categorias</span>
         </div>
       </div>
@@ -2888,9 +2938,29 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
 
         <section className="affiliation-maintenance-card">
           <div>
-            <span>Depuracion</span>
-            <strong>Fusionar jugador duplicado</strong>
-            <small>Mueve actas, goles, tarjetas, sanciones y movimientos al registro principal.</small>
+            <span>Identidad deportiva</span>
+            <strong>Vincular misma persona</strong>
+            <small>Relaciona registros entre categorias sin mover eventos, actas ni sanciones.</small>
+          </div>
+          <form className="duplicate-merge-form identity-link-form" onSubmit={submitIdentityLink}>
+            <label>Registro base
+              <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador..." />
+            </label>
+            <label>Registro relacionado
+              <SearchablePlayerSelect league={league} name="linkedPlayerId" players={players} placeholder="Buscar el otro registro..." />
+            </label>
+            <label className="wide-field">Nota interna
+              <textarea name="notes" placeholder="Ej. MISMA PERSONA, SEGUNDA Y PRIMERA FUERZA." />
+            </label>
+            <button className="primary" type="submit" disabled={players.length < 2}>Vincular sin fusionar</button>
+          </form>
+        </section>
+
+        <section className="affiliation-maintenance-card merge-risk-card">
+          <div>
+            <span>Depuracion controlada</span>
+            <strong>Fusionar duplicado real</strong>
+            <small>Solo para registros repetidos dentro de la misma categoria. Esta accion mueve historial al principal.</small>
           </div>
           <form className="duplicate-merge-form" onSubmit={submitMerge}>
             <label>Jugador principal
@@ -2899,10 +2969,48 @@ function AffiliationsPanel({ league, onAddTeamAffiliation, onDeleteTeamAffiliati
             <label>Registro duplicado
               <SearchablePlayerSelect league={league} name="duplicatePlayerId" players={players} placeholder="Buscar registro duplicado..." />
             </label>
-            <button className="primary" type="submit" disabled={players.length < 2}>Fusionar duplicado</button>
+            <button className="danger" type="submit" disabled={players.length < 2}>Fusionar duplicado</button>
           </form>
         </section>
       </div>
+
+      <section className="affiliation-active-section identity-links-section">
+        <div className="affiliation-section-head">
+          <div>
+            <span>Identidades vinculadas</span>
+            <strong>Misma persona, historial separado</strong>
+          </div>
+          <small>{activeIdentityLinks.length} vinculo(s)</small>
+        </div>
+        <div className="affiliation-card-grid">
+          {activeIdentityLinks.map((link) => {
+            const linkedPlayers = (link.playerIds || []).map((playerId) => getPlayer(league, playerId)).filter(Boolean);
+            return (
+              <article className="discipline-admin-card affiliation-card identity-link-card" key={link.id}>
+                <div className="identity-link-list">
+                  {linkedPlayers.map((player) => {
+                    const team = getTeam(league, player.teamId);
+                    const competition = getCompetition(league, player.competitionId || team?.competitionId);
+                    return (
+                      <span key={player.id}>
+                        <strong>{player.name}</strong>
+                        <small>{team?.name || "Sin equipo"} | {competition?.name || "Categoria"}</small>
+                      </span>
+                    );
+                  })}
+                </div>
+                {link.notes && <p>{link.notes}</p>}
+                <button className="danger" type="button" onClick={() => {
+                  if (!window.confirm("¿Quitar este vinculo de identidad? No se modificaran eventos ni jugadores.")) return;
+                  onDeletePlayerIdentityLink(link.id);
+                  setNotice("Vinculo de identidad eliminado.");
+                }}>Quitar vinculo</button>
+              </article>
+            );
+          })}
+          {!activeIdentityLinks.length && <p className="empty">Aun no hay identidades vinculadas.</p>}
+        </div>
+      </section>
 
       <section className="affiliation-active-section">
         <div className="affiliation-section-head">

@@ -2670,6 +2670,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
               <b>{player.number || "-"}</b>
               <span>{player.name}</span>
               {player.isCaptain && <small>Capitan</small>}
+              {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
             </button>
           ))}
           {!players.length && <p>No hay jugadores que coincidan con la busqueda.</p>}
@@ -2738,6 +2739,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
                   <b>{player.number || "-"}</b>
                   <span>{player.name}</span>
                   {player.isCaptain && <small>Capitan</small>}
+                  {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
                 </button>
               ))}
             </div>
@@ -2747,7 +2749,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
           <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label="Jugador">
             <option value="">{filteredPlayers.length ? "Selecciona jugador" : "Sin coincidencias, mostrando plantilla"}</option>
             {visiblePlayers.map((player) => (
-              <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isCaptain ? " | CAPITAN" : ""}</option>
+              <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isCaptain ? " | CAPITAN" : ""}{player.isAffiliate ? ` | AFILIADO ${player.originTeamName || ""}` : ""}</option>
             ))}
           </select>
         </label>
@@ -3393,7 +3395,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
                 <button className="review-sign away" type="button" onClick={() => signPreliminaryReport("away")} disabled={saving || reportState.awaySigned || ["finalized", "published"].includes(reportState.report.status)}>
                   Firmar visitante
                 </button>
-                <button className="primary review-publish" type="button" onClick={finalizePreliminaryReport} disabled={saving || !reportState.readyToFinalize || ["finalized", "published"].includes(reportState.report.status)}>
+                <button className="primary review-publish" type="button" onClick={finalizePreliminaryReport} disabled={saving || !canPublishPreliminaryReport()}>
                   Finalizar acta
                 </button>
               </div>

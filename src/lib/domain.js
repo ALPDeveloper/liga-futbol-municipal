@@ -352,6 +352,43 @@ export function normalizeStore(data) {
           updatedAt: roster.updatedAt || roster.submittedAt || "",
           version: Number(roster.version || 1)
         })).filter((roster) => roster.matchId && roster.teamId),
+        matchParticipations: (league.matchParticipations || []).map((participation) => ({
+          ...participation,
+          id: participation.id || makeId("match-participation"),
+          matchId: participation.matchId || "",
+          teamId: participation.teamId || "",
+          status: participation.status || "submitted",
+          captainPlayerId: participation.captainPlayerId || "",
+          submittedByUserId: participation.submittedByUserId || "",
+          submittedAt: participation.submittedAt || "",
+          lockedAt: participation.lockedAt || participation.submittedAt || "",
+          correctedByUserId: participation.correctedByUserId || "",
+          correctedAt: participation.correctedAt || "",
+          correctionReason: upperText(participation.correctionReason || ""),
+          source: participation.source || "delegate_portal",
+          metadata: participation.metadata || {},
+          active: participation.active !== false,
+          version: Number(participation.version || 1),
+          createdAt: participation.createdAt || participation.submittedAt || "",
+          updatedAt: participation.updatedAt || participation.submittedAt || "",
+          players: (participation.players || [])
+            .map((entry) => (typeof entry === "string"
+              ? {
+                  playerId: entry,
+                  playerNameSnapshot: "",
+                  playerNumberSnapshot: "",
+                  playerPhotoSnapshot: ""
+                }
+              : {
+                  id: entry.id || "",
+                  playerId: entry.playerId || "",
+                  playerNameSnapshot: entry.playerNameSnapshot || entry.name || "",
+                  playerNumberSnapshot: String(entry.playerNumberSnapshot ?? entry.number ?? ""),
+                  playerPhotoSnapshot: entry.playerPhotoSnapshot || entry.photoUrl || "",
+                  createdAt: entry.createdAt || participation.submittedAt || ""
+                }))
+            .filter((entry) => entry.playerId)
+        })).filter((participation) => participation.matchId && participation.teamId),
         matchReports: (league.matchReports || []).map((report) => ({
           ...report,
           id: report.id || makeId("match-report"),
@@ -716,18 +753,19 @@ export function calculatePlayerAppearanceEligibility(league) {
     ])
   );
 
-  for (const roster of league.matchRosters || []) {
-    if (!["submitted", "approved", "locked"].includes(roster.status || "")) continue;
-    const match = (league.matches || []).find((item) => item.id === roster.matchId);
+  for (const participation of league.matchParticipations || []) {
+    if (!participation.active && participation.active !== undefined) continue;
+    if (!["submitted", "locked", "corrected"].includes(participation.status || "")) continue;
+    const match = (league.matches || []).find((item) => item.id === participation.matchId);
     if (!match || !["finished", "walkover"].includes(match.status)) continue;
-    const rosterTeamId = roster.teamId || "";
+    const participationTeamId = participation.teamId || "";
 
-    for (const entry of roster.players || []) {
+    for (const entry of participation.players || []) {
       const playerId = typeof entry === "string" ? entry : entry.playerId;
       const player = getPlayer(league, playerId);
       const row = rows.get(playerId);
       if (!player || !row) continue;
-      if (player.teamId !== rosterTeamId) continue;
+      if (player.teamId !== participationTeamId) continue;
       row.officialAppearances += 1;
     }
   }
@@ -806,7 +844,14 @@ function groupInvolvesMatch(league, state, match) {
 }
 
 function getDisplayPlayerForState(league, state) {
-  return state.playerIds.map((playerId) => getPlayer(league, playerId)).filter(Boolean)[0] || getPlayer(league, state.playerId);
+  const players = state.playerIds.map((playerId) => getPlayer(league, playerId)).filter(Boolean);
+  if (state.competitionId) {
+    const competitionPlayer = players.find((player) => (
+      (player.competitionId || getTeam(league, player.teamId)?.competitionId || "") === state.competitionId
+    ));
+    if (competitionPlayer) return competitionPlayer;
+  }
+  return players[0] || getPlayer(league, state.playerId);
 }
 
 function getDisplayTeamForState(league, state) {

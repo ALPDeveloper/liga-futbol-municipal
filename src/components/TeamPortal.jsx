@@ -7,9 +7,8 @@ import { uploadImage } from "../lib/uploadApi.js";
 import {
   createTeamPortalPlayer,
   fetchTeamPortal,
-  revealTeamMatchPin,
   signTeamMatchReport,
-  submitTeamMatchRoster,
+  submitTeamMatchParticipation,
   updateTeamPortalLogo,
   updateTeamPortalPlayer
 } from "../lib/teamDelegateApi.js";
@@ -55,10 +54,10 @@ function getDelegateMatchStatus(match) {
     return { tone: "warning", label: "Pospuesto", detail: match.scheduleNote || "La liga indicara nueva fecha u horario.", step: 1 };
   }
   if (match.status === "advanced") {
-    return { tone: "live", label: "Adelantado", detail: match.scheduleNote || "El partido fue movido a una fecha anterior.", step: match.roster ? 2 : 1 };
+    return { tone: "live", label: "Adelantado", detail: match.scheduleNote || "El partido fue movido a una fecha anterior.", step: match.participationSubmitted ? 2 : 1 };
   }
   if (match.status === "rescheduled") {
-    return { tone: "sent", label: "Reprogramado", detail: match.scheduleNote || "El partido tiene nueva fecha u horario.", step: match.roster ? 2 : 1 };
+    return { tone: "sent", label: "Reprogramado", detail: match.scheduleNote || "El partido tiene nueva fecha u horario.", step: match.participationSubmitted ? 2 : 1 };
   }
   if (match.myTeamSigned && match.opponentSigned) {
     return { tone: "signed", label: "Firmado", detail: "Ambos equipos firmaron el acta", step: 5 };
@@ -67,15 +66,15 @@ function getDelegateMatchStatus(match) {
     return { tone: "signed", label: "Mi equipo firmo", detail: "Esperando firma rival o cierre arbitral", step: 5 };
   }
   if (["pending_captain_review", "both_signed", "correction_requested"].includes(match.reportStatus)) {
-    return { tone: "warning", label: "Pendiente de firma", detail: "Revisa el acta y firma con tu PIN", step: 4 };
+    return { tone: "warning", label: "Pendiente de firma", detail: "Revisa el acta y firma digitalmente", step: 4 };
   }
   if (["in_progress", "match_finished", "temporarily_saved"].includes(match.workflowStatus || "")) {
     return { tone: "live", label: "En curso", detail: "El arbitro esta capturando el partido", step: 3 };
   }
-  if (match.roster) {
-    return { tone: "sent", label: "Convocatoria enviada", detail: "Lista y PIN generados para este partido", step: 2 };
+  if (match.participationSubmitted) {
+    return { tone: "sent", label: "Participantes enviados", detail: "Reporte bloqueado para conteo de PJ", step: 2 };
   }
-  return { tone: "pending", label: "Convocatoria pendiente", detail: "Selecciona jugadores, capitan y portero", step: 1 };
+  return { tone: "pending", label: "Participantes pendientes", detail: "Selecciona jugadores participantes y capitan", step: 1 };
 }
 
 function getTeamScore(match) {
@@ -135,10 +134,6 @@ function getDelegateReportEventPlayerName(event) {
   return `${number}${event?.playerName || event?.player || event?.playerId || "Jugador no identificado"}`;
 }
 
-function normalizePinInput(value) {
-  return String(value || "").replace(/\D/g, "").slice(0, 8);
-}
-
 function normalizeJerseyNumberInput(value) {
   return String(value ?? "").replace(/\D/g, "").slice(0, 4);
 }
@@ -175,7 +170,7 @@ function getDelegateNextAction(match, status) {
       tone: "warning",
       eyebrow: "Seguimiento",
       title: "Partido pospuesto",
-      detail: match.scheduleNote || "La liga pausó este partido. La convocatoria se conserva y se reactivara cuando se reprograme.",
+      detail: match.scheduleNote || "La liga pausó este partido. El reporte se conserva y se reactivara cuando se reprograme.",
       button: "Ver partidos",
       target: "matches"
     };
@@ -190,13 +185,13 @@ function getDelegateNextAction(match, status) {
       target: "acta"
     };
   }
-  if (!match.roster) {
+  if (!match.participationSubmitted) {
     return {
       tone: "warning",
       eyebrow: "Proxima accion",
-      title: "Enviar convocatoria",
-      detail: "Selecciona jugadores, titulares, capitan y portero para que el arbitro pueda validar el partido.",
-      button: "Mandar plantilla",
+      title: "Enviar participantes",
+      detail: "Selecciona solo los jugadores que participaron realmente y define al capitan del partido.",
+      button: "Reportar participantes",
       target: "lineup"
     };
   }
@@ -205,7 +200,7 @@ function getDelegateNextAction(match, status) {
       tone: "warning",
       eyebrow: "Proxima accion",
       title: "Revisar y firmar acta",
-      detail: "El acta ya esta disponible. Revisa eventos, resultado y firma con el PIN del capitan.",
+      detail: "El acta ya esta disponible. Revisa eventos, resultado y firma digitalmente.",
       button: "Ir a firma",
       target: "acta"
     };
@@ -233,8 +228,8 @@ function getDelegateNextAction(match, status) {
   return {
     tone: "sent",
     eyebrow: "Proxima accion",
-    title: "Convocatoria enviada",
-    detail: "Tu equipo ya completo la convocatoria. Mantente atento al inicio de captura y al acta preliminar.",
+    title: "Participantes enviados",
+    detail: "Tu equipo ya reporto participantes. Mantente atento al acta del partido.",
     button: "Ver seguimiento",
     target: "acta"
   };
@@ -424,14 +419,11 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const [editingPlayerId, setEditingPlayerId] = useState("");
   const [busyPlayerId, setBusyPlayerId] = useState("");
   const [busyMatchId, setBusyMatchId] = useState("");
-  const [busyPinMatchId, setBusyPinMatchId] = useState("");
-  const [visiblePinsByMatchId, setVisiblePinsByMatchId] = useState({});
   const [teamLogoResetKey, setTeamLogoResetKey] = useState(0);
   const [activeView, setActiveView] = useState("home");
   const [delegateMatchTab, setDelegateMatchTab] = useState("upcoming");
   const [actaReturnView, setActaReturnView] = useState("home");
   const [selectedMatchId, setSelectedMatchId] = useState("");
-  const [signaturePin, setSignaturePin] = useState("");
   const [signingMatchId, setSigningMatchId] = useState("");
   const canManageRoster = Boolean(context?.canManageRoster);
   const filteredPlayers = useMemo(() => {
@@ -647,85 +639,49 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
     if (busyMatchId) return;
     const draft = rosterDrafts[match.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" };
     if (!draft.playerIds.length) {
-      setError("Selecciona al menos un jugador para enviar la convocatoria.");
+      setError("Selecciona al menos un jugador participante.");
       return;
     }
     if (!draft.captainPlayerId || !draft.playerIds.includes(draft.captainPlayerId)) {
-      setError("Selecciona un capitan dentro de la convocatoria.");
+      setError("Selecciona un capitan dentro de los participantes.");
       return;
     }
-    if (!draft.goalkeeperPlayerId || !draft.playerIds.includes(draft.goalkeeperPlayerId)) {
-      setError("Selecciona un portero dentro de la convocatoria.");
-      return;
-    }
-    const starterSet = new Set(draft.starters || []);
-    const substituteSet = new Set(draft.substitutes || []);
-    const missingRolePlayerId = draft.playerIds.find((playerId) => !starterSet.has(playerId) && !substituteSet.has(playerId));
-    if (missingRolePlayerId) {
-      setError(`${getEligiblePlayerName(eligiblePlayers, missingRolePlayerId)} debe estar como titular o suplente.`);
-      return;
-    }
-    const confirmed = window.confirm(`¿Enviar convocatoria de ${context.teamName} vs ${match.opponentName}?\n\nJugadores: ${draft.playerIds.length}\nTitulares: ${(draft.starters || []).length}\nSuplentes: ${(draft.substitutes || []).length}\nCapitan: ${getEligiblePlayerName(eligiblePlayers, draft.captainPlayerId)}\nPortero: ${getEligiblePlayerName(eligiblePlayers, draft.goalkeeperPlayerId)}\n\nEl arbitro vera esta lista para capturar el acta.`);
+    const confirmed = window.confirm(`¿Enviar participantes de ${context.teamName} vs ${match.opponentName}?\n\nJugadores participantes: ${draft.playerIds.length}\nCapitan: ${getEligiblePlayerName(eligiblePlayers, draft.captainPlayerId)}\n\nEste reporte quedara bloqueado para conteo de partidos jugados.`);
     if (!confirmed) return;
 
     setBusyMatchId(match.id);
-    setNotice("Enviando convocatoria...");
+    setNotice("Enviando participantes...");
     setError("");
     try {
-      const response = await submitTeamMatchRoster(authToken, match.id, draft);
+      const response = await submitTeamMatchParticipation(authToken, match.id, {
+        playerIds: draft.playerIds,
+        captainPlayerId: draft.captainPlayerId,
+        notes: draft.notes || ""
+      });
       applyPortalPayload(response);
       writeTeamPortalCache(currentUser?.id, response);
-      setNotice("Plantilla enviada exitosamente.");
+      setNotice("Participantes enviados y bloqueados correctamente.");
     } catch (saveError) {
       setNotice("");
-      setError(saveError.message || "No se pudo enviar la convocatoria.");
+      setError(saveError.message || "No se pudo enviar participantes.");
     } finally {
       setBusyMatchId("");
-    }
-  }
-
-  async function revealMatchPin(match, options = {}) {
-    if (busyPinMatchId) return;
-    if (!options.reportFollowup) return;
-
-    setBusyPinMatchId(match.id);
-    setNotice("Mostrando PIN del capitan...");
-    setError("");
-    try {
-      const response = await revealTeamMatchPin(authToken, match.id, { source: "report_followup" });
-      if (response.payload) {
-        applyPortalPayload(response.payload);
-        writeTeamPortalCache(currentUser?.id, response.payload);
-      }
-      setVisiblePinsByMatchId((current) => ({ ...current, [match.id]: response.pin || "" }));
-      setNotice("PIN mostrado. Compartelo solo al validar el acta.");
-    } catch (pinError) {
-      setNotice("");
-      setError(pinError.message || "No se pudo mostrar el PIN.");
-    } finally {
-      setBusyPinMatchId("");
     }
   }
 
   async function submitReportSignature(event) {
     event.preventDefault();
     if (!activeMatch || signingMatchId) return;
-    const pin = normalizePinInput(signaturePin);
-    if (pin.length < 4) {
-      setError("Ingresa el PIN del capitan para firmar el acta.");
-      return;
-    }
 
     setSigningMatchId(activeMatch.id);
     setNotice("Firmando acta...");
     setError("");
     try {
-      const response = await signTeamMatchReport(authToken, activeMatch.id, { pin });
+      const response = await signTeamMatchReport(authToken, activeMatch.id, {});
       if (response.payload) {
         applyPortalPayload(response.payload);
         writeTeamPortalCache(currentUser?.id, response.payload);
       }
-      setSignaturePin("");
       setNotice(response.readyToFinalize ? "Acta firmada. Ambos equipos ya completaron firmas." : "Acta firmada correctamente.");
     } catch (signError) {
       setNotice("");
@@ -752,11 +708,11 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
 
   const operationalUpcomingMatches = upcomingMatchItems.filter(isDelegateMatchOperational);
   const nextMatch = operationalUpcomingMatches[0] || upcomingMatchItems[0] || matches[0] || null;
-  const nextLineupMatch = operationalUpcomingMatches.find((match) => !hasDelegateActaAvailable(match) && !match.roster) ||
+  const nextLineupMatch = operationalUpcomingMatches.find((match) => !hasDelegateActaAvailable(match) && !match.participationSubmitted) ||
     operationalUpcomingMatches.find((match) => !hasDelegateActaAvailable(match)) ||
     null;
-  const submittedRosters = matches.filter((match) => match.roster).length;
-  const openRosterMatches = matches.filter((match) => !match.roster).length;
+  const submittedRosters = matches.filter((match) => match.participationSubmitted).length;
+  const openRosterMatches = matches.filter((match) => !match.participationSubmitted).length;
   const positionCounts = PLAYER_POSITION_OPTIONS.map((position) => ({
     position,
     count: players.filter((player) => getPlayerPositionOptionValue(player.position) === position).length
@@ -770,18 +726,23 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   const activeReportPayload = activeMatch?.reportPayload && typeof activeMatch.reportPayload === "object" ? activeMatch.reportPayload : {};
   const activeReportObservations = String(activeReportPayload.observations || activeMatch?.observations || "").trim();
   const activeReportEvents = getReportEvents(activeMatch);
+  const activeParticipationPlayers = Array.isArray(activeMatch?.participation?.players) ? activeMatch.participation.players : [];
+  const activeParticipationCaptain = activeParticipationPlayers.find((player) => player.playerId === activeMatch?.participation?.captainPlayerId);
   const activeReportCanSign = Boolean(
-    activeMatch?.roster &&
-    activeMatch.captureMode === "live" &&
+    activeMatch &&
     !activeMatch.myTeamSigned &&
-    ["pending_captain_review", "correction_requested", "both_signed"].includes(activeMatch.reportStatus)
+    ["pending_captain_review", "correction_requested", "both_signed", "finalized", "published"].includes(activeMatch.reportStatus)
   );
   const activeActaReadOnly = Boolean(activeMatch && (
     activeMatch.reportStatus === "published" ||
     activeMatch.status === "finished" ||
     activeMatch.status === "walkover"
   ));
-  const activeLineupAvailable = Boolean(activeMatch && isDelegateMatchOperational(activeMatch) && !hasDelegateActaAvailable(activeMatch));
+  const activeLineupAvailable = Boolean(
+    activeMatch &&
+    !activeMatch.participationSubmitted &&
+    (isDelegateMatchOperational(activeMatch) || hasDelegateActaAvailable(activeMatch))
+  );
   const activeDraft = activeMatch
     ? rosterDrafts[activeMatch.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" }
     : { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" };
@@ -796,7 +757,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
     { id: "home", label: "Inicio", icon: "home" },
     { id: "roster", label: "Plantilla", icon: "teams" },
     { id: "matches", label: "Partidos", icon: "matches" },
-    { id: "lineup", label: "Convocatoria", icon: "history" },
+    { id: "lineup", label: "Participantes", icon: "history" },
     { id: "tools", label: "Mas", icon: "more" }
   ];
   const isActaView = activeView === "acta";
@@ -811,8 +772,8 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
   ].filter(([, name]) => name) : [];
   const nextAction = getDelegateNextAction(nextMatch, nextMatchStatus);
   const nextActionChecks = nextMatch ? [
-    { label: "Convocatoria enviada", done: Boolean(nextMatch.roster) },
-    { label: "Rival convocado", done: Boolean(nextMatch.opponentRosterSubmitted) },
+    { label: "Participantes enviados", done: Boolean(nextMatch.participationSubmitted) },
+    { label: "Rival reportado", done: Boolean(nextMatch.opponentParticipationSubmitted) },
     { label: "Acta activa", done: nextMatchStatus.step >= 3 },
     { label: "Firma del equipo", done: Boolean(nextMatch.myTeamSigned) }
   ] : [
@@ -831,8 +792,8 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
       setActiveView("matches");
       return;
     }
-    if (match.roster) setActaReturnView(activeView === "matches" ? "matches" : "home");
-    setActiveView(match.roster ? "acta" : "lineup");
+    if (match.participationSubmitted) setActaReturnView(activeView === "matches" ? "matches" : "home");
+    setActiveView(match.participationSubmitted ? "acta" : "lineup");
   };
   const openDelegateNextAction = () => {
     if (nextAction.target === "lineup" && nextMatch) {
@@ -1044,7 +1005,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                               </div>
                             </div>
                             <div className="delegate-match-card-checks">
-                              <span className={match.roster ? "done" : ""}><b>{match.roster ? "✓" : "○"}</b>Convocatoria {match.roster ? "enviada" : "pendiente"}</span>
+                              <span className={match.participationSubmitted ? "done" : ""}><b>{match.participationSubmitted ? "✓" : "○"}</b>Participantes {match.participationSubmitted ? "enviados" : "pendientes"}</span>
                               <span className={actaAvailable ? "done" : ""}><b>{actaAvailable ? "✓" : "○"}</b>Acta {actaAvailable ? "activa" : "pendiente"}</span>
                               <span className={match.myTeamSigned ? "done" : ""}><b>{match.myTeamSigned ? "✓" : "○"}</b>Firma {match.myTeamSigned ? "lista" : "pendiente"}</span>
                             </div>
@@ -1057,7 +1018,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                               </button>
                             ) : isDelegateMatchOperational(match) ? (
                               <button type="button" onClick={() => openMatchWorkflow(match)}>
-                                <span>{match.roster ? "Seguimiento" : "Convocar"}</span>
+                                <span>{match.participationSubmitted ? "Seguimiento" : "Participantes"}</span>
                                 <strong>{status.label}</strong>
                               </button>
                             ) : (
@@ -1127,6 +1088,11 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       <span><small>Cancha</small><strong>{activeMatch.venue || "Por definir"}</strong></span>
                       <span><small>Jornada</small><strong>{activeMatch.round || "-"}</strong></span>
                     </div>
+                    {!activeMatch.participationSubmitted && (
+                      <button className="portal-primary-action" type="button" onClick={() => setActiveView("lineup")}>
+                        Reportar participantes
+                      </button>
+                    )}
                     {activeReferees.length > 0 && (
                       <div className="delegate-acta-officials">
                         <strong>Cuerpo arbitral</strong>
@@ -1136,6 +1102,30 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       </div>
                     )}
                   </article>
+
+                  {activeParticipationPlayers.length > 0 && (
+                    <article className="delegate-match-detail">
+                      <div className="portal-card-head">
+                        <strong>Participantes reportados</strong>
+                        <span>{activeParticipationPlayers.length}</span>
+                      </div>
+                      {activeParticipationCaptain && (
+                        <p className="delegate-sign-note">Capitan: {activeParticipationCaptain.playerNameSnapshot}</p>
+                      )}
+                      <div className="delegate-acta-mini-events full">
+                        {activeParticipationPlayers.map((player) => (
+                          <span className="delegate-acta-event-row" key={player.id || player.playerId}>
+                            <b>{player.playerNumberSnapshot || "-"}</b>
+                            <small>
+                              <em>{player.playerNameSnapshot}</em>
+                              <span>{player.playerId === activeMatch.participation?.captainPlayerId ? "Capitan" : "Participante"}</span>
+                              <i>{context.teamName}</i>
+                            </small>
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  )}
 
                   <article className="delegate-match-detail">
                     <div className="portal-card-head">
@@ -1166,29 +1156,11 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                         {activeMatch.myTeamSigned ? "Firmada" : activeReportCanSign ? "Pendiente" : "No disponible"}
                       </span>
                     </div>
-                    <div className="delegate-acta-pin-row">
-                      <span>
-                        <small>PIN del capitan</small>
-                        <strong>{visiblePinsByMatchId[activeMatch.id] || "------"}</strong>
-                      </span>
-                      <button type="button" onClick={() => revealMatchPin(activeMatch, { reportFollowup: true })} disabled={!activeMatch.roster?.captainPin || busyPinMatchId === activeMatch.id}>
-                        {busyPinMatchId === activeMatch.id ? "Mostrando..." : "Mostrar PIN"}
-                      </button>
-                    </div>
                     {activeMatch.myTeamSigned ? (
                       <p className="delegate-sign-note">Tu equipo ya firmo esta acta. El arbitro vera la firma automaticamente en su panel.</p>
                     ) : (
                       <form className="delegate-acta-sign-form" onSubmit={submitReportSignature}>
-                        <label>Capturar PIN para firmar
-                          <input
-                            inputMode="numeric"
-                            maxLength={8}
-                            placeholder="6 digitos"
-                            type="password"
-                            value={signaturePin}
-                            onChange={(event) => setSignaturePin(normalizePinInput(event.target.value))}
-                          />
-                        </label>
+                        <p className="delegate-sign-note">Confirma que revisaste el acta antes de firmarla digitalmente.</p>
                         <button className="portal-primary-action" type="submit" disabled={!activeReportCanSign || signingMatchId === activeMatch.id}>
                           {signingMatchId === activeMatch.id ? "Firmando..." : "Firmar acta"}
                         </button>
@@ -1207,9 +1179,9 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
             <div className="delegate-view-stack delegate-lineup-screen">
               {!nextLineupMatch ? (
                 <article className="delegate-match-detail">
-                  <span className="portal-status-pill neutral">Sin convocatoria pendiente</span>
-                  <strong>No hay partidos disponibles para mandar convocatoria.</strong>
-                  <small>La convocatoria solo aplica a partidos programados, reprogramados o adelantados que todavia no tienen acta resuelta.</small>
+                  <span className="portal-status-pill neutral">Sin reporte pendiente</span>
+                  <strong>No hay partidos disponibles para reportar participantes.</strong>
+                  <small>Los participantes se reportan por partido y quedan bloqueados para conteo de PJ.</small>
                   <button className="portal-primary-action" type="button" onClick={() => setActiveView("matches")}>Ver partidos</button>
                 </article>
               ) : activeMatch && !activeLineupAvailable ? (
@@ -1218,7 +1190,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                   <strong>{context.teamName} vs {activeMatch.opponentName}</strong>
                   <small>{hasDelegateActaAvailable(activeMatch) ? "Este partido ya tiene acta disponible. Puedes revisarla en modo lectura." : getScheduleChangeText(activeMatch) || activeMatchStatus.detail}</small>
                   <button className="portal-primary-action" type="button" onClick={() => openMatchWorkflow(hasDelegateActaAvailable(activeMatch) ? activeMatch : nextLineupMatch)}>
-                    {hasDelegateActaAvailable(activeMatch) ? "Ver acta" : "Ir a convocatoria pendiente"}
+                    {hasDelegateActaAvailable(activeMatch) ? "Ver acta" : "Ir a participantes pendientes"}
                   </button>
                 </article>
               ) : activeMatch ? (
@@ -1245,9 +1217,9 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                     </div>
                   </article>
                   <div className="delegate-lineup-summary">
-                    <span><b>{activeDraft.starters?.length || 0}</b> Titulares</span>
-                    <span><b>{activeDraft.substitutes?.length || 0}</b> Suplentes</span>
-                    <span><b>{activeDraft.playerIds?.length || 0}</b> Convocados</span>
+                    <span><b>{activeDraft.playerIds?.length || 0}</b> Participantes</span>
+                    <span><b>{activeDraft.captainPlayerId ? 1 : 0}</b> Capitan</span>
+                    <span><b>{activeMatch.participationSubmitted ? "OK" : "Pendiente"}</b> Reporte</span>
                   </div>
                   <div className="delegate-lineup-control-card">
                     <label>Capitan
@@ -1257,18 +1229,7 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       >
                         <option value="">Selecciona capitan</option>
                         {activeAvailablePlayers.filter((player) => activeDraft.playerIds.includes(player.id)).map((player) => (
-                          <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>Portero
-                      <select
-                        value={activeDraft.goalkeeperPlayerId || ""}
-                        onChange={(event) => updateRosterDraft(activeMatch.id, (current) => ({ ...current, goalkeeperPlayerId: event.target.value }))}
-                      >
-                        <option value="">Selecciona portero</option>
-                        {activeAvailablePlayers.filter((player) => activeDraft.playerIds.includes(player.id)).map((player) => (
-                          <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}</option>
+                          <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isAffiliate ? ` | AFILIADO ${player.originTeamName || ""}` : ""}</option>
                         ))}
                       </select>
                     </label>
@@ -1283,7 +1244,6 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                       const blockedByPlayoff = activeMatch.isPlayoff && player.playoffEligibility?.applies && !player.playoffEligibility?.eligible;
                       const disabled = blockedBySuspension || blockedByPlayoff;
                       const checked = activeDraft.playerIds.includes(player.id) && !disabled;
-                      const rosterRole = activeDraft.starters?.includes(player.id) ? "starter" : activeDraft.substitutes?.includes(player.id) ? "substitute" : "starter";
                       const jerseyNumber = activeDraft.jerseyNumbers?.[player.id] ?? player.number ?? "";
                       const suspensionLabel = player.suspension?.pendingReview
                         ? `Expulsado sujeto a comision: ${player.suspension.reason || "Revision disciplinaria"}`
@@ -1318,8 +1278,12 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                             })}
                           />
                           <span>
-                            <strong>{player.name}</strong>
-                            <small>{disabled ? suspensionLabel : `Numero base #${player.number || "-"} | ${player.position || "Jugador"}`}</small>
+                            <strong>{player.name}{player.isAffiliate && <em className="delegate-affiliate-pill">Afiliado</em>}</strong>
+                            <small>
+                              {disabled
+                                ? suspensionLabel
+                                : `${player.isAffiliate ? `Origen: ${player.originTeamName || "Equipo afiliado"} | ` : ""}No. #${player.number || "-"} | ${player.position || "Jugador"}`}
+                            </small>
                           </span>
                           {checked && (
                             <div className="delegate-lineup-player-tools">
@@ -1339,45 +1303,25 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
                                   }))}
                                 />
                               </span>
-                              <select
-                                aria-label={`Rol de ${player.name}`}
-                                value={rosterRole}
-                                onChange={(event) => updateRosterDraft(activeMatch.id, (current) => {
-                                  const starters = new Set(current.starters || []);
-                                  const substitutes = new Set(current.substitutes || []);
-                                  starters.delete(player.id);
-                                  substitutes.delete(player.id);
-                                  if (event.target.value === "substitute") substitutes.add(player.id);
-                                  else starters.add(player.id);
-                                  return {
-                                    ...current,
-                                    starters: [...starters].filter((playerId) => current.playerIds.includes(playerId)),
-                                    substitutes: [...substitutes].filter((playerId) => current.playerIds.includes(playerId))
-                                  };
-                                })}
-                              >
-                                <option value="starter">Titular</option>
-                                <option value="substitute">Suplente</option>
-                              </select>
                             </div>
                           )}
                         </label>
                       );
                     })}
                   </div>
-                  <label className="wide-field">Notas para el arbitro
+                  <label className="wide-field">Notas del reporte
                     <input
                       value={activeDraft.notes || ""}
                       onChange={(event) => updateRosterDraft(activeMatch.id, (current) => ({ ...current, notes: event.target.value }))}
-                      placeholder="Ej. Capitan alterno, uniforme, observaciones"
+                      placeholder="Ej. Observacion sobre participantes"
                     />
                   </label>
-                  <button className="portal-primary-action" type="submit" disabled={busyMatchId === activeMatch.id}>
-                    {busyMatchId === activeMatch.id ? "Enviando..." : activeMatch.roster ? "Actualizar convocatoria" : "Enviar convocatoria"}
+                  <button className="portal-primary-action" type="submit" disabled={activeMatch.participationSubmitted || busyMatchId === activeMatch.id}>
+                    {busyMatchId === activeMatch.id ? "Enviando..." : activeMatch.participationSubmitted ? "Participantes enviados" : "Enviar participantes"}
                   </button>
                 </form>
               ) : (
-                <p className="empty">Selecciona un partido para preparar convocatoria.</p>
+                <p className="empty">Selecciona un partido para reportar participantes.</p>
               )}
             </div>
           )}
@@ -1659,25 +1603,21 @@ function buildRosterDrafts(matches, eligiblePlayers) {
         return !blockedBySuspension && !blockedByPlayoff;
       })
       .map((player) => player.id);
-    const rosterPlayerIds = (match.roster?.players || [])
+    const participationPlayerIds = (match.participation?.players || [])
       .map((entry) => typeof entry === "string" ? entry : entry.playerId)
       .filter((playerId) => availablePlayerIds.includes(playerId));
-    const playerIds = rosterPlayerIds.length ? rosterPlayerIds : availablePlayerIds;
+    const playerIds = participationPlayerIds.length ? participationPlayerIds : [];
     const jerseyNumbers = Object.fromEntries(playerIds.map((playerId) => {
-      const rosterEntry = (match.roster?.players || []).find((entry) => (typeof entry === "string" ? entry : entry.playerId) === playerId);
+      const participationEntry = (match.participation?.players || []).find((entry) => (typeof entry === "string" ? entry : entry.playerId) === playerId);
       const player = eligiblePlayers.find((item) => item.id === playerId);
-      return [playerId, normalizeJerseyNumberInput(typeof rosterEntry === "object" ? rosterEntry.jerseyNumber ?? rosterEntry.rosterNumber ?? player?.number ?? "" : player?.number ?? "")];
+      return [playerId, normalizeJerseyNumberInput(typeof participationEntry === "object" ? participationEntry.playerNumberSnapshot ?? player?.number ?? "" : player?.number ?? "")];
     }));
-    const starters = (match.roster?.starters?.length ? match.roster.starters : playerIds.slice(0, 11))
-      .filter((playerId) => playerIds.includes(playerId));
-    const substitutes = (match.roster?.substitutes?.length ? match.roster.substitutes : playerIds.slice(11))
-      .filter((playerId) => playerIds.includes(playerId) && !starters.includes(playerId));
-    const captainPlayerId = playerIds.includes(match.roster?.captainPlayerId)
-      ? match.roster.captainPlayerId
+    const starters = [];
+    const substitutes = [];
+    const captainPlayerId = playerIds.includes(match.participation?.captainPlayerId)
+      ? match.participation.captainPlayerId
       : "";
-    const goalkeeperPlayerId = playerIds.includes(match.roster?.goalkeeperPlayerId)
-      ? match.roster.goalkeeperPlayerId
-      : "";
+    const goalkeeperPlayerId = "";
     drafts[match.id] = {
       playerIds,
       starters,
@@ -1685,7 +1625,7 @@ function buildRosterDrafts(matches, eligiblePlayers) {
       captainPlayerId,
       goalkeeperPlayerId,
       jerseyNumbers,
-      notes: match.roster?.notes || ""
+      notes: match.participation?.metadata?.notes || ""
     };
   }
   return drafts;
