@@ -498,6 +498,9 @@ function buildMatchPayload({ league, payload, currentMatch = null, canEditResult
   const allowsPendingSchedule = status === "postponed";
   if (!allowsPendingSchedule && !isValidDateValue(date)) {
     const error = new Error("Fecha invalida para el partido.");
+    error.message = currentMatch?.status === "postponed"
+      ? "Selecciona una fecha valida para reprogramar el partido pospuesto."
+      : "Selecciona una fecha valida para programar el partido.";
     error.status = 400;
     throw error;
   }

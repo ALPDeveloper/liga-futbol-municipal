@@ -2333,6 +2333,10 @@ function isActiveScheduleStatus(status) {
   return ["scheduled", "rescheduled", "advanced"].includes(status || "scheduled");
 }
 
+function isValidScheduleDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
 function MatchStatusSelect({ defaultValue, ariaLabel, canEditMatchResults }) {
   return (
     <select name="status" defaultValue={defaultValue || "scheduled"} aria-label={ariaLabel}>
@@ -4189,8 +4193,14 @@ function ManagementBoard({
   }
 
   async function handleMatchSave(matchId, form) {
+    const payload = getFormPayload(form);
+    if (isActiveScheduleStatus(payload.status) && !isValidScheduleDate(payload.date)) {
+      window.alert("Para programar o reprogramar este partido, selecciona una fecha valida.");
+      form.elements.date?.focus();
+      return;
+    }
     if (!window.confirm("¿Guardar cambios de este partido?")) return;
-    const result = await onUpdateMatch(matchId, getFormPayload(form));
+    const result = await onUpdateMatch(matchId, payload);
     if (result === false) return;
     setListNotice("Datos del partido guardados correctamente.");
   }
