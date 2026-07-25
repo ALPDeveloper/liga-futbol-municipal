@@ -32,12 +32,21 @@ const IMAGE_UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp";
 const MAX_UPLOAD_SIZE_MB = Math.round((MAX_IMAGE_DATA_URL_LENGTH / 1024 / 1024) * 10) / 10;
 const ADMIN_MATCH_REPORT_STATUSES = "finalized,pending_captain_review,correction_requested,both_signed";
 const ADMIN_SHEET_STEPS = [
-  { id: "match", number: 1, label: "Partido", hint: "Seleccionar" },
+  { id: "match", number: 1, label: "Partido", hint: "Info" },
   { id: "score", number: 2, label: "Marcador", hint: "Resultado" },
   { id: "events", number: 3, label: "Eventos", hint: "Registro" },
   { id: "notes", number: 4, label: "Obs.", hint: "Acta" },
   { id: "finish", number: 5, label: "Finalizar", hint: "Publicar" }
 ];
+const ADMIN_SHEET_EVENT_ACTIONS = [
+  { type: "goal", label: "Gol", icon: "⚽", className: "event-goal" },
+  { type: "yellow", label: "Amarilla", icon: "🟨", className: "event-yellow" },
+  { type: "red", label: "Roja", icon: "🟥", className: "event-red" },
+  { type: "own_goal", label: "Autogol", icon: "🥅", className: "event-own-goal" },
+  { type: "injury_note", label: "Lesion", icon: "✚", className: "event-injury" },
+  { type: "other_note", label: "Otro", icon: "⋯", className: "event-other" }
+];
+const ADMIN_SHEET_OBSERVATION_CHIPS = ["Juego limpio", "Lluvia", "Retraso", "Suspension temporal", "Sin novedades"];
 
 function needsAdminMatchReportAttention(report) {
   return report?.status === "finalized" || report?.payload?.signatureIssue?.status === "pending_admin_attention";
@@ -2341,13 +2350,14 @@ function isValidScheduleDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
 
-function MatchStatusSelect({ defaultValue, ariaLabel, canEditMatchResults }) {
+function MatchStatusSelect({ defaultValue, ariaLabel, canEditMatchResults, onChange }) {
   return (
-    <select name="status" defaultValue={defaultValue || "scheduled"} aria-label={ariaLabel}>
+    <select name="status" defaultValue={defaultValue || "scheduled"} aria-label={ariaLabel} onChange={onChange}>
       <option value="scheduled">Programado</option>
       <option value="rescheduled">Reprogramado</option>
       <option value="advanced">Adelantado</option>
       <option value="postponed">Pospuesto</option>
+      <option value="suspended">Suspendido</option>
       {canEditMatchResults && <option value="finished">Finalizado</option>}
       {canEditMatchResults && <option value="walkover">Default</option>}
     </select>
@@ -4013,6 +4023,243 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
   );
 }
 
+function AdminMatchTeamBadge({ team, side = "home" }) {
+  const initials = getInitials(team?.name || (side === "home" ? "L" : "V"));
+  return (
+    <span className={`admin-match-team-badge ${side}`}>
+      {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : initials}
+    </span>
+  );
+}
+
+function getAdminMatchScheduleState(match) {
+  const hasDate = Boolean(match.date);
+  const hasTime = Boolean(match.time);
+  const hasVenue = Boolean(match.venue);
+  const complete = hasDate && hasTime && hasVenue;
+  const finished = match.status === "finished" || match.status === "walkover";
+  const pendingAttention = match.status === "postponed" || match.status === "suspended";
+
+  if (finished) return { tone: "finished", label: "Finalizado", detail: "Resultado registrado", complete, hasDate, hasTime, hasVenue };
+  if (pendingAttention) return { tone: "pending", label: getMatchStatusLabel(match.status), detail: match.scheduleNote || "Requiere seguimiento", complete, hasDate, hasTime, hasVenue };
+  if (complete) return { tone: "scheduled", label: getMatchStatusLabel(match.status), detail: `${formatDate(match.date)} · ${match.time}${match.venue ? ` · ${match.venue}` : ""}`, complete, hasDate, hasTime, hasVenue };
+  return { tone: "pending", label: "Pendiente", detail: "Sin programar", complete, hasDate, hasTime, hasVenue };
+}
+
+function AdminMatchEditorCard({
+  canEditMatchResults,
+  getCompetitionLeague,
+  league,
+  match,
+  onDelete,
+  onSubmit,
+  showingAllCompetitions = false
+}) {
+  const homeTeam = getTeam(league, match.homeTeamId);
+  const awayTeam = getTeam(league, match.awayTeamId);
+  const competition = getCompetition(league, match.competitionId);
+  const scheduleState = getAdminMatchScheduleState(match);
+  const isInitialResultVisible = match.status === "finished" || match.status === "walkover";
+  const [statusValue, setStatusValue] = useState(match.status || "scheduled");
+  const [resultVisible, setResultVisible] = useState(isInitialResultVisible);
+  const resultEnabled = resultVisible || statusValue === "finished" || statusValue === "walkover";
+  const stage = match.stage || "regular";
+  const isPlayoff = stage === "playoff";
+  const editable = canEditMatchResults || isEditableScheduleStatus(match.status);
+
+  useEffect(() => {
+    const nextStatus = match.status || "scheduled";
+    setStatusValue(nextStatus);
+    setResultVisible(nextStatus === "finished" || nextStatus === "walkover");
+  }, [match.id, match.status]);
+
+  function handleStatusChange(event) {
+    const nextStatus = event.target.value;
+    setStatusValue(nextStatus);
+    if (nextStatus === "finished" || nextStatus === "walkover") setResultVisible(true);
+  }
+
+  return (
+    <details className={`admin-match-editor-card ${scheduleState.tone}`} data-match-id={match.id}>
+      <summary className="admin-match-compact-card">
+        <span className="admin-match-index">{match.round || "-"}</span>
+        <div className="admin-match-compact-team home">
+          <AdminMatchTeamBadge team={homeTeam} side="home" />
+          <strong>{homeTeam?.name || "Local"}</strong>
+        </div>
+        <span className="admin-match-vs">VS</span>
+        <div className="admin-match-compact-team away">
+          <AdminMatchTeamBadge team={awayTeam} side="away" />
+          <strong>{awayTeam?.name || "Visitante"}</strong>
+        </div>
+        <div className="admin-match-quick-status">
+          <b>{scheduleState.label}</b>
+          <small>{scheduleState.detail}</small>
+        </div>
+        <span className="admin-match-edit-pill">Editar</span>
+        <span className="admin-match-chevron" aria-hidden="true">⌄</span>
+      </summary>
+
+      <form className="admin-match-edit-panel" onSubmit={onSubmit}>
+        <header className="admin-match-edit-head">
+          <div>
+            <span>Partido {match.round || "-"}</span>
+            <strong>{homeTeam?.name || "Local"} <b>VS</b> {awayTeam?.name || "Visitante"}</strong>
+          </div>
+          <small className={`admin-match-status-badge ${scheduleState.tone}`}>{scheduleState.label}</small>
+          <button className="admin-match-delete-icon" type="button" disabled={!editable} onClick={onDelete} aria-label="Eliminar partido">🗑</button>
+        </header>
+
+        <div className="admin-match-readiness" aria-label="Indicador de programacion">
+          <span className={scheduleState.hasDate ? "ok" : "missing"}>Fecha {scheduleState.hasDate ? "✓" : "✕"}</span>
+          <span className={scheduleState.hasTime ? "ok" : "missing"}>Hora {scheduleState.hasTime ? "✓" : "✕"}</span>
+          <span className={scheduleState.hasVenue ? "ok" : "missing"}>Cancha {scheduleState.hasVenue ? "✓" : "✕"}</span>
+        </div>
+
+        <section className="admin-match-edit-block">
+          <h4><span aria-hidden="true">▣</span> Programacion</h4>
+          <div className="admin-match-field-grid">
+            <label>Fecha
+              <input name="date" defaultValue={match.date} aria-label={`Fecha ${match.id}`} type="date" placeholder="Seleccionar fecha" />
+              {!match.date && <small>Sin definir</small>}
+            </label>
+            <label>Hora
+              <input name="time" defaultValue={match.time || ""} aria-label={`Hora ${match.id}`} type="time" placeholder="Seleccionar hora" />
+              {!match.time && <small>Sin definir</small>}
+            </label>
+            <label>Cancha
+              <VenueSelect league={league} defaultValue={match.venue || ""} ariaLabel={`Cancha ${match.id}`} />
+              {!match.venue && <small>Seleccionar cancha</small>}
+            </label>
+          </div>
+        </section>
+
+        <section className="admin-match-edit-block">
+          <h4><span aria-hidden="true">♜</span> Informacion del torneo</h4>
+          <div className="admin-match-field-grid tournament">
+            <label>Categoria
+              <CompetitionSelect league={league} name="competitionId" defaultValue={match.competitionId || getDefaultCompetitionId(league)} />
+            </label>
+            <label>Tipo
+              <select name="stage" defaultValue={stage} aria-label={`Tipo ${match.id}`}>
+                <option value="regular">Regular</option>
+                <option value="playoff">Liguilla</option>
+              </select>
+            </label>
+            <label>Jornada
+              <input name="round" defaultValue={match.round} aria-label={`Jornada ${match.id}`} type="number" min="1" required />
+            </label>
+            <label>Fase
+              <select name="playoffRound" defaultValue={match.playoffRound || ""} aria-label={`Fase ${match.id}`} required={isPlayoff}>
+                <option value="">{isPlayoff ? "Selecciona fase" : "No aplica"}</option>
+                {PLAYOFF_PHASE_OPTIONS.map((phase) => (
+                  <option key={phase.value} value={phase.label}>{phase.label}</option>
+                ))}
+                <option value="Repechaje">Repechaje</option>
+              </select>
+            </label>
+            <label>Juego
+              <select name="playoffLeg" defaultValue={match.playoffLeg || ""} aria-label={`Juego ${match.id}`}>
+                <option value="">{isPlayoff ? "Unico" : "No aplica"}</option>
+                <option value="Ida">Ida</option>
+                <option value="Vuelta">Vuelta</option>
+              </select>
+            </label>
+          </div>
+          {showingAllCompetitions && <small className="admin-match-context-note">{competition?.name || "Sin categoria"} | {competition?.season || "Temporada"}</small>}
+        </section>
+
+        <section className="admin-match-edit-block">
+          <h4><span aria-hidden="true">⚑</span> Estado del partido</h4>
+          <div className="admin-match-field-grid status-notes">
+            <label>Estado
+              <MatchStatusSelect
+                canEditMatchResults={canEditMatchResults}
+                defaultValue={match.status || "scheduled"}
+                ariaLabel={`Estado ${match.id}`}
+                onChange={handleStatusChange}
+              />
+            </label>
+            <label>Motivo / nota
+              <textarea name="scheduleNote" defaultValue={match.scheduleNote || ""} aria-label={`Nota programacion ${match.id}`} placeholder="Escribe alguna nota o motivo..." />
+            </label>
+          </div>
+        </section>
+
+        <section className={`admin-match-edit-block result ${resultEnabled ? "expanded" : "hidden-result"}`}>
+          <div className="admin-match-block-title-row">
+            <h4><span aria-hidden="true">▥</span> Resultado</h4>
+            {!resultEnabled && <small>Oculto</small>}
+          </div>
+          {!resultEnabled ? (
+            <>
+              <p>Los campos de resultado se habilitaran cuando el partido cambie a Finalizado.</p>
+              <button className="admin-match-show-result" type="button" onClick={() => setResultVisible(true)}>Mostrar resultado</button>
+              {canEditMatchResults && (
+                <>
+                  <input type="hidden" name="homeGoals" defaultValue={match.homeGoals ?? ""} />
+                  <input type="hidden" name="awayGoals" defaultValue={match.awayGoals ?? ""} />
+                  <input type="hidden" name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} />
+                  <input type="hidden" name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} />
+                  <input type="hidden" name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} />
+                  <input type="hidden" name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} />
+                </>
+              )}
+              <input type="hidden" name="aggregateHome" defaultValue={match.aggregateHome ?? ""} />
+              <input type="hidden" name="aggregateAway" defaultValue={match.aggregateAway ?? ""} />
+              <input type="hidden" name="homeTeamId" defaultValue={match.homeTeamId} />
+              <input type="hidden" name="awayTeamId" defaultValue={match.awayTeamId} />
+            </>
+          ) : (
+            <div className="admin-match-score-editor">
+              <div className="admin-match-score-team-card home">
+                <AdminMatchTeamBadge team={homeTeam} side="home" />
+                <div>
+                  <small>Local</small>
+                  <strong>{homeTeam?.name || "Equipo local"}</strong>
+                </div>
+              </div>
+              <b className="admin-match-score-vs">VS</b>
+              <div className="admin-match-score-team-card away">
+                <AdminMatchTeamBadge team={awayTeam} side="away" />
+                <div>
+                  <small>Visitante</small>
+                  <strong>{awayTeam?.name || "Equipo visitante"}</strong>
+                </div>
+              </div>
+
+              <label className="admin-match-team-select home">Equipo local
+                <TeamSelect league={getCompetitionLeague(match.competitionId)} name="homeTeamId" defaultValue={match.homeTeamId} />
+              </label>
+              <label className="admin-match-team-select away">Equipo visitante
+                <TeamSelect league={getCompetitionLeague(match.competitionId)} name="awayTeamId" defaultValue={match.awayTeamId} />
+              </label>
+
+              <div className="admin-match-score-fields home">
+                {canEditMatchResults && <label>Goles<input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="0" /></label>}
+                {canEditMatchResults && <label>Tiempo extra<input name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} aria-label={`Tiempo extra local ${match.id}`} type="number" min="0" placeholder="-" /></label>}
+                {canEditMatchResults && <label>Penales<input name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} aria-label={`Penales local ${match.id}`} type="number" min="0" placeholder="-" /></label>}
+                <label>Global<input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="-" /></label>
+              </div>
+              <div className="admin-match-score-fields away">
+                {canEditMatchResults && <label>Goles<input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="0" /></label>}
+                {canEditMatchResults && <label>Tiempo extra<input name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} aria-label={`Tiempo extra visitante ${match.id}`} type="number" min="0" placeholder="-" /></label>}
+                {canEditMatchResults && <label>Penales<input name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} aria-label={`Penales visitante ${match.id}`} type="number" min="0" placeholder="-" /></label>}
+                <label>Global<input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="-" /></label>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <footer className="admin-match-form-actions">
+          <button className="danger" type="button" disabled={!editable} onClick={onDelete}>Eliminar partido</button>
+          <button className="primary" type="submit" disabled={!editable}>Guardar cambios</button>
+        </footer>
+      </form>
+    </details>
+  );
+}
+
 function ManagementBoard({
   allowedLists = null,
   authToken,
@@ -4442,19 +4689,32 @@ function ManagementBoard({
           </div>
         </div>}
 
-        {activeList === "matches" && <div className="wide-field">
-          <h3>Partidos</h3>
-          <p className="helper-text">Aqui puedes editar todos los partidos generados: fecha, hora, cancha, equipos, jornada regular y liguilla. Hora y cancha pueden quedar vacias hasta definirlas.</p>
+        {activeList === "matches" && <div className="admin-match-board wide-field">
+          <div className="admin-match-board-head">
+            <div>
+              <span>Operacion</span>
+              <h3>Partidos y datos</h3>
+              <p>Programa jornadas, revisa pendientes y edita un partido a la vez sin perder contexto.</p>
+            </div>
+            <small>{competitionMatches.length} partido(s)</small>
+          </div>
+
           {playoffEditMatches.length > 0 && (
-            <section className="round-edit-section playoff-edit-section active">
-              <div className="round-edit-header static">
-                <span>Fase final</span>
-                <strong>Liguilla</strong>
-                <small>{playoffEditMatches.length} partido(s)</small>
-              </div>
-              <div className="bulk-actions">
+            <section className="admin-round-card playoff">
+              <div className="admin-round-summary static">
+                <div>
+                  <span>{selectedCompetition?.name || "Fase final"}</span>
+                  <strong>Liguilla</strong>
+                  <small>{playoffEditMatches.length} partido(s)</small>
+                </div>
+                <div className="admin-round-metrics">
+                  <span><b>{playoffEditMatches.length}</b>Total partidos</span>
+                  <span><b>{playoffEditMatches.filter((match) => getAdminMatchScheduleState(match).complete && isActiveScheduleStatus(match.status)).length}</b>Programados</span>
+                  <span><b>{playoffEditMatches.filter((match) => !getAdminMatchScheduleState(match).complete && match.status !== "finished" && match.status !== "walkover").length}</b>Pendientes</span>
+                  <span><b>{playoffEditMatches.filter((match) => match.status === "finished" || match.status === "walkover").length}</b>Finalizados</span>
+                </div>
                 <button
-                  className="danger"
+                  className="admin-round-delete"
                   type="button"
                   onClick={() => {
                     if (!selectedCompetition?.id) {
@@ -4469,115 +4729,66 @@ function ManagementBoard({
                   Eliminar liguilla
                 </button>
               </div>
-              <div className="editable-list">
+              <div className="admin-match-card-list">
                 {playoffEditMatches.map((match) => (
-                  <form
-                    className="editable-row match-edit-row"
+                  <AdminMatchEditorCard
+                    canEditMatchResults={canEditMatchResults}
+                    getCompetitionLeague={getCompetitionLeague}
                     key={match.id}
+                    league={league}
+                    match={match}
+                    onDelete={() => confirmDelete("este partido de liguilla", () => onDeleteMatch(match.id), "Partido de liguilla eliminado correctamente.")}
                     onSubmit={(event) => {
                       event.preventDefault();
                       handleMatchSave(match.id, event.currentTarget);
                     }}
-                  >
-                    <CompetitionSelect league={league} name="competitionId" defaultValue={match.competitionId || getDefaultCompetitionId(league)} />
-                    <input type="hidden" name="stage" value="playoff" />
-                    <input type="hidden" name="round" value={match.round || 0} />
-                    <select name="playoffRound" defaultValue={match.playoffRound || ""} aria-label={`Fase ${match.id}`} required>
-                      <option value="">Fase</option>
-                      {PLAYOFF_PHASE_OPTIONS.map((phase) => (
-                        <option key={phase.value} value={phase.label}>{phase.label}</option>
-                      ))}
-                      <option value="Repechaje">Repechaje</option>
-                    </select>
-                    <select name="playoffLeg" defaultValue={match.playoffLeg || ""} aria-label={`Juego ${match.id}`}>
-                      <option value="">Unico</option>
-                      <option value="Ida">Ida</option>
-                      <option value="Vuelta">Vuelta</option>
-                    </select>
-                    <input name="date" defaultValue={match.date} aria-label={`Fecha ${match.id}`} type="date" />
-                    <input name="time" defaultValue={match.time || ""} aria-label={`Hora ${match.id}`} type="time" />
-                    <VenueSelect league={league} defaultValue={match.venue || ""} ariaLabel={`Cancha ${match.id}`} />
-                    <TeamSelect league={getCompetitionLeague(match.competitionId)} name="homeTeamId" defaultValue={match.homeTeamId} />
-                    {canEditMatchResults && <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />}
-                    <TeamSelect league={getCompetitionLeague(match.competitionId)} name="awayTeamId" defaultValue={match.awayTeamId} />
-                    {canEditMatchResults && <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />}
-                    <MatchStatusSelect canEditMatchResults={canEditMatchResults} defaultValue={match.status || "scheduled"} ariaLabel={`Estado ${match.id}`} />
-                    <input name="scheduleNote" defaultValue={match.scheduleNote || ""} aria-label={`Nota programacion ${match.id}`} placeholder="Motivo / nota" />
-                    <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
-                    <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
-                    {canEditMatchResults && <input name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} aria-label={`Tiempo extra local ${match.id}`} type="number" min="0" placeholder="TE local" />}
-                    {canEditMatchResults && <input name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} aria-label={`Tiempo extra visitante ${match.id}`} type="number" min="0" placeholder="TE visit." />}
-                    {canEditMatchResults && <input name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} aria-label={`Penales local ${match.id}`} type="number" min="0" placeholder="Pen local" />}
-                    {canEditMatchResults && <input name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} aria-label={`Penales visitante ${match.id}`} type="number" min="0" placeholder="Pen visit." />}
-                    <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : getMatchStatusLabel(match.status)}</span>
-                    <button className="primary" type="submit" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)}>Guardar</button>
-                    <button className="danger" type="button" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)} onClick={() => confirmDelete("este partido de liguilla", () => onDeleteMatch(match.id), "Partido de liguilla eliminado correctamente.")}>Eliminar</button>
-                  </form>
+                    showingAllCompetitions={showingAllCompetitions}
+                  />
                 ))}
               </div>
             </section>
           )}
-          <div className="round-edit-list">
+
+          <div className="admin-round-list">
             {matchRounds.map(({ competitionId, round, matches }) => {
               const roundKey = showingAllCompetitions ? `${competitionId || "sin-categoria"}:${round}` : String(round);
               const isOpen = openRounds.has(roundKey);
               const roundCompetition = getCompetition(league, competitionId);
+              const scheduledCount = matches.filter((match) => getAdminMatchScheduleState(match).complete && isActiveScheduleStatus(match.status)).length;
+              const pendingCount = matches.filter((match) => !getAdminMatchScheduleState(match).complete && match.status !== "finished" && match.status !== "walkover").length;
               const finishedCount = matches.filter((match) => match.status === "finished" || match.status === "walkover").length;
               return (
-                <section className={`round-edit-section ${Number(round) === Number(activeRound) ? "active" : ""}`} key={roundKey}>
-                  <button className="round-edit-header" type="button" onClick={() => toggleRound(roundKey)}>
-                    <span>{isOpen ? "Ocultar" : "Abrir"}</span>
-                    <strong>{showingAllCompetitions && roundCompetition ? `${roundCompetition.name} | ` : ""}Jornada {round || "-"}</strong>
-                    <small>{matches.length} partido(s) | {finishedCount} con resultado</small>
+                <section className={`admin-round-card ${Number(round) === Number(activeRound) ? "active" : ""}`} key={roundKey}>
+                  <button className="admin-round-summary" type="button" onClick={() => toggleRound(roundKey)}>
+                    <div>
+                      <span>{showingAllCompetitions && roundCompetition ? roundCompetition.name : selectedCompetition?.name || "Categoria"}</span>
+                      <strong>Jornada {round || "-"}</strong>
+                      <small>Fase regular</small>
+                    </div>
+                    <div className="admin-round-metrics">
+                      <span><b>{matches.length}</b>Total partidos</span>
+                      <span><b>{scheduledCount}</b>Programados</span>
+                      <span><b>{pendingCount}</b>Pendientes</span>
+                      <span><b>{finishedCount}</b>Finalizados</span>
+                    </div>
+                    <span className="admin-round-open">{isOpen ? "Ocultar" : "Ver partidos"}</span>
                   </button>
                   {isOpen && (
-                    <div className="editable-list">
+                    <div className="admin-match-card-list">
                       {matches.map((match) => (
-                        <form
-                          className="editable-row match-edit-row"
+                        <AdminMatchEditorCard
+                          canEditMatchResults={canEditMatchResults}
+                          getCompetitionLeague={getCompetitionLeague}
                           key={match.id}
+                          league={league}
+                          match={match}
+                          onDelete={() => confirmDelete("este partido", () => onDeleteMatch(match.id), "Partido eliminado correctamente.")}
                           onSubmit={(event) => {
                             event.preventDefault();
                             handleMatchSave(match.id, event.currentTarget);
                           }}
-                        >
-                          <CompetitionSelect league={league} name="competitionId" defaultValue={match.competitionId || getDefaultCompetitionId(league)} />
-                          <select name="stage" defaultValue={match.stage || "regular"} aria-label={`Tipo ${match.id}`}>
-                            <option value="regular">Regular</option>
-                            <option value="playoff">Liguilla</option>
-                          </select>
-                          <input name="round" defaultValue={match.round} aria-label={`Jornada ${match.id}`} type="number" min="1" required />
-                          <select name="playoffRound" defaultValue={match.playoffRound || ""} aria-label={`Fase ${match.id}`}>
-                            <option value="">Fase</option>
-                            {PLAYOFF_PHASE_OPTIONS.map((phase) => (
-                              <option key={phase.value} value={phase.label}>{phase.label}</option>
-                            ))}
-                            <option value="Repechaje">Repechaje</option>
-                          </select>
-                          <select name="playoffLeg" defaultValue={match.playoffLeg || ""} aria-label={`Juego ${match.id}`}>
-                            <option value="">Juego</option>
-                            <option value="Ida">Ida</option>
-                            <option value="Vuelta">Vuelta</option>
-                          </select>
-                          <input name="date" defaultValue={match.date} aria-label={`Fecha ${match.id}`} type="date" />
-                          <input name="time" defaultValue={match.time || ""} aria-label={`Hora ${match.id}`} type="time" />
-                          <VenueSelect league={league} defaultValue={match.venue || ""} ariaLabel={`Cancha ${match.id}`} />
-                          <TeamSelect league={getCompetitionLeague(match.competitionId)} name="homeTeamId" defaultValue={match.homeTeamId} />
-                          {canEditMatchResults && <input name="homeGoals" defaultValue={match.homeGoals ?? ""} aria-label={`Goles local ${match.id}`} type="number" min="0" placeholder="GL" />}
-                          <TeamSelect league={getCompetitionLeague(match.competitionId)} name="awayTeamId" defaultValue={match.awayTeamId} />
-                          {canEditMatchResults && <input name="awayGoals" defaultValue={match.awayGoals ?? ""} aria-label={`Goles visitante ${match.id}`} type="number" min="0" placeholder="GV" />}
-                          <MatchStatusSelect canEditMatchResults={canEditMatchResults} defaultValue={match.status || "scheduled"} ariaLabel={`Estado ${match.id}`} />
-                          <input name="scheduleNote" defaultValue={match.scheduleNote || ""} aria-label={`Nota programacion ${match.id}`} placeholder="Motivo / nota" />
-                          <input name="aggregateHome" defaultValue={match.aggregateHome ?? ""} aria-label={`Global local ${match.id}`} type="number" min="0" placeholder="G local" />
-                          <input name="aggregateAway" defaultValue={match.aggregateAway ?? ""} aria-label={`Global visitante ${match.id}`} type="number" min="0" placeholder="G visitante" />
-                          {canEditMatchResults && <input name="extraTimeHomeGoals" defaultValue={match.extraTimeHomeGoals ?? ""} aria-label={`Tiempo extra local ${match.id}`} type="number" min="0" placeholder="TE local" />}
-                          {canEditMatchResults && <input name="extraTimeAwayGoals" defaultValue={match.extraTimeAwayGoals ?? ""} aria-label={`Tiempo extra visitante ${match.id}`} type="number" min="0" placeholder="TE visit." />}
-                          {canEditMatchResults && <input name="penaltyHomeGoals" defaultValue={match.penaltyHomeGoals ?? ""} aria-label={`Penales local ${match.id}`} type="number" min="0" placeholder="Pen local" />}
-                          {canEditMatchResults && <input name="penaltyAwayGoals" defaultValue={match.penaltyAwayGoals ?? ""} aria-label={`Penales visitante ${match.id}`} type="number" min="0" placeholder="Pen visit." />}
-                          <span className={`status ${match.status}`}>{match.status === "finished" ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : getMatchStatusLabel(match.status)}</span>
-                          <button className="primary" type="submit" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)}>Guardar</button>
-                          <button className="danger" type="button" disabled={!canEditMatchResults && !isEditableScheduleStatus(match.status)} onClick={() => confirmDelete("este partido", () => onDeleteMatch(match.id), "Partido eliminado correctamente.")}>Eliminar</button>
-                        </form>
+                          showingAllCompetitions={showingAllCompetitions}
+                        />
                       ))}
                     </div>
                   )}
@@ -4618,6 +4829,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   const hasPlayoffMatches = competitionLeague.matches.some((match) => (match.stage || "regular") === "playoff");
   const [selectedRound, setSelectedRound] = useState((preferredMatch?.stage || "regular") === "playoff" ? "playoff" : preferredMatch?.round || rounds[0] || "");
   const [matchStatusFilter, setMatchStatusFilter] = useState("scheduled");
+  const [matchSearch, setMatchSearch] = useState("");
   const roundMatches = useMemo(() => (
     competitionLeague.matches
       .filter((match) => (
@@ -4638,8 +4850,22 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       if (matchStatusFilter === "scheduled") return isActiveScheduleStatus(match.status);
       if (matchStatusFilter === "finished") return match.status === "finished" || match.status === "walkover";
       return true;
+    }).filter((match) => {
+      const query = normalizeAdminSearchTerm(matchSearch);
+      if (!query) return true;
+      const homeTeam = getTeam(league, match.homeTeamId);
+      const awayTeam = getTeam(league, match.awayTeamId);
+      return normalizeAdminSearchTerm([
+        homeTeam?.name,
+        awayTeam?.name,
+        match.venue,
+        match.date,
+        match.time,
+        `jornada ${match.round || ""}`,
+        getMatchStatusLabel(match.status)
+      ].filter(Boolean).join(" ")).includes(query);
     })
-  ), [matchStatusFilter, roundMatches]);
+  ), [league, matchSearch, matchStatusFilter, roundMatches]);
   const [homeGoals, setHomeGoals] = useState(0);
   const [awayGoals, setAwayGoals] = useState(0);
   const [extraTimeEnabled, setExtraTimeEnabled] = useState(false);
@@ -4655,7 +4881,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   const [events, setEvents] = useState([]);
   const [validationMessage, setValidationMessage] = useState("");
   const [sheetNotice, setSheetNotice] = useState("");
-  const [sheetStep, setSheetStep] = useState("match");
+  const [sheetStep, setSheetStep] = useState("select");
+  const [eventDraft, setEventDraft] = useState(null);
 
   useEffect(() => {
     const defaultCompetitionId = getDefaultCompetitionId(league);
@@ -4700,7 +4927,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       setDefaultScore("3");
       setEvents([]);
       setValidationMessage("");
-      setSheetStep("match");
+      setSheetStep("select");
+      setEventDraft(null);
       return;
     }
 
@@ -4725,7 +4953,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       type: event.type,
       lockedType: event.type,
       teamId: event.teamId || getPlayer(league, event.playerId)?.teamId || selectedMatch.homeTeamId,
-      lockedTeamId: event.teamId || getPlayer(league, event.playerId)?.teamId || selectedMatch.homeTeamId,
+      lockedTeamId: "",
       playerId: event.playerId,
       minute: event.minute || "",
       minuteLabel: event.minuteLabel || "",
@@ -4770,23 +4998,76 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     return selectedPlayer ? [selectedPlayer, ...filteredPlayers] : filteredPlayers;
   }
 
-  function addEvent(type, teamId = selectedMatch?.homeTeamId) {
-    setEvents((current) => [
-      ...current,
-      {
-        id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+  function createMatchSheetEvent(type, teamId = selectedMatch?.homeTeamId) {
+    return {
+      id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type,
+      lockedType: type,
+      teamId,
+      lockedTeamId: "",
+      playerId: "",
+      minute: "",
+      suspensionMatches: type === "red" ? Number(league.rules?.defaultRedSuspensionMatches || 1) : 0,
+      suspensionIndefinite: false,
+      reason: "",
+      playerQuery: ""
+    };
+  }
+
+  function openEventModal(type, teamId = selectedMatch?.homeTeamId, existingEvent = null) {
+    if (type === "injury_note" || type === "other_note") {
+      setEventDraft({
+        id: `note-${Date.now()}`,
         type,
-        lockedType: type,
         teamId,
-        lockedTeamId: teamId,
         playerId: "",
         minute: "",
-        suspensionMatches: type === "red" ? Number(league.rules?.defaultRedSuspensionMatches || 1) : 0,
-        suspensionIndefinite: false,
-        reason: "",
+        note: "",
         playerQuery: ""
-      }
-    ]);
+      });
+      return;
+    }
+    setEventDraft(existingEvent ? { ...existingEvent } : createMatchSheetEvent(type, teamId));
+  }
+
+  function updateEventDraft(field, value) {
+    setEventDraft((current) => {
+      if (!current) return current;
+      if (current.type === "injury_note" || current.type === "other_note") return { ...current, [field]: value };
+      return updateMatchSheetEventItem(current, field, value, {
+        getPlayersForTeam,
+        getPlayersForEvent,
+        defaultRedSuspensionMatches: league.rules?.defaultRedSuspensionMatches,
+        lockGoalTeam: false
+      });
+    });
+  }
+
+  function appendObservationLine(line) {
+    setObservations((current) => [String(current || "").trim(), line].filter(Boolean).join("\n"));
+  }
+
+  function saveEventDraft() {
+    if (!eventDraft) return;
+    if (eventDraft.type === "injury_note" || eventDraft.type === "other_note") {
+      const team = getTeam(league, eventDraft.teamId);
+      const player = getPlayer(league, eventDraft.playerId);
+      const minuteText = eventDraft.minute ? `${eventDraft.minute}' · ` : "";
+      const label = eventDraft.type === "injury_note" ? "Lesion" : "Incidencia";
+      const playerText = player ? `${player.name} (${team?.name || "Equipo"})` : team?.name || "Equipo";
+      appendObservationLine(`${label}: ${minuteText}${playerText}${eventDraft.note ? ` — ${eventDraft.note}` : ""}`);
+      setSheetStep("notes");
+      setEventDraft(null);
+      return;
+    }
+
+    setEvents((current) => {
+      const exists = current.some((item) => item.id === eventDraft.id);
+      return exists
+        ? current.map((item) => item.id === eventDraft.id ? eventDraft : item)
+        : [...current, eventDraft];
+    });
+    setEventDraft(null);
   }
 
   function buildMissingGoalEvents(teamId, currentEvents) {
@@ -4803,7 +5084,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       type: "goal",
       lockedType: "goal",
       teamId,
-      lockedTeamId: teamId,
+      lockedTeamId: "",
       playerId: "",
       minute: "",
       suspensionMatches: 0,
@@ -4829,19 +5110,6 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       const awayMissing = buildMissingGoalEvents(selectedMatch.awayTeamId, withHome);
       return [...withHome, ...awayMissing];
     });
-  }
-
-  function updateEvent(eventId, field, value) {
-    setEvents((current) => current.map((event) => (
-      event.id === eventId
-        ? updateMatchSheetEventItem(event, field, value, {
-            getPlayersForTeam,
-            getPlayersForEvent,
-            defaultRedSuspensionMatches: league.rules?.defaultRedSuspensionMatches,
-            lockGoalTeam: true
-          })
-        : event
-    )));
   }
 
   function removeEvent(eventId) {
@@ -4871,8 +5139,25 @@ function MatchSheet({ league, onSaveMatchSheet }) {
 
   if (!selectedMatch) {
     return (
-      <div className="match-sheet">
-        <div className="sheet-picker">
+      <div className="match-sheet admin-sheet-app">
+        <div className="admin-sheet-shell">
+          <header className="admin-sheet-hero">
+            <div className="admin-sheet-brand">
+              <img src={ligatecLogo} alt="" />
+              <div>
+                <span>Operacion de liga</span>
+                <strong>Captura de Actas</strong>
+              </div>
+            </div>
+          </header>
+          <section className="admin-sheet-screen admin-sheet-select-screen">
+            <div className="admin-sheet-screen-head">
+              <div>
+                <span>Selecciona un partido para comenzar.</span>
+                <strong>Sin partidos disponibles</strong>
+              </div>
+            </div>
+            <div className="sheet-picker admin-sheet-picker">
           <label>Torneo
             <CompetitionSelect
               league={league}
@@ -4882,8 +5167,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
               onChange={(event) => setSelectedCompetitionId(event.target.value)}
             />
           </label>
+            </div>
+            <p className="empty">Programa un partido en este torneo para poder capturar el acta.</p>
+          </section>
         </div>
-        <p className="empty">Programa un partido en este torneo para poder capturar el acta.</p>
       </div>
     );
   }
@@ -4984,83 +5271,22 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   function renderEventRow(eventItem, index, isLatest = false) {
     const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
     const eventTeam = getTeam(league, eventTeamId);
-    const eventTeamLabel = eventItem.type === "own_goal" ? "Equipo que recibe el gol" : "Equipo del evento";
     const playerTeamId = eventItem.type === "own_goal" ? getOpponentTeamId(eventTeamId) : eventTeamId;
-    const eventPlayers = getEventPlayersForDisplay(eventItem, playerTeamId);
-    const playerLabel = eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : "Jugador";
+    const player = getPlayer(league, eventItem.playerId);
+    const playerNumber = getPlayerNumberForTeam(league, eventItem.playerId, playerTeamId);
     const eventSide = eventTeamId === selectedMatch.homeTeamId ? "home" : "away";
 
     return (
-      <article className={`event-row event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
-        <div className="event-row-head">
-          <strong><span className="event-icon" aria-hidden="true">{getMatchEventIcon(eventItem.type)}</span>{getMatchEventLabel(eventItem.type)} | {eventTeam?.name || "Equipo"}</strong>
-          <span>Evento {index + 1}</span>
-          <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)}>Quitar</button>
+      <article className={`event-row admin-sheet-timeline-event event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
+        <b aria-hidden="true">{getMatchEventIcon(eventItem.type)}</b>
+        <time>{eventItem.minute ? `${eventItem.minute}'` : "--'"}</time>
+        <div>
+          <strong>{getMatchEventLabel(eventItem.type)}</strong>
+          <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
+          <small>{eventTeam?.name || "Equipo"}</small>
         </div>
-        <div className="event-locked-field">
-          <span>Evento</span>
-          <strong><span className="event-icon" aria-hidden="true">{getMatchEventIcon(eventItem.type)}</span>{getMatchEventLabel(eventItem.type)}</strong>
-          <small>Fijo por el boton elegido</small>
-        </div>
-        <div className="event-locked-field">
-          <span>{eventTeamLabel}</span>
-          <strong>{eventTeam?.name || "Equipo"}</strong>
-          <small>{eventItem.type === "own_goal" ? "Gol a favor de este equipo" : "No editable"}</small>
-        </div>
-        <label>Buscar jugador
-          <input
-            value={eventItem.playerQuery || ""}
-            onChange={(event) => updateEvent(eventItem.id, "playerQuery", event.target.value)}
-            placeholder="Nombre o numero"
-          />
-        </label>
-        <label>{playerLabel}
-          <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label={eventItem.type === "own_goal" ? "Jugador que hizo el autogol" : `Jugador de ${eventTeam?.name || "equipo"}`}>
-            <option value="">{eventPlayers.length ? "Selecciona jugador" : "Sin jugadores disponibles"}</option>
-            {eventPlayers.map((player) => (
-              <option key={player.id} value={player.id}>
-                #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>Minuto
-          <input value={eventItem.minuteLabel || eventItem.minute} onChange={(event) => updateEvent(eventItem.id, "minute", event.target.value)} type="text" placeholder="Min" aria-label="Minuto" />
-        </label>
-        {eventItem.type === "red" ? (
-          <>
-            <label className="event-toggle-field">
-              <input
-                checked={Boolean(eventItem.suspensionIndefinite)}
-                onChange={(event) => updateEvent(eventItem.id, "suspensionIndefinite", event.target.checked)}
-                type="checkbox"
-              />
-              Inhabilitado indefinido
-            </label>
-            <label>Partidos de sancion
-              <input
-                value={eventItem.suspensionIndefinite ? "" : eventItem.suspensionMatches}
-                onChange={(event) => updateEvent(eventItem.id, "suspensionMatches", event.target.value)}
-                type="number"
-                min="1"
-                placeholder={eventItem.suspensionIndefinite ? "Indefinido" : "Sancion"}
-                aria-label="Partidos de sancion"
-                disabled={Boolean(eventItem.suspensionIndefinite)}
-              />
-            </label>
-            <label className="event-reason-field">Motivo
-              <input value={eventItem.reason} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Ej. Insultos al arbitro" aria-label="Motivo de sancion" required />
-            </label>
-          </>
-        ) : (
-          <span className="event-hint">
-            {eventItem.type === "goal"
-              ? `Gol de ${eventTeam?.name || "equipo asignado"}`
-              : eventItem.type === "own_goal"
-              ? `Autogol a favor de ${eventTeam?.name || "equipo asignado"}`
-              : `Amonestacion de ${eventTeam?.name || "equipo asignado"}`}
-          </span>
-        )}
+        <button type="button" onClick={() => openEventModal(eventItem.type, eventTeamId, eventItem)} aria-label={`Editar ${getMatchEventLabel(eventItem.type)}`}>Editar</button>
+        <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)} aria-label={`Quitar ${getMatchEventLabel(eventItem.type)}`}>Quitar</button>
       </article>
     );
   }
@@ -5085,7 +5311,93 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     );
   }
 
-  const previousEvents = events.slice(0, -1);
+  function renderEventModal() {
+    if (!eventDraft) return null;
+    const isNoteEvent = eventDraft.type === "injury_note" || eventDraft.type === "other_note";
+    const eventTeamId = eventDraft.teamId || selectedMatch.homeTeamId;
+    const eventTeam = getTeam(league, eventTeamId);
+    const playerTeamId = eventDraft.type === "own_goal" ? getOpponentTeamId(eventTeamId) : eventTeamId;
+    const eventPlayers = isNoteEvent
+      ? getPlayersForTeam(eventTeamId)
+      : getEventPlayersForDisplay(eventDraft, playerTeamId);
+    const modalTitle = isNoteEvent
+      ? eventDraft.type === "injury_note" ? "Registrar lesion" : "Registrar incidencia"
+      : getMatchEventLabel(eventDraft.type);
+
+    return (
+      <div className="admin-sheet-modal-backdrop" role="presentation" onClick={() => setEventDraft(null)}>
+        <div className="admin-sheet-event-modal" role="dialog" aria-modal="true" aria-label={modalTitle} onClick={(event) => event.stopPropagation()}>
+          <header>
+            <span aria-hidden="true">{isNoteEvent ? eventDraft.type === "injury_note" ? "✚" : "⋯" : getMatchEventIcon(eventDraft.type)}</span>
+            <div>
+              <small>Evento rapido</small>
+              <strong>{modalTitle}</strong>
+            </div>
+            <button type="button" onClick={() => setEventDraft(null)} aria-label="Cerrar">×</button>
+          </header>
+          <div className="admin-sheet-modal-grid">
+            <label>{eventDraft.type === "own_goal" ? "Equipo favorecido" : "Equipo"}
+              <select value={eventTeamId} onChange={(event) => updateEventDraft("teamId", event.target.value)}>
+                <option value={selectedMatch.homeTeamId}>{homeTeam?.name || "Local"}</option>
+                <option value={selectedMatch.awayTeamId}>{awayTeam?.name || "Visitante"}</option>
+              </select>
+            </label>
+            <label>Minuto
+              <input value={eventDraft.minuteLabel || eventDraft.minute || ""} onChange={(event) => updateEventDraft("minute", event.target.value)} inputMode="numeric" placeholder="Ej. 12" />
+            </label>
+            <label className="wide-field">Buscar jugador
+              <input value={eventDraft.playerQuery || ""} onChange={(event) => updateEventDraft("playerQuery", event.target.value)} placeholder="Nombre o numero" />
+            </label>
+            <label className="wide-field">{eventDraft.type === "own_goal" ? "Jugador que hizo el autogol" : "Jugador"}
+              <select value={eventDraft.playerId || ""} onChange={(event) => updateEventDraft("playerId", event.target.value)}>
+                <option value="">{eventPlayers.length ? "Selecciona jugador" : "Sin jugadores disponibles"}</option>
+                {eventPlayers.map((player) => (
+                  <option key={player.id} value={player.id}>
+                    #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {eventDraft.type === "red" && (
+              <>
+                <label className="event-toggle-field wide-field">
+                  <input
+                    checked={Boolean(eventDraft.suspensionIndefinite)}
+                    onChange={(event) => updateEventDraft("suspensionIndefinite", event.target.checked)}
+                    type="checkbox"
+                  />
+                  Inhabilitado indefinido
+                </label>
+                <label>Partidos de sancion
+                  <input
+                    value={eventDraft.suspensionIndefinite ? "" : eventDraft.suspensionMatches}
+                    onChange={(event) => updateEventDraft("suspensionMatches", event.target.value)}
+                    type="number"
+                    min="1"
+                    placeholder={eventDraft.suspensionIndefinite ? "Indefinido" : "Sancion"}
+                    disabled={Boolean(eventDraft.suspensionIndefinite)}
+                  />
+                </label>
+                <label>Motivo
+                  <input value={eventDraft.reason || ""} onChange={(event) => updateEventDraft("reason", event.target.value)} placeholder="Ej. Insultos al arbitro" />
+                </label>
+              </>
+            )}
+            {isNoteEvent && (
+              <label className="wide-field">Detalle
+                <textarea value={eventDraft.note || ""} onChange={(event) => updateEventDraft("note", event.target.value)} placeholder="Describe brevemente la situacion." />
+              </label>
+            )}
+          </div>
+          <div className="admin-sheet-modal-actions">
+            <button type="button" onClick={() => setEventDraft(null)}>Cancelar</button>
+            <button className="primary" type="button" onClick={saveEventDraft}>Guardar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const latestEvent = events[events.length - 1] || null;
   const activeStepIndex = Math.max(0, ADMIN_SHEET_STEPS.findIndex((step) => step.id === sheetStep));
   const selectedStageLabel = (selectedMatch.stage || "regular") === "playoff"
@@ -5093,6 +5405,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     : `Jornada ${selectedMatch.round || "-"}`;
   const yellowCardCount = cleanEvents.filter((item) => item.type === "yellow").length;
   const redCardCount = cleanEvents.filter((item) => item.type === "red").length;
+  const ownGoalCount = cleanEvents.filter((item) => item.type === "own_goal").length;
+  const injuryNoteCount = String(observations || "").split("\n").filter((line) => normalizeAdminSearchTerm(line).includes("lesion")).length;
   const eventTotalCount = cleanEvents.length;
   const observationsReady = Boolean(String(observations || "").trim());
   const currentStepMeta = ADMIN_SHEET_STEPS[activeStepIndex] || ADMIN_SHEET_STEPS[0];
@@ -5122,7 +5436,11 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       .join("")
       .toUpperCase();
 
-    return <span className={`admin-sheet-team-badge ${side}`}>{initials || "EQ"}</span>;
+    return (
+      <span className={`admin-sheet-team-badge ${side}`}>
+        {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : initials || "EQ"}
+      </span>
+    );
   }
 
   return (
@@ -5173,75 +5491,63 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     >
       <div className="admin-sheet-shell">
         <header className="admin-sheet-hero">
+          {sheetStep !== "select" && (
+            <button className="admin-sheet-back-button" type="button" onClick={() => setSheetStep("select")} aria-label="Volver a seleccionar partido">←</button>
+          )}
           <div className="admin-sheet-brand">
             <img src={ligatecLogo} alt="" />
             <div>
-              <span>Ligatec Admin</span>
-              <strong>Captura de acta</strong>
+              <span>{sheetStep === "select" ? "Operacion de liga" : "Captura de Acta"}</span>
+              <strong>{sheetStep === "select" ? "Captura de Actas" : "Captura de Acta"}</strong>
             </div>
           </div>
-          <div className="admin-sheet-step-chip">
-            <span>Paso {currentStepMeta.number}/5</span>
-            <strong>{currentStepMeta.label}</strong>
-          </div>
+          {sheetStep !== "select" && (
+            <div className="admin-sheet-step-chip">
+              <span>Paso {currentStepMeta.number} de 5</span>
+              <strong>{currentStepMeta.label}</strong>
+            </div>
+          )}
         </header>
 
-        <div className="admin-sheet-scoreboard" aria-label="Resumen del partido seleccionado">
-          <div className="admin-sheet-club">
-            {renderTeamBadge(homeTeam, "home")}
-            <strong>{homeTeam?.name || "Local"}</strong>
-            <span>Local</span>
-          </div>
-          <div className="admin-sheet-result">
-            <span>{selectedStageLabel}</span>
-            <strong>{expectedHomeGoals} - {expectedAwayGoals}</strong>
-            <small>{sheetMode === "played" ? "Partido jugado" : `Default ${defaultScore}-0`}</small>
-          </div>
-          <div className="admin-sheet-club away">
-            {renderTeamBadge(awayTeam, "away")}
-            <strong>{awayTeam?.name || "Visitante"}</strong>
-            <span>Visitante</span>
-          </div>
-        </div>
+        {sheetStep !== "select" && (
+          <>
+          <nav className="admin-sheet-stepper" aria-label="Pasos de captura">
+            {ADMIN_SHEET_STEPS.map((step, index) => (
+              <button
+                className={`${sheetStep === step.id ? "active" : ""} ${index < activeStepIndex ? "done" : ""}`}
+                key={step.id}
+                type="button"
+                onClick={() => goToSheetStep(step.id)}
+              >
+                <span>{index < activeStepIndex ? "✓" : step.number}</span>
+                <strong>{step.label}</strong>
+                <small>{step.hint}</small>
+              </button>
+            ))}
+          </nav>
+          </>
+        )}
 
-        <div className="admin-sheet-meta-row" aria-label="Datos del partido seleccionado">
-          <span>📅 {formatDate(selectedMatch.date)}</span>
-          <span>⏱ {selectedMatch.time || "Hora por definir"}</span>
-          <span>📍 {selectedMatch.venue || "Cancha por definir"}</span>
-        </div>
-
-        <nav className="admin-sheet-stepper" aria-label="Pasos de captura">
-          {ADMIN_SHEET_STEPS.map((step, index) => (
-            <button
-              className={`${sheetStep === step.id ? "active" : ""} ${index < activeStepIndex ? "done" : ""}`}
-              key={step.id}
-              type="button"
-              onClick={() => goToSheetStep(step.id)}
-            >
-              <span>{step.number}</span>
-              <strong>{step.label}</strong>
-              <small>{step.hint}</small>
-            </button>
-          ))}
-        </nav>
-
-        {sheetStep === "match" && (
-          <section className="admin-sheet-screen admin-sheet-match-screen">
+        {sheetStep === "select" && (
+          <section className="admin-sheet-screen admin-sheet-select-screen">
             <div className="admin-sheet-screen-head">
               <div>
-                <span>Seleccionar partido</span>
-                <strong>Lista de partidos de la jornada</strong>
+                <span>Selecciona un partido para comenzar.</span>
+                <strong>Partidos disponibles</strong>
               </div>
-              <small>{visibleRoundMatches.length} disponible(s)</small>
+              <small>{visibleRoundMatches.length} partido(s)</small>
             </div>
-            <div className="sheet-picker admin-sheet-picker">
+            <div className="sheet-picker admin-sheet-picker admin-sheet-select-filters">
               <label>Torneo
                 <CompetitionSelect
                   league={league}
                   name="sheetCompetitionId"
                   defaultValue={selectedCompetitionId}
                   value={selectedCompetitionId}
-                  onChange={(event) => setSelectedCompetitionId(event.target.value)}
+                  onChange={(event) => {
+                    setSelectedCompetitionId(event.target.value);
+                    setSheetStep("select");
+                  }}
                 />
               </label>
               <label>Jornada
@@ -5252,38 +5558,21 @@ function MatchSheet({ league, onSaveMatchSheet }) {
               </label>
               <label>Estado
                 <select value={matchStatusFilter} onChange={(event) => setMatchStatusFilter(event.target.value)}>
-                  <option value="scheduled">Por capturar</option>
+                  <option value="scheduled">Pendientes por capturar</option>
                   <option value="finished">Capturados</option>
                   <option value="all">Todos</option>
                 </select>
               </label>
-              <label className="sheet-match-select">Partido
-                <select
-                  value={selectedMatch.id}
-                  onChange={(event) => {
-                    setMatchId(event.target.value);
-                    setSheetStep("score");
-                  }}
-                  disabled={!visibleRoundMatches.length}
-                >
-                  {visibleRoundMatches.map((match) => (
-                    <option key={match.id} value={match.id}>
-                      {getTeam(league, match.homeTeamId)?.name || "Local"} vs {getTeam(league, match.awayTeamId)?.name || "Visitante"} | {match.status === "finished" || match.status === "walkover" ? `${match.homeGoals}-${match.awayGoals}` : match.time || "POR DEFINIR"}
-                    </option>
-                  ))}
-                </select>
+              <label className="sheet-match-search">Buscar
+                <input type="search" value={matchSearch} onChange={(event) => setMatchSearch(event.target.value)} placeholder="Buscar equipo o partido..." />
               </label>
             </div>
-            <div className="admin-sheet-selection-brief">
-              <span><b>{selectedStageLabel}</b> Selecciona el partido que vas a operar.</span>
-              <span>El marcador inicia en 0-0 para actas nuevas y solo conserva datos si ya fue capturada.</span>
-            </div>
-            <div className="sheet-match-grid admin-sheet-match-grid" aria-label="Partidos de la jornada">
+            <div className="admin-sheet-match-grid" aria-label="Partidos para capturar acta">
               {visibleRoundMatches.map((match) => {
                 const cardHomeTeam = getTeam(league, match.homeTeamId);
                 const cardAwayTeam = getTeam(league, match.awayTeamId);
                 const isCaptured = match.status === "finished" || match.status === "walkover";
-                const cardStatusLabel = isCaptured ? `Acta ${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : getMatchStatusLabel(match.status);
+                const cardStatusLabel = isCaptured ? "Capturado" : getMatchStatusLabel(match.status);
                 return (
                   <button
                     className={selectedMatch?.id === match.id ? "active" : ""}
@@ -5291,24 +5580,62 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                     type="button"
                     onClick={() => {
                       setMatchId(match.id);
-                      setSheetStep("score");
+                      setSheetStep("match");
                     }}
                   >
                     <span className="admin-sheet-match-card-head">
-                      <b>{(match.stage || "regular") === "playoff" ? [match.playoffRound || "Liguilla", match.playoffLeg].filter(Boolean).join(" | ") : `Jornada ${match.round}`}</b>
+                      <b>{(match.stage || "regular") === "playoff" ? [match.playoffRound || "Liguilla", match.playoffLeg].filter(Boolean).join(" | ") : `J${match.round || "-"}`}</b>
                       <small>{cardStatusLabel}</small>
                     </span>
                     <strong className="admin-sheet-match-teams">
-                      <span>{cardHomeTeam?.name || "LOCAL"}</span>
+                      {renderTeamBadge(cardHomeTeam, "home")}
+                      <span className="admin-sheet-match-team-name home">{cardHomeTeam?.name || "LOCAL"}</span>
                       <em>VS</em>
-                      <span>{cardAwayTeam?.name || "VISITANTE"}</span>
+                      {renderTeamBadge(cardAwayTeam, "away")}
+                      <span className="admin-sheet-match-team-name away">{cardAwayTeam?.name || "VISITANTE"}</span>
                     </strong>
-                    <span className="admin-sheet-match-meta">📅 {formatDate(match.date)} · ⏱ {match.time || "POR DEFINIR"}</span>
-                    <span className="admin-sheet-match-meta">📍 {match.venue || "Cancha por definir"}</span>
+                    <span className="admin-sheet-match-meta">{formatDate(match.date)} · {match.time || "POR DEFINIR"}</span>
+                    <span className="admin-sheet-match-meta">{match.venue || "Cancha por definir"}</span>
                   </button>
                 );
               })}
-              {!visibleRoundMatches.length && <p className="empty">No hay partidos con ese filtro en esta jornada.</p>}
+              {!visibleRoundMatches.length && <p className="empty">No hay partidos con esos filtros.</p>}
+            </div>
+          </section>
+        )}
+
+        {sheetStep === "match" && (
+          <section className="admin-sheet-screen admin-sheet-match-screen">
+            <div className="admin-sheet-screen-head">
+              <div>
+                <span>Informacion del partido</span>
+                <strong>Confirma que sea el encuentro correcto</strong>
+              </div>
+              <small>{isEditingSavedSheet ? "Acta capturada" : "Nueva captura"}</small>
+            </div>
+            <div className="admin-sheet-info-card">
+              <div className="admin-sheet-info-versus">
+                <div>
+                  {renderTeamBadge(homeTeam, "home")}
+                  <strong>{homeTeam?.name || "Local"}</strong>
+                  <span>Local</span>
+                </div>
+                <b>VS</b>
+                <div>
+                  {renderTeamBadge(awayTeam, "away")}
+                  <strong>{awayTeam?.name || "Visitante"}</strong>
+                  <span>Visitante</span>
+                </div>
+              </div>
+              <div className="admin-sheet-info-list">
+                <span><small>Torneo</small><strong>{getCompetition(league, selectedCompetitionId)?.name || competitionLeague.name || "Torneo"}</strong></span>
+                <span><small>Jornada</small><strong>{selectedStageLabel}</strong></span>
+                <span><small>Fecha</small><strong>{formatDate(selectedMatch.date)}</strong></span>
+                <span><small>Hora</small><strong>{selectedMatch.time || "Por definir"}</strong></span>
+                <span><small>Cancha</small><strong>{selectedMatch.venue || "Cancha por definir"}</strong></span>
+                <span><small>Arbitro</small><strong>{selectedMatch.refereeName || selectedMatch.referee || "Por asignar"}</strong></span>
+                <span><small>Estado</small><strong>{getMatchStatusLabel(selectedMatch.status)}</strong></span>
+              </div>
             </div>
           </section>
         )}
@@ -5320,10 +5647,11 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                 <span>Detalle del partido</span>
                 <strong>Marcador oficial</strong>
               </div>
-              <small>{isEditingSavedSheet ? "Edicion de acta" : "Nueva captura"}</small>
+              <small>El marcador inicia en 0-0</small>
             </div>
             <div className="admin-sheet-score-edit">
               <article>
+                {renderTeamBadge(homeTeam, "home")}
                 <span>Local</span>
                 <strong>{homeTeam?.name || "Local"}</strong>
                 <div className="admin-score-stepper">
@@ -5333,6 +5661,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                 </div>
               </article>
               <article>
+                {renderTeamBadge(awayTeam, "away")}
                 <span>Visitante</span>
                 <strong>{awayTeam?.name || "Visitante"}</strong>
                 <div className="admin-score-stepper">
@@ -5395,47 +5724,28 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             <div className="event-toolbar admin-sheet-toolbar">
               <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Agregar goles pendientes</button>
             </div>
-            <div className="event-quick-panel" aria-label="Agregar eventos rapidos">
-              <div className="event-team-card">
-                <strong>{homeTeam?.name || "Local"}</strong>
-                <span>Eventos del local</span>
-                <div className="event-quick-buttons">
-                  <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
-                  <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
-                  <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
-                  <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.homeTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
-                </div>
-              </div>
-              <div className="event-team-card away">
-                <strong>{awayTeam?.name || "Visitante"}</strong>
-                <span>Eventos del visitante</span>
-                <div className="event-quick-buttons">
-                  <button className="event-goal" type="button" onClick={() => addEvent("goal", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("goal")}</span>Gol</button>
-                  <button className="event-yellow" type="button" onClick={() => addEvent("yellow", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("yellow")}</span>Amarilla</button>
-                  <button className="event-red" type="button" onClick={() => addEvent("red", selectedMatch.awayTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("red")}</span>Roja</button>
-                  <button className="event-own-goal" type="button" onClick={() => addEvent("own_goal", selectedMatch.homeTeamId)} disabled={!getPlayersForTeam(selectedMatch.awayTeamId).length}><span aria-hidden="true">{getMatchEventIcon("own_goal")}</span>Autogol</button>
-                </div>
-              </div>
+            <div className="event-quick-panel admin-sheet-action-grid" aria-label="Agregar eventos rapidos">
+              {ADMIN_SHEET_EVENT_ACTIONS.map((action) => (
+                <button
+                  className={action.className}
+                  key={action.type}
+                  type="button"
+                  onClick={() => openEventModal(action.type, selectedMatch.homeTeamId)}
+                  disabled={!["injury_note", "other_note"].includes(action.type) && !getPlayersForTeam(selectedMatch.homeTeamId).length && !getPlayersForTeam(selectedMatch.awayTeamId).length}
+                >
+                  <span aria-hidden="true">{action.icon}</span>
+                  <strong>{action.label}</strong>
+                </button>
+              ))}
             </div>
             <div className="event-list admin-sheet-event-list">
-              {latestEvent && (
-                <div className="sheet-latest-event">
-                  <span>Ultimo evento registrado</span>
-                  {renderEventRow(latestEvent, events.length - 1, true)}
-                </div>
+              <div className="admin-sheet-timeline-head">
+                <strong>Eventos registrados</strong>
+                <span>{eventTotalCount} evento(s)</span>
+              </div>
+              {events.length ? events.map((eventItem, index) => renderEventRow(eventItem, index, eventItem.id === latestEvent?.id)) : (
+                <p className="empty">Agrega goles, tarjetas o incidencias desde las acciones rapidas.</p>
               )}
-              {previousEvents.length > 0 && (
-                <details className="sheet-previous-events">
-                  <summary>
-                    <strong>Eventos anteriores</strong>
-                    <span>{previousEvents.length} evento(s), tocar para revisar</span>
-                  </summary>
-                  <div className="sheet-previous-event-list">
-                    {previousEvents.map((eventItem, index) => renderEventRow(eventItem, index))}
-                  </div>
-                </details>
-              )}
-              {!events.length && <p className="empty">Agrega goles, tarjetas amarillas o rojas para completar el acta.</p>}
             </div>
           </section>
         )}
@@ -5457,6 +5767,20 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                 placeholder="Registra hechos relevantes, incidencias, acuerdos arbitrales o notas internas del partido."
               />
             </label>
+            <div className="admin-sheet-observation-chips" aria-label="Sugerencias rapidas">
+              {ADMIN_SHEET_OBSERVATION_CHIPS.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => {
+                    if (chip === "Sin novedades") setObservations("Juego sin incidentes mayores.");
+                    else appendObservationLine(chip);
+                  }}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
             <div className="sheet-default-controls admin-sheet-type-controls" aria-label="Tipo de resultado del acta">
               <label>Tipo de acta
                 <select value={sheetMode} onChange={(event) => applyDefaultScore(event.target.value)}>
@@ -5496,11 +5820,11 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                 {renderTeamBadge(awayTeam, "away")}
               </div>
               <div className="admin-sheet-summary-grid">
-                <span>Goles local <strong>{isDefaultSheet ? homeGoalEvents : `${homeGoalEvents}/${expectedHomeGoals}`}</strong></span>
-                <span>Goles visitante <strong>{isDefaultSheet ? awayGoalEvents : `${awayGoalEvents}/${expectedAwayGoals}`}</strong></span>
+                <span>Goles <strong>{goalEvents.length}</strong></span>
                 <span>Amarillas <strong>{yellowCardCount}</strong></span>
                 <span>Rojas <strong>{redCardCount}</strong></span>
-                <span>Eventos registrados <strong>{eventTotalCount}</strong></span>
+                <span>Autogoles <strong>{ownGoalCount}</strong></span>
+                <span>Lesiones <strong>{injuryNoteCount}</strong></span>
                 <span>Observaciones <strong>{observationsReady ? "Si" : "No"}</strong></span>
               </div>
               <div className="admin-sheet-final-note">
@@ -5520,17 +5844,20 @@ function MatchSheet({ league, onSaveMatchSheet }) {
           </section>
         )}
 
-      {validationMessage && <p className="sheet-alert">{validationMessage}</p>}
-      {sheetNotice && <p className="auth-ok">{sheetNotice}</p>}
+        {validationMessage && <p className="sheet-alert">{validationMessage}</p>}
+        {sheetNotice && <p className="auth-ok">{sheetNotice}</p>}
 
+        {sheetStep !== "select" && (
         <div className="admin-sheet-actions">
           <button type="button" onClick={() => moveSheetStep(-1)} disabled={activeStepIndex === 0}>Anterior</button>
           {sheetStep === "finish" ? (
-            <button className="primary" type="submit">Guardar y publicar acta</button>
+            <button className="primary admin-sheet-publish-button" type="submit">PUBLICAR ACTA</button>
           ) : (
-            <button className="primary" type="button" onClick={() => moveSheetStep(1)}>Siguiente</button>
+            <button className="primary" type="button" onClick={() => moveSheetStep(1)}>Continuar</button>
           )}
         </div>
+        )}
+        {renderEventModal()}
       </div>
     </form>
   );
