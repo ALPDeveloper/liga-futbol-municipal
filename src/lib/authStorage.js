@@ -12,14 +12,12 @@ export function loadAuth() {
 }
 
 export function saveAuth(auth, remember = true) {
-  const targetStorage = remember ? localStorage : sessionStorage;
-  const staleStorage = remember ? sessionStorage : localStorage;
-  staleStorage.removeItem(AUTH_KEY);
-  targetStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+  sessionStorage.removeItem(AUTH_KEY);
+  localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
 }
 
 export function isAuthRemembered() {
-  return Boolean(localStorage.getItem(AUTH_KEY));
+  return true;
 }
 
 export function clearAuth() {

@@ -60,7 +60,7 @@ export const runtimeConfig = {
   seedDemoData: parseBoolean(process.env.SEED_DEMO_DATA, false),
   seedDemoUsers: parseBoolean(process.env.SEED_DEMO_USERS, false),
   tokenSecret: process.env.AUTH_SECRET || DEFAULT_DEV_SECRET,
-  tokenTtlMs: 1000 * 60 * 60 * Number(process.env.TOKEN_TTL_HOURS || 8),
+  tokenTtlMs: 1000 * 60 * 60 * Number(process.env.TOKEN_TTL_HOURS || 8760),
   databaseProvider: process.env.DATABASE_PROVIDER === "postgres" ? "postgres" : "sqlite",
   databaseUrl: process.env.DATABASE_URL || "",
   imageUploadMaxBytes: Number(process.env.IMAGE_UPLOAD_MAX_BYTES || 1_800_000),

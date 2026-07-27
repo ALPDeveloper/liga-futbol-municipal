@@ -1682,16 +1682,23 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     }
     return [...groups.values()];
   }, [filteredMatches]);
-  const activeFilterChips = [
-    selectedCompetition ? { id: "competition", label: selectedCompetition.name, clear: null } : null,
-    selectedRoundFilter !== "all" ? { id: "round", label: selectedRoundFilter === "next" ? `Jornada ${displayRound || "-"}` : `Jornada ${selectedRoundFilter}`, clear: () => setSelectedRoundFilter("all") } : null,
-    matchStatusFilter !== "all" ? { id: "status", label: "Por jugarse", clear: () => setMatchStatusFilter("all") } : null,
-    assignmentCoverageFilter !== "all" ? { id: "coverage", label: getAssignmentCoverageLabel(assignmentCoverageFilter), clear: () => setAssignmentCoverageFilter("all") } : null,
-    matchSearch ? { id: "search", label: matchSearch, clear: () => setMatchSearch("") } : null
-  ].filter(Boolean);
   const signatureIssueReports = finalizedReports.filter((report) => report.payload?.signatureIssue?.status === "pending_admin_attention");
   const readyFinalizedReports = finalizedReports.filter((report) => report.status === "finalized");
   const actaAttentionCount = pendingSheets.length + finalizedReports.length;
+
+  function openRefereeCreateScreen() {
+    setLastInvitation(null);
+    setShowRefereeCreateSheet(false);
+    setActiveRefereeTask("create");
+    window.requestAnimationFrame(() => {
+      document.querySelector(".referee-ops-shell")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function closeRefereeCreateScreen() {
+    setActiveRefereeTask("manage");
+    setShowRefereeCreateSheet(false);
+  }
 
   async function reloadReferees() {
     setLoading(true);
@@ -1722,6 +1729,15 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       setSelectedCompetitionId(fallbackId);
     }
   }, [league, selectedCompetitionId]);
+
+  useEffect(() => {
+    if (!selectedAssignmentMatch && !showAdvancedFilters) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [selectedAssignmentMatch, showAdvancedFilters]);
 
   async function reviewSheet(sheet, action, note = "") {
     const confirmed = window.confirm(action === "approve"
@@ -1947,8 +1963,12 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           <span>Programa designaciones, administra arbitros y da seguimiento a actas publicadas o casos legacy. Las actas finalizadas por el arbitro no requieren revision previa.</span>
         </div>
       )}
-      {notice && <p className="auth-ok">{notice}</p>}
-      {error && <p className="auth-error">{error}</p>}
+      {(notice || error) && (
+        <div className={`referee-action-toast ${error ? "is-error" : "is-success"}`} role="status" aria-live="polite">
+          <strong>{error ? "No se pudo completar" : "Accion completada"}</strong>
+          <span>{error || notice}</span>
+        </div>
+      )}
 
       <div className="referee-command-center">
         <button className={activeRefereeTask === "assign" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("assign")}>
@@ -1967,6 +1987,16 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           <small>{actaAttentionCount} por atender</small>
         </button>
       </div>
+
+      {activeRefereeTask === "create" && (
+        <RefereeCreateScreen
+          busyAction={busyAction}
+          lastInvitation={lastInvitation}
+          league={league}
+          onClose={closeRefereeCreateScreen}
+          onSubmit={submitReferee}
+        />
+      )}
 
       {activeRefereeTask === "assign" && (
         <>
@@ -2002,7 +2032,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           </div>
 
           <div className="referee-quick-actions">
-            <button className="primary" type="button" onClick={() => setShowRefereeCreateSheet(true)}>+ Nuevo arbitro</button>
+            <button className="primary" type="button" onClick={openRefereeCreateScreen}>+ Nuevo arbitro</button>
             <button type="button" onClick={() => setActiveRefereeTask("manage")}>Arbitros</button>
             <button type="button" onClick={() => setActiveRefereeTask("review")}>Actas</button>
             <button type="button" onClick={() => {
@@ -2050,17 +2080,6 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
             </label>
           </div>
 
-          {!!activeFilterChips.length && (
-            <div className="referee-active-filters">
-              {activeFilterChips.map((chip) => (
-                <span key={chip.id}>
-                  {chip.label}
-                  {chip.clear && <button type="button" aria-label={`Quitar ${chip.label}`} onClick={chip.clear}>x</button>}
-                </span>
-              ))}
-            </div>
-          )}
-
           <div className="referee-match-groups">
             {loading ? (
               <RefereeSkeletonList />
@@ -2069,7 +2088,6 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
                 <div className="referee-day-head">
                   <strong>{group.title}</strong>
                   <span>{group.subtitle}</span>
-                  <b>{group.matches.length}</b>
                 </div>
                 <div className="referee-match-list">
                   {group.matches.map((match) => (
@@ -2131,7 +2149,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
         <div className="referee-task-panel referee-tab-panel">
           <div className="referee-tab-head">
             <h3>Arbitros registrados</h3>
-            <button className="primary" type="button" onClick={() => setShowRefereeCreateSheet(true)}>+ Nuevo arbitro</button>
+            <button className="primary" type="button" onClick={openRefereeCreateScreen}>+ Nuevo arbitro</button>
           </div>
           <div className="referee-metric-grid compact">
             <ArbitrationMetricCard label="Activos" tone="ok" value={activeReferees.length} />
@@ -2259,11 +2277,11 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       )}
 
       {showRefereeCreateSheet && (
-        <RefereeCreateSheet
+        <RefereeCreateScreen
           busyAction={busyAction}
           lastInvitation={lastInvitation}
           league={league}
-          onClose={() => setShowRefereeCreateSheet(false)}
+          onClose={closeRefereeCreateScreen}
           onSubmit={submitReferee}
         />
       )}
@@ -2312,6 +2330,14 @@ function getAssignmentCoverageLabel(value) {
 function getRefereeInitials(name = "") {
   const parts = String(name || "AR").trim().split(/\s+/).filter(Boolean);
   return (parts[0]?.[0] || "A") + (parts[1]?.[0] || parts[0]?.[1] || "R");
+}
+
+function getTeamAbbreviation(team) {
+  const source = String(team?.shortName || team?.name || "EQ").trim();
+  const words = source.split(/\s+/).filter(Boolean);
+  if (team?.shortName && team.shortName.length <= 3) return team.shortName.toLocaleUpperCase("es-MX");
+  if (words.length >= 2) return `${words[0][0] || ""}${words[1][0] || ""}`.toLocaleUpperCase("es-MX");
+  return source.slice(0, 2).toLocaleUpperCase("es-MX") || "EQ";
 }
 
 function findReferee(referees, userId) {
@@ -2427,6 +2453,8 @@ function RefereeMatchOpsCard({ feedback, focused = false, league, match, onOpen,
 }
 
 function RefereeAssignmentSheet({ activeReferees, busyAction, league, match, matches, onClose, onSubmit, selectedCompetition }) {
+  const homeTeam = getTeam(league, match.homeTeamId);
+  const awayTeam = getTeam(league, match.awayTeamId);
   return (
     <div className="referee-sheet-backdrop" role="presentation" onClick={onClose}>
       <form className="referee-bottom-sheet referee-assignment-sheet" role="dialog" aria-modal="true" aria-label="Asignar equipo arbitral" onClick={(event) => event.stopPropagation()} onSubmit={(event) => onSubmit(event, match)}>
@@ -2435,12 +2463,19 @@ function RefereeAssignmentSheet({ activeReferees, busyAction, league, match, mat
             <span>Asignar equipo arbitral</span>
             <strong>{getMatchAdminLabel(league, match)}</strong>
           </div>
-          <button type="button" onClick={onClose}>Cerrar</button>
+          <button className="referee-sheet-close-button" type="button" onClick={onClose}>Cerrar</button>
         </div>
         <div className="referee-sheet-match-summary">
-          <span>{formatDate(match.date)} · {match.time || "Hora por definir"}</span>
-          <strong>{match.venue || "Cancha por definir"}</strong>
-          <small>{selectedCompetition?.name || "Torneo"} · Jornada {match.round || "-"}</small>
+          <div className="referee-sheet-versus">
+            <span>{getTeamAbbreviation(homeTeam)}</span>
+            <b>VS</b>
+            <span>{getTeamAbbreviation(awayTeam)}</span>
+          </div>
+          <div>
+            <span>{formatDate(match.date)} · {match.time || "Hora por definir"}</span>
+            <strong>{match.venue || "Cancha por definir"}</strong>
+            <small>{selectedCompetition?.name || "Torneo"} · Jornada {match.round || "-"}</small>
+          </div>
         </div>
         <div className="referee-sheet-form-grid">
           <RefereeSelect label="Arbitro central" match={match} matches={matches} name="centralRefereeUserId" referees={activeReferees} defaultValue={match.centralRefereeUserId || ""} />
@@ -2449,12 +2484,12 @@ function RefereeAssignmentSheet({ activeReferees, busyAction, league, match, mat
           <RefereeSelect label="Cuarto arbitro" match={match} matches={matches} name="fourthRefereeUserId" referees={activeReferees} defaultValue={match.fourthRefereeUserId || ""} />
         </div>
         <div className="referee-sheet-actions">
-          <button type="button" onClick={onClose}>Cancelar</button>
-          <button type="submit" name="saveMode" value="central-only" disabled={busyAction === `match-referees-${match.id}`}>Guardar solo central</button>
+          <button className="referee-action-secondary" type="button" onClick={onClose}>Cancelar</button>
+          <button className="referee-action-central" type="submit" name="saveMode" value="central-only" disabled={busyAction === `match-referees-${match.id}`}>Guardar solo central</button>
           {(match.centralRefereeUserId || match.assistantReferee1UserId || match.assistantReferee2UserId || match.fourthRefereeUserId) && (
             <button className="danger ghost-danger" type="submit" name="saveMode" value="clear" disabled={busyAction === `match-referees-${match.id}`}>Eliminar designacion</button>
           )}
-          <button className="primary" type="submit" disabled={busyAction === `match-referees-${match.id}`}>
+          <button className="primary referee-action-save" type="submit" disabled={busyAction === `match-referees-${match.id}`}>
             {busyAction === `match-referees-${match.id}` ? "Guardando..." : "Guardar designacion"}
           </button>
         </div>
@@ -2463,15 +2498,23 @@ function RefereeAssignmentSheet({ activeReferees, busyAction, league, match, mat
   );
 }
 
-function RefereeCreateSheet({ busyAction, lastInvitation, league, onClose, onSubmit }) {
+function RefereeCreateScreen({ busyAction, lastInvitation, league, onClose, onSubmit }) {
   return (
-    <div className="referee-sheet-backdrop" role="presentation" onClick={onClose}>
-      <div className="referee-bottom-sheet" role="dialog" aria-modal="true" aria-label="Nuevo arbitro" onClick={(event) => event.stopPropagation()}>
-        <div className="referee-bottom-sheet-head">
-          <strong>Nuevo arbitro</strong>
-          <button className="referee-sheet-close" type="button" aria-label="Cerrar" onClick={onClose}>×</button>
+    <section className="referee-create-screen" aria-label="Nuevo arbitro">
+      <div className="referee-create-hero">
+        <button className="referee-create-back" type="button" onClick={onClose} aria-label="Volver a arbitros">←</button>
+        <div>
+          <span>Alta arbitral</span>
+          <h3>Nuevo arbitro</h3>
+          <p>Crea la cuenta, genera su invitacion y deja listo el acceso al panel arbitral.</p>
         </div>
-        <form className="referee-sheet-form-grid" onSubmit={onSubmit}>
+      </div>
+      <div className="referee-create-layout">
+        <form className="referee-create-form" onSubmit={onSubmit}>
+          <div className="referee-create-section-head">
+            <span>Datos de contacto</span>
+            <strong>Informacion principal</strong>
+          </div>
           <label>Nombre completo<input name="name" required placeholder="Ej. Juan Perez Lopez" /></label>
           <label>Correo electronico<input name="email" required type="email" placeholder="ejemplo@correo.com" /></label>
           <label>Telefono<input name="phone" required inputMode="tel" placeholder="351 123 4567" /></label>
@@ -2484,15 +2527,16 @@ function RefereeCreateSheet({ busyAction, lastInvitation, league, onClose, onSub
           </div>
           <label className="wide-field">Observaciones<textarea name="notes" placeholder="Observaciones adicionales (opcional)" /></label>
           <div className="referee-sheet-actions wide-field">
-            <button type="button" onClick={onClose}>Cancelar</button>
-            <button className="primary" type="submit" disabled={busyAction === "create-referee"}>
+            <button className="referee-action-secondary" type="button" onClick={onClose}>Cancelar</button>
+            <button className="primary referee-action-save" type="submit" disabled={busyAction === "create-referee"}>
               {busyAction === "create-referee" ? "Creando..." : "Crear e invitar"}
             </button>
           </div>
         </form>
         {lastInvitation && (
-          <div className="delegate-invitation-box">
-            <strong>Invitacion lista</strong>
+          <div className="delegate-invitation-box referee-invitation-panel">
+            <span>Invitacion generada</span>
+            <strong>Lista para compartir</strong>
             <textarea readOnly value={lastInvitation.whatsappMessage || ""} />
             <div className="inline-actions">
               <button type="button" onClick={() => navigator.clipboard?.writeText(lastInvitation.whatsappMessage || "")}>Copiar mensaje</button>
@@ -2501,7 +2545,7 @@ function RefereeCreateSheet({ busyAction, lastInvitation, league, onClose, onSub
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -401,7 +401,7 @@ function DelegateLoadingShell() {
   );
 }
 
-export function TeamPortal({ authToken, currentUser, onLogout }) {
+export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publicLeaguePath = "/" }) {
   const initialPayload = useMemo(() => readTeamPortalCache(currentUser?.id), [currentUser?.id]);
   const [context, setContext] = useState(initialPayload?.context || null);
   const [players, setPlayers] = useState(initialPayload?.players || []);
@@ -861,7 +861,21 @@ export function TeamPortal({ authToken, currentUser, onLogout }) {
               <strong>{isPlayerEditView ? selectedEditingPlayer?.name || "Jugador" : isPlayerCreateView ? "Agregar jugador" : context.teamName}</strong>
               <em>{isPlayerEditView ? `#${selectedEditingPlayer?.number || "-"} ${getPlayerPositionOptionValue(selectedEditingPlayer?.position)}` : isPlayerCreateView ? "Plantilla del equipo" : context.competitionName || "Categoria asignada"}</em>
             </div>
-            {activeView === "home" && <button className="delegate-logout-button" type="button" onClick={onLogout}>Salir</button>}
+            {activeView === "home" && (
+              <div className="delegate-header-actions">
+                <button
+                  className="delegate-public-button"
+                  type="button"
+                  onClick={() => {
+                    if (onNavigate) onNavigate(publicLeaguePath);
+                    else window.location.href = publicLeaguePath;
+                  }}
+                >
+                  Ir a liga
+                </button>
+                <button className="delegate-logout-button" type="button" onClick={onLogout}>Cerrar sesion</button>
+              </div>
+            )}
             {activeView === "matches" && (
               <button
                 className="delegate-header-filter-button"

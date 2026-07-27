@@ -257,6 +257,9 @@ function RefereeTinyIcon({ type }) {
   if (type === "logout") {
     return <svg {...common}><path d="M10 6H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4" /><path d="M14 8l4 4-4 4" /><path d="M18 12H9" /></svg>;
   }
+  if (type === "external") {
+    return <svg {...common}><path d="M7 17 17 7" /><path d="M9 7h8v8" /><path d="M19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" /></svg>;
+  }
   if (type === "check") {
     return <svg {...common}><path d="m5 12 4 4 10-10" /></svg>;
   }
@@ -513,7 +516,7 @@ function scrollRefereePortalToTop() {
   });
 }
 
-function RefereeHeader({ onLogout }) {
+function RefereeHeader({ onLogout, onNavigate, publicLeaguePath = "/" }) {
   return (
     <header className="referee-app-header">
       <img className="referee-header-watermark" alt="" src={ligatecLogo} aria-hidden="true" />
@@ -526,9 +529,20 @@ function RefereeHeader({ onLogout }) {
       </div>
       <div className="referee-header-actions">
         <b>Activo</b>
+        <button
+          className="portal-mini-link portal-public-link"
+          type="button"
+          onClick={() => {
+            if (onNavigate) onNavigate(publicLeaguePath);
+            else window.location.href = publicLeaguePath;
+          }}
+        >
+          <RefereeTinyIcon type="external" />
+          <span>Ir a liga</span>
+        </button>
         <button className="portal-mini-link" type="button" onClick={onLogout}>
           <RefereeTinyIcon type="logout" />
-          <span>Salir</span>
+          <span>Cerrar sesion</span>
         </button>
       </div>
     </header>
@@ -3450,7 +3464,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
   );
 }
 
-export function RefereePortal({ authToken, currentUser, onLogout }) {
+export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, publicLeaguePath = "/" }) {
   const initialPayload = useMemo(() => readRefereePortalCache(currentUser?.id), [currentUser?.id]);
   const [payload, setPayload] = useState(initialPayload || null);
   const [error, setError] = useState("");
@@ -3796,6 +3810,8 @@ export function RefereePortal({ authToken, currentUser, onLogout }) {
     <main className={`page referee-portal-page portal-mobile-shell referee-mobile-app referee-view-${activeView}`} id="referee-home">
       {activeView === "home" && <RefereeHeader
         onLogout={onLogout}
+        onNavigate={onNavigate}
+        publicLeaguePath={publicLeaguePath}
       />}
       {activeView === "home" && portalNotice && <p className="auth-ok referee-portal-notice">{portalNotice}</p>}
 

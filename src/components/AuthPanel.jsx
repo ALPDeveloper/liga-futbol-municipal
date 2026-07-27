@@ -70,7 +70,6 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
   const [recoveryMessage, setRecoveryMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
-  const [rememberSession, setRememberSession] = useState(true);
 
   if (currentUser) {
     return (
@@ -80,7 +79,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
           <strong>{currentUser.name}</strong>
           <small>{currentUser.role === "super_admin" ? "Super admin" : currentUser.role === "team_delegate" ? "Delegado de equipo" : currentUser.role === "referee" ? "Arbitro" : currentUser.role === "admin_limited" ? "Admin limitado" : "Admin de liga"}</small>
         </span>
-        <button type="button" onClick={onLogout}>Salir</button>
+        <button type="button" onClick={onLogout}>Cerrar sesion</button>
       </div>
     );
   }
@@ -126,7 +125,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
           <span>Nueva contraseña</span>
           <span className="auth-input-shell">
             <AuthIcon name="lock" />
-            <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type={showNewPassword ? "text" : "password"} placeholder="Minimo 10 caracteres" aria-label="Nueva contraseña" />
+            <input className="auth-password-input" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type={showNewPassword ? "text" : "password"} placeholder="Minimo 10 caracteres" aria-label="Nueva contraseña" />
             <button className="auth-visibility-button" type="button" onClick={() => setShowNewPassword((value) => !value)} aria-label={showNewPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
               <AuthIcon name="eye" />
             </button>
@@ -150,7 +149,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
         event.preventDefault();
         setError("");
         try {
-          await onLogin(email, password, rememberSession);
+          await onLogin(email, password, true);
         } catch (loginError) {
           setError(loginError.message);
         }
@@ -167,17 +166,14 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
         <span>Contraseña</span>
         <span className="auth-input-shell">
           <AuthIcon name="lock" />
-          <input value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? "text" : "password"} placeholder="Ingresa tu contraseña" aria-label="Contraseña" autoComplete="current-password" />
+          <input className="auth-password-input" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? "text" : "password"} placeholder="Ingresa tu contraseña" aria-label="Contraseña" autoComplete="current-password" />
           <button className="auth-visibility-button" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
             <AuthIcon name="eye" />
           </button>
         </span>
       </label>
       <div className="auth-inline-actions">
-        <label className="auth-remember">
-          <input type="checkbox" checked={rememberSession} onChange={(event) => setRememberSession(event.target.checked)} aria-label="Mantener mi sesion iniciada" />
-          <span>Mantener mi sesion iniciada</span>
-        </label>
+        <span className="auth-session-note">Sesion activa hasta cerrar sesion.</span>
         <button className="auth-link-action" type="button" onClick={() => setMode("recover")}>Olvidaste tu contraseña?</button>
       </div>
       <button className="primary auth-submit-button" type="submit">

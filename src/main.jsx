@@ -1228,12 +1228,12 @@ function App() {
                     </button>
                   </>
                 )}
-                {(league?.id || isAccessRoute || isAccessSelectionRoute) && <a className="private-panel-link" href={privatePublicReturnPath} onClick={(event) => {
+                {(league?.id || isAccessRoute || isAccessSelectionRoute) && <a className="private-panel-link" href={privatePublicReturnPath} aria-label="Ir a liga" title="Ir a liga" onClick={(event) => {
                   event.preventDefault();
                   navigateTo(privatePublicReturnPath);
                 }}>
                   <span>↗</span>
-                  <strong>Vista publica</strong>
+                  <strong>Ir a liga</strong>
                 </a>}
               </nav>
               {isAdminRoute && <span className={`api-pill private-api-pill ${apiStatus}`}>
@@ -1246,7 +1246,7 @@ function App() {
                     <strong>{currentUser.name || currentUser.email}</strong>
                     <small>{getRoleLabel(activeAccessRole)}</small>
                   </span>
-                  <button type="button" onClick={logout}>Salir</button>
+                  <button type="button" onClick={logout}>Cerrar sesion</button>
                 </div>
               )}
             </>
@@ -1354,11 +1354,11 @@ function App() {
         </Suspense>
       ) : isTeamRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando portal de equipo" />}>
-          <LazyTeamPortal authToken={auth.token} currentUser={currentUser} onLogout={logout} />
+          <LazyTeamPortal authToken={auth.token} currentUser={currentUser} onLogout={logout} onNavigate={navigateTo} publicLeaguePath={publicLeaguePath} />
         </Suspense>
       ) : isRefereeRoute ? (
         <Suspense fallback={<RouteFallback label="Cargando panel de arbitro" />}>
-          <LazyRefereePortal authToken={auth.token} currentUser={currentUser} onLogout={logout} />
+          <LazyRefereePortal authToken={auth.token} currentUser={currentUser} onLogout={logout} onNavigate={navigateTo} publicLeaguePath={publicLeaguePath} />
         </Suspense>
       ) : (
         <Suspense fallback={<RouteFallback label="Cargando liga" />}>
