@@ -559,7 +559,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
       clearPublicHash();
       forcePublicScrollTop();
     }
-  }, [league.id]);
+  }, [league.id, league.competitions]);
 
   useEffect(() => {
     if (!showCompetitionGate || !window.location.hash) return;
