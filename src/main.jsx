@@ -1220,6 +1220,7 @@ function App() {
   const [userListRefreshKey, setUserListRefreshKey] = useState(0);
   const [publicEntryMode, setPublicEntryMode] = useState(false);
   const [publicHeaderHidden, setPublicHeaderHidden] = useState(false);
+  const [operationDataActive, setOperationDataActive] = useState(false);
   const lastPublicScrollYRef = useRef(window.scrollY);
   const pendingPersistRef = useRef(null);
   const persistRunningRef = useRef(false);
@@ -1281,6 +1282,16 @@ function App() {
     if (!publicLeagueId) setPublicEntryMode(false);
   }, [publicLeagueId]);
   const hidePublicChromeForEntry = publicEntryMode && !isPrivateRoute && Boolean(publicLeagueId);
+
+  useEffect(() => {
+    const updateOperationDataActive = () => {
+      setOperationDataActive(document.documentElement.classList.contains("operation-data-active"));
+    };
+    updateOperationDataActive();
+    const observer = new MutationObserver(updateOperationDataActive);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (isPrivateRoute || isAuthExperienceRoute || hidePublicChromeForEntry) {
@@ -1613,7 +1624,7 @@ function App() {
   }
 
   return (
-    <div className={`${isPrivateRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} ${isAuthExperienceRoute ? "auth-route-shell" : ""} ${hidePublicChromeForEntry ? "public-entry-shell" : ""}`} style={themeStyle}>
+    <div className={`${isPrivateRoute ? "app-shell admin-route-shell" : "app-shell public-route-shell"} ${isAuthExperienceRoute ? "auth-route-shell" : ""} ${hidePublicChromeForEntry ? "public-entry-shell" : ""} ${operationDataActive ? "operation-data-shell-active" : ""}`} style={themeStyle}>
       {!isAuthExperienceRoute && !hidePublicChromeForEntry && !isLandingRoute && !isLeagueDirectoryRoute && <header className={`topbar ${isPrivateRoute ? "admin-topbar" : `public-topbar ${publicHeaderHidden ? "public-topbar-hidden" : ""}`}`}>
         <div className={!isPrivateRoute ? "public-brand-zone" : ""}>
           <a className="brand" href={isAdminRoute ? "/panel/admin" : "/"} aria-label="Ir al inicio" onClick={(event) => {
