@@ -1959,6 +1959,35 @@ app.post("/api/leagues/:leagueId/matches/:matchId/result", requireAuth, async (r
   response.json(nextStore);
 });
 
+app.post("/api/leagues/:leagueId/matches/:matchId/sheet", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!canEditMatchResults(request.user, leagueId)) {
+    return response.status(403).json({ error: "No puedes capturar actas en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  const match = league?.matches?.find((item) => item.id === request.params.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
+  if (league.status !== "active") return response.status(404).json({ error: "Liga suspendida" });
+
+  const nextStore = await importStoreData(saveMatchSheet(store, leagueId, {
+    ...request.body,
+    matchId: match.id
+  }));
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "match_sheet_save",
+    entityType: "match",
+    entityId: match.id,
+    detail: `Publico acta jornada ${match.round || "-"}`
+  });
+  response.json(nextStore);
+});
+
 app.post("/api/leagues/:leagueId/matches/:matchId/discipline-resolution", requireAuth, async (request, response) => {
   const leagueId = String(request.params.leagueId || "").trim();
   if (!hasAdminPermission(request.user, leagueId, "discipline")) {

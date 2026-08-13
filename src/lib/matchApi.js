@@ -48,6 +48,15 @@ export async function saveMatchResultInApi(token, leagueId, matchId, payload) {
   return parseResponse(response);
 }
 
+export async function saveMatchSheetInApi(token, leagueId, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/matches/${encodeURIComponent(matchId)}/sheet`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response);
+}
+
 export async function resolveMatchDisciplineInApi(token, leagueId, matchId, payload) {
   const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/matches/${encodeURIComponent(matchId)}/discipline-resolution`, {
     method: "POST",

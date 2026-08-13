@@ -5578,7 +5578,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     <form
       className="match-sheet admin-sheet-app"
       noValidate
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
         const error = validateMatchSheet();
         if (error) {
@@ -5598,7 +5598,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         if (!confirmed) return;
 
         try {
-          onSaveMatchSheet({
+          await onSaveMatchSheet({
             matchId: selectedMatch.id,
             homeGoals,
             awayGoals,
@@ -5621,10 +5621,12 @@ function MatchSheet({ league, onSaveMatchSheet }) {
               : "Acta publicada correctamente.";
           setSheetNotice(successMessage);
           window.alert(successMessage);
+          setSelectedMatchId("");
           setSheetStep("match");
         } catch (saveError) {
-          setValidationMessage(saveError.message || "No se pudo guardar el acta.");
-          window.alert(saveError.message || "No se pudo guardar el acta.");
+          const message = saveError.message || "No se pudo guardar el acta.";
+          setValidationMessage(message);
+          window.alert(message);
         }
       }}
     >

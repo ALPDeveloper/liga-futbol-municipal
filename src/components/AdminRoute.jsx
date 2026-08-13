@@ -51,7 +51,7 @@ import {
 } from "../lib/actions.js";
 import { createUser } from "../lib/userApi.js";
 import { deleteLeagueFromApi } from "../lib/leagueApi.js";
-import { createMatchInApi, deleteMatchInApi, resolveMatchDisciplineInApi, saveMatchResultInApi, updateMatchInApi } from "../lib/matchApi.js";
+import { createMatchInApi, deleteMatchInApi, resolveMatchDisciplineInApi, saveMatchResultInApi, saveMatchSheetInApi, updateMatchInApi } from "../lib/matchApi.js";
 import { createPlayerInApi, deletePlayerInApi, updatePlayerInApi } from "../lib/playerApi.js";
 import { updateLeagueRulesInApi } from "../lib/rulesApi.js";
 import { findDuplicatePlayer, validatePlayerFullName } from "../lib/playerValidation.js";
@@ -284,6 +284,21 @@ export function AdminRoute({
     }
   }
 
+  async function saveMatchSheetFromPanel(payload) {
+    if (!authToken) {
+      commit(saveMatchSheet(store, league.id, payload));
+      return true;
+    }
+    try {
+      const apiStore = await saveMatchSheetInApi(authToken, league.id, payload.matchId, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (matchError) {
+      throw new Error(matchError.message || "No se pudo publicar el acta.");
+    }
+  }
+
   async function resolveMatchDisciplineFromPanel(payload) {
     if (!authToken) {
       commit(resolveMatchEventDiscipline(store, league.id, payload));
@@ -347,7 +362,7 @@ export function AdminRoute({
       onGenerateSchedule={(payload) => commit(generateSchedule(store, league.id, payload))}
       onGeneratePlayoffBracket={(payload) => commit(generatePlayoffBracket(store, league.id, payload))}
       onSaveIdentity={(payload) => commit(saveIdentity(store, league.id, payload))}
-      onSaveMatchSheet={(payload) => commit(saveMatchSheet(store, league.id, payload))}
+      onSaveMatchSheet={saveMatchSheetFromPanel}
       onSaveRules={saveRules}
       onSaveResult={saveResultFromPanel}
       onResolveMatchDiscipline={resolveMatchDisciplineFromPanel}
