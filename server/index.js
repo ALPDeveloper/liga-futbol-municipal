@@ -1971,10 +1971,28 @@ app.post("/api/leagues/:leagueId/matches/:matchId/sheet", requireAuth, async (re
   if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
   if (league.status !== "active") return response.status(404).json({ error: "Liga suspendida" });
 
-  const nextStore = await importStoreData(saveMatchSheet(store, leagueId, {
+  let nextStoreCandidate;
+  try {
+    nextStoreCandidate = saveMatchSheet(store, leagueId, {
     ...request.body,
-    matchId: match.id
-  }));
+      matchId: match.id,
+      events: Array.isArray(request.body?.events) ? request.body.events : []
+    });
+  } catch (sheetError) {
+    return response.status(400).json({
+      error: sheetError.message || "No se pudo validar el acta del partido."
+    });
+  }
+
+  let nextStore;
+  try {
+    nextStore = await importStoreData(nextStoreCandidate);
+  } catch (persistError) {
+    console.error("Error al publicar acta desde panel admin:", persistError);
+    return response.status(500).json({
+      error: "No se pudo guardar el acta en servidor. Intenta nuevamente antes de continuar."
+    });
+  }
   clearPublicCache();
 
   await logAudit({

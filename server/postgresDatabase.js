@@ -1249,7 +1249,7 @@ export async function importPostgresStore(store) {
           event.eventTeamSide || "",
           event.subtype || "",
           event.period || "",
-          event.minute,
+          event.minute === "" || event.minute === undefined ? null : event.minute,
           event.minuteLabel || "",
           event.second || null,
           event.suspensionMatches,
