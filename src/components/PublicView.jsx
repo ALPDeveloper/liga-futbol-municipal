@@ -3119,7 +3119,7 @@ function drawActaMinuteNode(context, x, y, event) {
   context.fillStyle = "#ffffff";
   context.font = "1000 19px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   context.textAlign = "center";
-  context.fillText(event && hasEventMinute(event) ? `${getEventMinuteLabel(event)}'` : "0'", x, y + 6);
+  context.fillText(event && hasEventMinute(event) ? `${getEventMinuteLabel(event)}'` : "", x, y + 6);
   context.textAlign = "left";
 }
 
@@ -6576,7 +6576,8 @@ function parseEventMinute(event) {
   const value = event.minute ?? "";
   if (value === "" || value === null || value === undefined) return null;
   const numeric = Number(value);
-  return Number.isNaN(numeric) ? null : numeric;
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric;
 }
 
 function getEventMinuteLabel(event) {
@@ -6704,7 +6705,7 @@ function MatchTeamEvents({ title, events, league, showMinutes = true }) {
         const player = getPlayer(league, event.playerId);
         return (
           <article className={`match-event-row ${event.type} ${showMinutes ? "" : "without-minute"}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
-            {showMinutes && <span className="match-event-minute">{event.minute ? `${getEventMinuteLabel(event)}'` : ""}</span>}
+            {showMinutes && <span className="match-event-minute">{hasEventMinute(event) ? `${getEventMinuteLabel(event)}'` : ""}</span>}
             <span className="match-event-badge">{getPublicEventIcon(event.type)}</span>
             <div>
               <strong>{player?.name || "Jugador"}</strong>

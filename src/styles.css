@@ -11100,6 +11100,39 @@ th {
   background: rgba(2, 10, 17, 0.35);
 }
 
+.admin-console-page .admin-search-input-wrap,
+.admin-search-input-wrap {
+  position: relative;
+  display: grid;
+  width: 100%;
+}
+
+.admin-console-page .admin-search-input-wrap input,
+.admin-search-input-wrap input {
+  width: 100%;
+  min-width: 0;
+  padding-right: 42px;
+}
+
+.admin-console-page .admin-search-input-wrap button,
+.admin-search-input-wrap button {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid rgba(132, 166, 190, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eaf4ff;
+  font-size: 1.15rem;
+  font-weight: 950;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
 .admin-console-page .searchable-select small {
   color: rgba(220, 232, 240, 0.58);
 }
@@ -11466,6 +11499,69 @@ th {
   color: rgba(220, 232, 240, 0.65);
 }
 
+.admin-console-page .admin-sheet-team-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.admin-console-page .admin-sheet-team-switch button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "badge role"
+    "badge name";
+  gap: 2px 10px;
+  align-items: center;
+  min-height: 72px;
+  padding: 10px;
+  border: 1px solid rgba(132, 166, 190, 0.18);
+  border-radius: 16px;
+  background: rgba(2, 10, 17, 0.46);
+  color: rgba(220, 232, 240, 0.72);
+  text-align: left;
+}
+
+.admin-console-page .admin-sheet-team-switch button.active {
+  border-color: rgba(157, 255, 117, 0.72);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(157, 255, 117, 0.2), transparent 50%),
+    rgba(2, 10, 17, 0.64);
+  color: #f7fbff;
+  box-shadow: 0 0 0 1px rgba(157, 255, 117, 0.18), 0 12px 30px rgba(0, 0, 0, 0.24);
+}
+
+.admin-console-page .admin-sheet-team-switch .admin-sheet-team-badge {
+  grid-area: badge;
+}
+
+.admin-console-page .admin-sheet-team-switch span {
+  grid-area: role;
+  color: #9dff75;
+  font-size: 0.68rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-sheet-team-switch strong {
+  grid-area: name;
+  min-width: 0;
+  color: #f7fbff;
+  font-size: 0.78rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-sheet-team-switch + select {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .admin-console-page .event-quick-buttons button {
   border-radius: 13px;
   color: #06110d;
@@ -11534,6 +11630,9 @@ th {
 .admin-console-page .admin-sheet-final-events {
   display: grid;
   gap: 8px;
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px;
   border: 1px solid rgba(132, 166, 190, 0.16);
   border-radius: 15px;
@@ -12087,6 +12186,20 @@ th {
   background:
     radial-gradient(circle at 86% 0%, var(--identity-accent, #8cff5a), transparent 28%),
     linear-gradient(135deg, var(--identity-primary, #00593d), var(--identity-secondary, #101820));
+}
+
+.admin-console-page .identity-preview-logo {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 18px;
+  background: rgba(2, 10, 17, 0.42);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.25);
 }
 
 .admin-console-page .identity-preview-card span,
@@ -24632,7 +24745,11 @@ button.mini-match-row:focus-visible {
 .referee-review-events div {
   display: grid;
   gap: 6px;
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin-top: 8px;
+  padding-right: 4px;
 }
 
 .referee-review-events span {

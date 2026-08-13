@@ -710,6 +710,7 @@ function LeagueAdmin({
 
             {activeSection === "identity" && (
               <IdentityPanel
+                authToken={authToken}
                 identity={identity}
                 league={league}
                 notice={identityNotice}
@@ -793,8 +794,41 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
   );
 }
 
-function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNotice }) {
+function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNotice, authToken }) {
   const highlightsCount = (league.highlights || []).length;
+  const [logoPreview, setLogoPreview] = useState(identity.logoUrl || league.logoUrl || "");
+  const [savingIdentity, setSavingIdentity] = useState(false);
+
+  useEffect(() => {
+    setLogoPreview(identity.logoUrl || league.logoUrl || "");
+  }, [identity.logoUrl, league.logoUrl, league.id]);
+
+  async function submitIdentity(event) {
+    event.preventDefault();
+    if (!window.confirm("¿Guardar los cambios de identidad publica de la liga?")) return;
+    setSavingIdentity(true);
+    try {
+      const form = event.currentTarget;
+      const payload = getFormPayload(form);
+      const file = form.elements.logoFile?.files?.[0];
+      const shouldRemoveLogo = payload.removeLogo === "on";
+      const logoUrl = shouldRemoveLogo
+        ? ""
+        : file && file.size
+          ? await resolveImageUpload(file, { authToken, leagueId: league.id, scope: "league-logos" })
+          : logoPreview;
+      onSaveIdentity({ ...payload, logoUrl });
+      setLogoPreview(logoUrl);
+      setIdentityNotice("Identidad publica guardada correctamente.");
+      if (form.elements.logoFile) form.elements.logoFile.value = "";
+      if (form.elements.removeLogo) form.elements.removeLogo.checked = false;
+    } catch (error) {
+      setIdentityNotice(error.message || "No se pudo guardar la identidad publica.");
+    } finally {
+      setSavingIdentity(false);
+    }
+  }
+
   return (
     <section className="panel admin-data-panel config-admin-panel identity-admin-panel">
       <SectionHeading eyebrow="Configuracion" title="Identidad publica de la liga" />
@@ -805,6 +839,7 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
           "--identity-secondary": identity.secondaryColor,
           "--identity-accent": identity.accentColor
         }}>
+          {logoPreview && <img className="identity-preview-logo" src={logoPreview} alt="" />}
           <span>Vista publica</span>
           <strong>{league.name}</strong>
           <small>{league.city} · {league.season}</small>
@@ -818,12 +853,7 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
       </div>
       <form
         className="identity-form config-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!window.confirm("¿Guardar los cambios de identidad publica de la liga?")) return;
-          onSaveIdentity(getFormPayload(event.currentTarget));
-          setIdentityNotice("Identidad publica guardada correctamente.");
-        }}
+        onSubmit={submitIdentity}
       >
         <div className="config-form-section">
           <h3>Datos principales</h3>
@@ -833,6 +863,32 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
         </div>
         <div className="config-form-section">
           <h3>Marca local</h3>
+          <label>Logo de liga
+            <input
+              accept={IMAGE_UPLOAD_ACCEPT}
+              name="logoFile"
+              type="file"
+              onChange={async (event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) return;
+                try {
+                  setLogoPreview(await readFileAsDataUrl(file));
+                } catch (error) {
+                  setIdentityNotice(error.message || "No se pudo leer el logo.");
+                  event.currentTarget.value = "";
+                }
+              }}
+            />
+          </label>
+          <input name="logoUrl" type="hidden" value={logoPreview} readOnly />
+          {logoPreview && (
+            <label className="event-toggle-field">
+              <input name="removeLogo" type="checkbox" onChange={(event) => {
+                if (event.currentTarget.checked) setLogoPreview("");
+              }} />
+              Quitar logo actual
+            </label>
+          )}
           <label>Distintivo local<input name="nickname" defaultValue={identity.nickname} placeholder="Ej. Pueblo de las 3 campanas" /></label>
           <label>Actividades o rasgos<input name="activities" defaultValue={identity.activities} placeholder="Ej. Aguacate, pan" /></label>
           <label>Patrocinador / anuncio<input name="adBanner" defaultValue={league.adBanner} /></label>
@@ -848,7 +904,7 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
           <label>Texto publico<textarea name="publicIntro" defaultValue={identity.publicIntro} /></label>
           <label>Destacados manuales<textarea name="highlights" defaultValue={(league.highlights || []).join("\n")} placeholder="Un destacado por linea" /></label>
         </div>
-        <button className="primary" type="submit">Guardar identidad</button>
+        <button className="primary" type="submit" disabled={savingIdentity}>{savingIdentity ? "Guardando..." : "Guardar identidad"}</button>
       </form>
     </section>
   );
@@ -2656,7 +2712,7 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
                       const team = getTeam(league, event.teamId);
                       return (
                         <span key={`${report.id}-${index}`}>
-                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {event.minute !== "" && event.minute !== undefined ? `| Min ${event.minute}` : ""}
+                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {getAdminMinuteText(event.minute) ? `| Min ${event.minute}` : ""}
                         </span>
                       );
                     })}
@@ -2715,7 +2771,7 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
                       const team = getTeam(league, event.teamId);
                       return (
                         <span key={`${sheet.id}-${index}`}>
-                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {event.minute !== "" && event.minute !== undefined ? `| Min ${event.minute}` : ""}
+                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {getAdminMinuteText(event.minute) ? `| Min ${event.minute}` : ""}
                         </span>
                       );
                     })}
@@ -4895,11 +4951,9 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       if (matchStatusFilter === "finished") return match.status === "finished" || match.status === "walkover";
       return true;
     }).filter((match) => {
-      const query = normalizeAdminSearchTerm(matchSearch);
-      if (!query) return true;
       const homeTeam = getTeam(league, match.homeTeamId);
       const awayTeam = getTeam(league, match.awayTeamId);
-      return normalizeAdminSearchTerm([
+      return adminSearchMatches([
         homeTeam?.name,
         awayTeam?.name,
         match.venue,
@@ -4907,7 +4961,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         match.time,
         `jornada ${match.round || ""}`,
         getMatchStatusLabel(match.status)
-      ].filter(Boolean).join(" ")).includes(query);
+      ], matchSearch);
     })
   ), [league, matchSearch, matchStatusFilter, roundMatches]);
   const [homeGoals, setHomeGoals] = useState(0);
@@ -5030,11 +5084,14 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   function getEventPlayersForDisplay(eventItem, playerTeamId) {
     const eventTeamId = eventItem.teamId || selectedMatch.homeTeamId;
     const eventPlayers = getPlayersForEvent(eventItem.type, eventTeamId);
-    const query = normalizeAdminSearchTerm(eventItem.playerQuery);
-    if (!query) return eventPlayers;
+    if (!normalizeAdminSearchTerm(eventItem.playerQuery)) return eventPlayers;
 
     const filteredPlayers = eventPlayers.filter((player) => (
-      normalizeAdminSearchTerm(`#${getPlayerNumberForTeam(league, player.id, playerTeamId) || ""} ${player.name} ${getTeam(league, player.teamId)?.name || ""}`).includes(query)
+      adminSearchMatches([
+        getPlayerNumberForTeam(league, player.id, playerTeamId),
+        player.name,
+        getTeam(league, player.teamId)?.name || ""
+      ], eventItem.playerQuery)
     ));
     if (!eventItem.playerId || filteredPlayers.some((player) => player.id === eventItem.playerId)) return filteredPlayers;
 
@@ -5323,7 +5380,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     return (
       <article className={`event-row admin-sheet-timeline-event event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
         <b aria-hidden="true">{getMatchEventIcon(eventItem.type)}</b>
-        <time>{eventItem.minute ? `${eventItem.minute}'` : "--'"}</time>
+        <time>{getAdminMinuteText(eventItem.minute)}</time>
         <div>
           <strong>{getMatchEventLabel(eventItem.type)}</strong>
           <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
@@ -5350,7 +5407,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
           <strong>{getMatchEventLabel(eventItem.type)}</strong>
           <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
         </div>
-        <small>{eventItem.minute ? `${eventItem.minute}' · ` : ""}{eventTeam?.name || "Equipo"}</small>
+        <small>{getAdminMinuteText(eventItem.minute) ? `${getAdminMinuteText(eventItem.minute)} · ` : ""}{eventTeam?.name || "Equipo"}</small>
       </article>
     );
   }
@@ -5380,7 +5437,24 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             <button type="button" onClick={() => setEventDraft(null)} aria-label="Cerrar">×</button>
           </header>
           <div className="admin-sheet-modal-grid">
-            <label>{eventDraft.type === "own_goal" ? "Equipo favorecido" : "Equipo"}
+            <label className="wide-field">{eventDraft.type === "own_goal" ? "Equipo favorecido" : "Equipo del evento"}
+              <div className="admin-sheet-team-switch" role="group" aria-label="Elegir equipo del evento">
+                {[selectedMatch.homeTeamId, selectedMatch.awayTeamId].map((teamId) => {
+                  const team = getTeam(league, teamId);
+                  return (
+                    <button
+                      className={eventTeamId === teamId ? "active" : ""}
+                      key={teamId}
+                      type="button"
+                      onClick={() => updateEventDraft("teamId", teamId)}
+                    >
+                      {renderTeamBadge(team, teamId === selectedMatch.homeTeamId ? "home" : "away")}
+                      <span>{teamId === selectedMatch.homeTeamId ? "Local" : "Visitante"}</span>
+                      <strong>{team?.name || "Equipo"}</strong>
+                    </button>
+                  );
+                })}
+              </div>
               <select value={eventTeamId} onChange={(event) => updateEventDraft("teamId", event.target.value)}>
                 <option value={selectedMatch.homeTeamId}>{homeTeam?.name || "Local"}</option>
                 <option value={selectedMatch.awayTeamId}>{awayTeam?.name || "Visitante"}</option>
@@ -5390,7 +5464,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
               <input value={eventDraft.minuteLabel || eventDraft.minute || ""} onChange={(event) => updateEventDraft("minute", event.target.value)} inputMode="numeric" placeholder="Ej. 12" />
             </label>
             <label className="wide-field">Buscar jugador
-              <input value={eventDraft.playerQuery || ""} onChange={(event) => updateEventDraft("playerQuery", event.target.value)} placeholder="Nombre o numero" />
+              <div className="admin-search-input-wrap">
+                <input value={eventDraft.playerQuery || ""} onChange={(event) => updateEventDraft("playerQuery", event.target.value)} placeholder="Nombre, apellido o numero" />
+                {eventDraft.playerQuery && <button type="button" onClick={() => updateEventDraft("playerQuery", "")} aria-label="Limpiar jugador">×</button>}
+              </div>
             </label>
             <label className="wide-field">{eventDraft.type === "own_goal" ? "Jugador que hizo el autogol" : "Jugador"}
               <select value={eventDraft.playerId || ""} onChange={(event) => updateEventDraft("playerId", event.target.value)}>
@@ -5461,6 +5538,16 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   }
 
   function moveSheetStep(direction) {
+    if (direction > 0 && sheetStep === "events" && !isDefaultSheet) {
+      const expectedTotal = expectedHomeGoals + expectedAwayGoals;
+      const capturedTotal = homeGoalEvents + awayGoalEvents;
+      if (homeGoalEvents !== expectedHomeGoals || awayGoalEvents !== expectedAwayGoals) {
+        const message = `La cantidad de goles del marcador (${expectedTotal}) no coincide con los goles registrados en eventos (${capturedTotal}).`;
+        setValidationMessage(message);
+        window.alert(message);
+        return;
+      }
+    }
     const nextIndex = Math.min(ADMIN_SHEET_STEPS.length - 1, Math.max(0, activeStepIndex + direction));
     goToSheetStep(ADMIN_SHEET_STEPS[nextIndex].id);
   }
@@ -5527,9 +5614,17 @@ function MatchSheet({ league, onSaveMatchSheet }) {
               : "",
             events: cleanEvents
           });
-          setSheetNotice(isDefaultSheet ? "Default guardado correctamente. Los eventos capturados contaran solo para jugadores." : isEditingSavedSheet ? "Acta corregida correctamente." : "Acta guardada correctamente.");
+          const successMessage = isDefaultSheet
+            ? "Default publicado correctamente. Los eventos capturados contaran solo para jugadores."
+            : isEditingSavedSheet
+              ? "Acta corregida y publicada correctamente."
+              : "Acta publicada correctamente.";
+          setSheetNotice(successMessage);
+          window.alert(successMessage);
+          setSheetStep("match");
         } catch (saveError) {
           setValidationMessage(saveError.message || "No se pudo guardar el acta.");
+          window.alert(saveError.message || "No se pudo guardar el acta.");
         }
       }}
     >
@@ -5608,7 +5703,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                 </select>
               </label>
               <label className="sheet-match-search">Buscar
-                <input type="search" value={matchSearch} onChange={(event) => setMatchSearch(event.target.value)} placeholder="Buscar equipo o partido..." />
+                <div className="admin-search-input-wrap">
+                  <input type="search" value={matchSearch} onChange={(event) => setMatchSearch(event.target.value)} placeholder="Buscar equipo o partido..." />
+                  {matchSearch && <button type="button" onClick={() => setMatchSearch("")} aria-label="Limpiar busqueda">×</button>}
+                </div>
               </label>
             </div>
             <div className="admin-sheet-match-grid" aria-label="Partidos para capturar acta">
@@ -6019,12 +6117,15 @@ function DisciplineControlPanel({
           </div>
           <div className="discipline-filters">
             <label>Buscar
-              <input
-                type="search"
-                value={disciplineQuery}
-                onChange={(event) => setDisciplineQuery(event.target.value)}
-                placeholder="Nombre, numero o equipo"
-              />
+              <div className="admin-search-input-wrap">
+                <input
+                  type="search"
+                  value={disciplineQuery}
+                  onChange={(event) => setDisciplineQuery(event.target.value)}
+                  placeholder="Nombre, numero o equipo"
+                />
+                {disciplineQuery && <button type="button" onClick={() => setDisciplineQuery("")} aria-label="Limpiar busqueda">×</button>}
+              </div>
             </label>
             <label>Categoria
               <select value={disciplineCompetitionId} onChange={(event) => {
@@ -6176,18 +6277,16 @@ function DisciplineAdminTrace({ league, row }) {
 
 function disciplineMovementMatchesFilters(league, item, filters) {
   const player = getPlayer(league, item.playerId);
-  return player ? disciplinePlayerMatchesFilters(league, player, filters) : normalizeAdminSearchTerm("Jugador eliminado").includes(normalizeAdminSearchTerm(filters.query));
+  return player ? disciplinePlayerMatchesFilters(league, player, filters) : adminSearchMatches("Jugador eliminado", filters.query);
 }
 
 function disciplinePlayerMatchesFilters(league, player, filters) {
   const teamIds = getPlayerAdminTeamIds(league, player);
   const teams = teamIds.map((teamId) => getTeam(league, teamId)).filter(Boolean);
   const competitionIds = teams.map((team) => team.competitionId || getDefaultCompetitionId(league));
-  const query = normalizeAdminSearchTerm(filters.query);
   if (filters.competitionId && !competitionIds.includes(filters.competitionId)) return false;
   if (filters.teamId && !teamIds.includes(filters.teamId)) return false;
-  if (!query) return true;
-  return getPlayerAdminSearchValues(league, player).some((value) => normalizeAdminSearchTerm(value).includes(query));
+  return adminSearchMatches(getPlayerAdminSearchValues(league, player), filters.query);
 }
 
 function PlayerSelect({ league, name, players }) {
@@ -6209,10 +6308,9 @@ function PlayerSelect({ league, name, players }) {
 function SearchablePlayerSelect({ league, name, players, placeholder }) {
   const [query, setQuery] = useState("");
   const filteredPlayers = useMemo(() => {
-    const term = normalizeAdminSearchTerm(query);
-    const source = term
+    const source = normalizeAdminSearchTerm(query)
       ? players.filter((player) => {
-        return getPlayerAdminSearchValues(league, player).some((value) => normalizeAdminSearchTerm(value).includes(term));
+        return adminSearchMatches(getPlayerAdminSearchValues(league, player), query);
       })
       : players;
     return source.slice(0, 60);
@@ -6220,13 +6318,16 @@ function SearchablePlayerSelect({ league, name, players, placeholder }) {
 
   return (
     <div className="searchable-select">
-      <input
-        type="search"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={placeholder || "Buscar jugador..."}
-        aria-label={placeholder || "Buscar jugador"}
-      />
+      <div className="admin-search-input-wrap">
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={placeholder || "Buscar jugador..."}
+          aria-label={placeholder || "Buscar jugador"}
+        />
+        {query && <button type="button" onClick={() => setQuery("")} aria-label="Limpiar busqueda">×</button>}
+      </div>
       <select name={name} required disabled={!filteredPlayers.length}>
         {filteredPlayers.map((player) => {
           const team = getTeam(league, player.teamId);
@@ -6271,6 +6372,25 @@ function normalizeAdminSearchTerm(value) {
     .replace(/\s+/g, " ")
     .trim()
     .toLocaleUpperCase("es-MX");
+}
+
+function adminSearchMatches(values, query) {
+  const tokens = normalizeAdminSearchTerm(query).split(" ").filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = (Array.isArray(values) ? values : [values])
+    .map((value) => normalizeAdminSearchTerm(value))
+    .filter(Boolean)
+    .join(" ");
+  return tokens.every((token) => haystack.includes(token));
+}
+
+function hasRecordedAdminMinute(value) {
+  const normalized = String(value ?? "").trim();
+  return Boolean(normalized) && normalized !== "0";
+}
+
+function getAdminMinuteText(value) {
+  return hasRecordedAdminMinute(value) ? `${value}'` : "";
 }
 
 function getMatchEventLabel(type) {
@@ -6328,7 +6448,27 @@ function getPendingDisciplinaryReviews(league) {
 }
 
 function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, onResolveMatchDiscipline }) {
-  const activeLeague = scopeLeagueToCompetition(league, getDefaultCompetitionId(league));
+  const activeCompetitionIds = new Set((league.competitions || [])
+    .filter((competition) => competition.status !== "archived")
+    .map((competition) => competition.id));
+  const shouldScopeActiveCompetitions = activeCompetitionIds.size > 0;
+  const activeLeague = {
+    ...league,
+    teams: shouldScopeActiveCompetitions
+      ? (league.teams || []).filter((team) => !team.competitionId || activeCompetitionIds.has(team.competitionId))
+      : (league.teams || []),
+    players: (league.players || []).filter((player) => {
+      if (!shouldScopeActiveCompetitions) return true;
+      const team = getTeam(league, player.teamId);
+      return !team?.competitionId || activeCompetitionIds.has(team.competitionId);
+    }),
+    matches: shouldScopeActiveCompetitions
+      ? (league.matches || []).filter((match) => !match.competitionId || activeCompetitionIds.has(match.competitionId))
+      : (league.matches || []),
+    sanctions: shouldScopeActiveCompetitions
+      ? (league.sanctions || []).filter((sanction) => !sanction.competitionId || activeCompetitionIds.has(sanction.competitionId))
+      : (league.sanctions || [])
+  };
   const sanctions = activeLeague.sanctions || [];
   const activeSanctions = sanctions.filter((sanction) => sanction.status !== "cleared" && sanction.status !== "revoked");
   const clearedSanctions = sanctions.filter((sanction) => sanction.status === "cleared");
@@ -6339,21 +6479,17 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   const [sanctionQuery, setSanctionQuery] = useState("");
   const [sanctionStatusFilter, setSanctionStatusFilter] = useState("active");
   const visibleActiveSanctions = useMemo(() => {
-    const query = normalizeAdminSearchTerm(sanctionQuery);
     return activeSanctions.filter((sanction) => {
       const player = getPlayer(activeLeague, sanction.playerId);
       const team = player ? getTeam(activeLeague, player.teamId) : null;
-      if (!query) return true;
-      return normalizeAdminSearchTerm(`${player?.name || ""} ${player?.number || ""} ${team?.name || ""} ${sanction.type || ""} ${sanction.reason || ""}`).includes(query);
+      return adminSearchMatches([player?.name, player?.number, team?.name, sanction.type, sanction.reason], sanctionQuery);
     });
   }, [activeLeague, activeSanctions, sanctionQuery]);
   const visibleClearedSanctions = useMemo(() => {
-    const query = normalizeAdminSearchTerm(sanctionQuery);
     return clearedSanctions.filter((sanction) => {
       const player = getPlayer(activeLeague, sanction.playerId);
       const team = player ? getTeam(activeLeague, player.teamId) : null;
-      if (!query) return true;
-      return normalizeAdminSearchTerm(`${player?.name || ""} ${player?.number || ""} ${team?.name || ""} ${sanction.type || ""} ${sanction.reason || ""}`).includes(query);
+      return adminSearchMatches([player?.name, player?.number, team?.name, sanction.type, sanction.reason], sanctionQuery);
     });
   }, [activeLeague, clearedSanctions, sanctionQuery]);
 
@@ -6447,7 +6583,10 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
 
       <div className="admin-filter-console">
         <label>Buscar sancion
-          <input type="search" value={sanctionQuery} onChange={(event) => setSanctionQuery(event.target.value)} placeholder="Jugador, equipo, motivo" />
+          <div className="admin-search-input-wrap">
+            <input type="search" value={sanctionQuery} onChange={(event) => setSanctionQuery(event.target.value)} placeholder="Jugador, equipo, motivo" />
+            {sanctionQuery && <button type="button" onClick={() => setSanctionQuery("")} aria-label="Limpiar busqueda">×</button>}
+          </div>
         </label>
         <label>Vista
           <select value={sanctionStatusFilter} onChange={(event) => setSanctionStatusFilter(event.target.value)}>

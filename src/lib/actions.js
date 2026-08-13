@@ -1140,6 +1140,7 @@ export function saveIdentity(store, leagueId, payload) {
     identity: {
       ...DEFAULT_IDENTITY,
       ...league.identity,
+      logoUrl: sanitizeImageUrl(payload.logoUrl ?? league.identity?.logoUrl ?? league.logoUrl ?? ""),
       nickname: upperText(payload.nickname),
       activities: upperText(payload.activities),
       publicIntro: upperText(payload.publicIntro),
@@ -1180,7 +1181,7 @@ function parseMatchEventMinute(value, label = "") {
   const rawLabel = String(label || "").trim();
   const rawValue = String(value ?? "").trim();
   const source = rawLabel || rawValue;
-  if (!source) return { minute: 0, minuteLabel: "" };
+  if (!source) return { minute: "", minuteLabel: "" };
 
   const addedMatch = source.match(/^(\d{1,3})\s*\+\s*(\d{1,2})$/);
   if (addedMatch) {

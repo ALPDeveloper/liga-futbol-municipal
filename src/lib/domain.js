@@ -150,6 +150,7 @@ export function normalizeStore(data) {
         identity: {
           ...DEFAULT_IDENTITY,
           ...(league.identity || {}),
+          logoUrl: sanitizeImageUrl(league.identity?.logoUrl || league.logoUrl || DEFAULT_IDENTITY.logoUrl || ""),
           nickname: upperText(league.identity?.nickname || DEFAULT_IDENTITY.nickname),
           activities: upperText(league.identity?.activities || DEFAULT_IDENTITY.activities),
           publicIntro: upperText(league.identity?.publicIntro || DEFAULT_IDENTITY.publicIntro)

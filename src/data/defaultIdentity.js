@@ -1,4 +1,5 @@
 export const DEFAULT_IDENTITY = {
+  logoUrl: "",
   nickname: "",
   activities: "",
   publicIntro: "Resultados, tabla de posiciones, goleadores, sanciones y proximos partidos en un solo lugar para aficionados y equipos.",
