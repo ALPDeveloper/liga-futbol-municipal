@@ -120,6 +120,21 @@ function runMigrations() {
     db.prepare("ALTER TABLE sponsors ADD COLUMN notes TEXT").run();
   }
 
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS league_media (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+      type TEXT NOT NULL DEFAULT 'gallery',
+      title TEXT NOT NULL,
+      caption TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      image_url TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT
+    )
+  `).run();
+
   const matchColumns = db.prepare("PRAGMA table_info(matches)").all().map((column) => column.name);
   if (!matchColumns.includes("competition_id")) {
     db.prepare("ALTER TABLE matches ADD COLUMN competition_id TEXT").run();
@@ -848,6 +863,17 @@ export function getStore() {
       sortOrder: row.sort_order,
       notes: row.notes
     }));
+    const media = db.prepare("SELECT * FROM league_media WHERE league_id = ? ORDER BY sort_order, created_at DESC, title").all(leagueRow.id).map((row) => ({
+      id: row.id,
+      competitionId: row.competition_id || "",
+      type: row.type || "gallery",
+      title: row.title,
+      caption: row.caption || "",
+      status: row.status || "active",
+      imageUrl: row.image_url,
+      sortOrder: row.sort_order,
+      createdAt: row.created_at || ""
+    }));
     const matches = db.prepare("SELECT * FROM matches WHERE league_id = ? ORDER BY round, date, time").all(leagueRow.id).map((row) => ({
       id: row.id,
       competitionId: row.competition_id,
@@ -1005,6 +1031,7 @@ export function getStore() {
       disciplineResets,
       appearanceAdjustments,
       sponsors,
+      media,
       matches,
       matchRosters,
       matchParticipations
@@ -1078,6 +1105,7 @@ export function importStore(store) {
       DELETE FROM teams;
       DELETE FROM competitions;
       DELETE FROM league_announcements;
+      DELETE FROM league_media;
       DELETE FROM league_highlights;
       DELETE FROM league_rules;
       DELETE FROM league_identities;
@@ -1184,6 +1212,24 @@ export function importStore(store) {
           sponsor.linkUrl || "",
           Number(sponsor.sortOrder || 0),
           sponsor.notes || ""
+        );
+      }
+
+      for (const item of league.media || []) {
+        db.prepare(`
+          INSERT INTO league_media (id, league_id, competition_id, type, title, caption, status, image_url, sort_order, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          item.id,
+          league.id,
+          item.competitionId || null,
+          item.type || "gallery",
+          item.title || "Foto",
+          item.caption || "",
+          item.status || "active",
+          item.imageUrl || "",
+          Number(item.sortOrder || 0),
+          item.createdAt || new Date().toISOString()
         );
       }
 

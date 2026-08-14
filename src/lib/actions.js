@@ -660,6 +660,53 @@ export function deleteSponsor(store, leagueId, sponsorId) {
   }));
 }
 
+export function addMediaItem(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    media: [
+      ...(league.media || []),
+      {
+        id: makeId("media"),
+        competitionId: payload.competitionId || league.currentCompetitionId || "",
+        type: normalizeMediaType(payload.type),
+        title: upperText(payload.title || "Foto"),
+        caption: upperText(payload.caption || ""),
+        status: payload.status || "active",
+        imageUrl: sanitizeImageUrl(payload.imageUrl),
+        sortOrder: Number(payload.sortOrder || 0),
+        createdAt: new Date().toISOString()
+      }
+    ]
+  }));
+}
+
+export function updateMediaItem(store, leagueId, mediaId, payload) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    media: (league.media || []).map((item) => (
+      item.id === mediaId
+        ? {
+            ...item,
+            competitionId: payload.competitionId || item.competitionId || league.currentCompetitionId || "",
+            type: normalizeMediaType(payload.type || item.type),
+            title: upperText(payload.title || item.title || "Foto"),
+            caption: payload.caption === undefined ? upperText(item.caption || "") : upperText(payload.caption || ""),
+            status: payload.status || item.status || "active",
+            imageUrl: payload.imageUrl === undefined ? sanitizeImageUrl(item.imageUrl) : sanitizeImageUrl(payload.imageUrl),
+            sortOrder: Number(payload.sortOrder ?? item.sortOrder ?? 0)
+          }
+        : item
+    ))
+  }));
+}
+
+export function deleteMediaItem(store, leagueId, mediaId) {
+  return updateLeague(store, leagueId, (league) => ({
+    ...league,
+    media: (league.media || []).filter((item) => item.id !== mediaId)
+  }));
+}
+
 export function addVenue(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => ({
     ...league,
@@ -674,6 +721,10 @@ export function addVenue(store, leagueId, payload) {
       }
     ]
   }));
+}
+
+function normalizeMediaType(value) {
+  return ["hero", "moment", "gallery"].includes(value) ? value : "gallery";
 }
 
 export function updateVenue(store, leagueId, venueId, payload) {

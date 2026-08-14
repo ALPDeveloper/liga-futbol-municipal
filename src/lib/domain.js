@@ -182,6 +182,16 @@ export function normalizeStore(data) {
           imageUrl: sanitizeImageUrl(sponsor.imageUrl),
           notes: upperText(sponsor.notes || "")
         })),
+        media: (league.media || []).map((item) => ({
+          ...item,
+          title: upperText(item.title || "Foto"),
+          caption: upperText(item.caption || ""),
+          type: ["hero", "moment", "gallery"].includes(item.type) ? item.type : "gallery",
+          status: item.status || "active",
+          sortOrder: Number(item.sortOrder || 0),
+          imageUrl: sanitizeImageUrl(item.imageUrl),
+          competitionId: item.competitionId || ""
+        })).filter((item) => item.imageUrl),
         venues: sourceVenues.map((venue) => ({
           ...venue,
           id: venue.id || venueIdFromName(venue.name),
@@ -1027,6 +1037,17 @@ function getNextScheduledMatch(league, teamId) {
   return sortMatches(league.matches.filter((match) => isActiveScheduleMatch(match) && involvesTeam(match, teamId)))[0] || null;
 }
 
+function getOriginSortValue(origin) {
+  const dateValue = origin?.date ? Date.parse(origin.date) : 0;
+  const roundValue = Number(origin?.round || 0);
+  const idValue = String(origin?.matchId || origin?.sanctionId || "");
+  return {
+    date: Number.isFinite(dateValue) ? dateValue : 0,
+    round: Number.isFinite(roundValue) ? roundValue : 0,
+    id: idValue
+  };
+}
+
 function getReturnMatch(league, teamId, remainingMatches, origin) {
   const scheduled = sortMatches(league.matches.filter((match) => isActiveScheduleMatch(match) && involvesTeam(match, teamId) && isAfterOrigin(match, origin)));
   if (remainingMatches > 0) return scheduled[remainingMatches] || null;
@@ -1065,6 +1086,7 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
       returnRound: "Indefinido",
       indefinite: true,
       origin,
+      originSort: getOriginSortValue(origin),
       originMatch,
       servedMatchList: servedMatches
     };
@@ -1100,6 +1122,7 @@ function buildSuspensionNotice(league, { playerId, totalMatches, reason, type, o
     returnMatch,
     returnRound: returnMatch?.round || fallbackReturnRound || "",
     origin,
+    originSort: getOriginSortValue(origin),
     originMatch,
     servedMatchList: servedMatches
   };
@@ -1131,6 +1154,7 @@ function buildPendingDisciplinaryNotice(league, { playerId, reason, type, origin
     indefinite: false,
     pendingReview: true,
     origin,
+    originSort: getOriginSortValue(origin),
     originMatch: origin?.matchId ? league.matches.find((match) => match.id === origin.matchId) || null : null,
     servedMatchList: []
   };
@@ -1217,8 +1241,9 @@ export function calculateSuspensionNotices(league) {
     .filter(Boolean)
     .sort((a, b) => (
       (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1) ||
-      Number(b.indefinite) - Number(a.indefinite) ||
-      Number(b.remainingMatches || 0) - Number(a.remainingMatches || 0) ||
+      Number(b.originSort?.date || 0) - Number(a.originSort?.date || 0) ||
+      Number(b.originSort?.round || 0) - Number(a.originSort?.round || 0) ||
+      String(b.originSort?.id || "").localeCompare(String(a.originSort?.id || "")) ||
       a.player.name.localeCompare(b.player.name)
     ));
 }

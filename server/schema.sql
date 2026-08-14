@@ -67,6 +67,19 @@ CREATE TABLE IF NOT EXISTS league_announcements (
   date TEXT
 );
 
+CREATE TABLE IF NOT EXISTS league_media (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+  type TEXT NOT NULL DEFAULT 'gallery',
+  title TEXT NOT NULL,
+  caption TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  image_url TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS teams (
   id TEXT PRIMARY KEY,
   league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,

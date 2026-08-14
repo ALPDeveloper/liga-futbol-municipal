@@ -83,6 +83,20 @@ async function runPostgresMigrations(pool) {
       date DATE
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS league_media (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL,
+      type TEXT NOT NULL DEFAULT 'gallery',
+      title TEXT NOT NULL,
+      caption TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      image_url TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ
+    )
+  `);
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS leagues ADD COLUMN IF NOT EXISTS public_visibility TEXT NOT NULL DEFAULT 'visible'");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS assistant_coach TEXT");
@@ -611,6 +625,7 @@ export async function getPostgresStore() {
       disciplineResetRows,
       appearanceAdjustmentRows,
       sponsorRows,
+      mediaRows,
       matchRows,
       rosterRows,
       participationRows
@@ -630,6 +645,7 @@ export async function getPostgresStore() {
       pool.query("SELECT * FROM discipline_resets WHERE league_id = $1 ORDER BY date DESC NULLS LAST, id DESC", [leagueRow.id]),
       pool.query("SELECT * FROM player_appearance_adjustments WHERE league_id = $1 ORDER BY date DESC NULLS LAST, id DESC", [leagueRow.id]),
       pool.query("SELECT * FROM sponsors WHERE league_id = $1 ORDER BY sort_order, name", [leagueRow.id]),
+      pool.query("SELECT * FROM league_media WHERE league_id = $1 ORDER BY sort_order, created_at DESC NULLS LAST, title", [leagueRow.id]),
       pool.query("SELECT * FROM matches WHERE league_id = $1 ORDER BY round, date, time", [leagueRow.id]),
       pool.query("SELECT * FROM match_rosters WHERE league_id = $1 ORDER BY submitted_at DESC", [leagueRow.id]),
       pool.query("SELECT * FROM match_participations WHERE league_id = $1 ORDER BY submitted_at DESC, version DESC", [leagueRow.id])
@@ -754,6 +770,17 @@ export async function getPostgresStore() {
       linkUrl: row.link_url,
       sortOrder: row.sort_order,
       notes: row.notes
+    }));
+    const media = mediaRows.rows.map((row) => ({
+      id: row.id,
+      competitionId: row.competition_id || "",
+      type: row.type || "gallery",
+      title: row.title,
+      caption: row.caption || "",
+      status: row.status || "active",
+      imageUrl: row.image_url,
+      sortOrder: row.sort_order,
+      createdAt: toDateTimeValue(row.created_at) || ""
     }));
     const matchIds = matchRows.rows.map((row) => row.id);
     const eventRows = matchIds.length
@@ -931,6 +958,7 @@ export async function getPostgresStore() {
       disciplineResets,
       appearanceAdjustments,
       sponsors,
+      media,
       matches,
       matchRosters,
       matchParticipations
@@ -1047,6 +1075,7 @@ export async function importPostgresStore(store) {
       "teams",
       "competitions",
       "league_announcements",
+      "league_media",
       "league_highlights",
       "league_rules",
       "league_identities",
@@ -1150,6 +1179,19 @@ export async function importPostgresStore(store) {
           Number(sponsor.sortOrder || 0),
           sponsor.notes || ""
         ]));
+
+      await insertRows(client, "league_media", ["id", "league_id", "competition_id", "type", "title", "caption", "status", "image_url", "sort_order", "created_at"], (league.media || []).map((item) => [
+          item.id,
+          league.id,
+          item.competitionId || null,
+          item.type || "gallery",
+          item.title || "Foto",
+          item.caption || "",
+          item.status || "active",
+          item.imageUrl || "",
+          Number(item.sortOrder || 0),
+          item.createdAt || new Date().toISOString()
+        ]), { dateColumns: ["created_at"] });
 
       await insertRows(client, "teams", ["id", "league_id", "competition_id", "name", "coach", "assistant_coach", "address", "colors", "logo_url", "status", "withdrawn_round", "withdrawn_reason"], league.teams.map((team) => (
         [team.id, league.id, team.competitionId || league.currentCompetitionId, team.name, team.coach, team.assistantCoach || "", team.address || "", team.colors, team.logoUrl || "", team.status || "active", team.withdrawnRound || null, team.withdrawnReason || null]

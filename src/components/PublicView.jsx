@@ -183,6 +183,11 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const [activeStatsPanel, setActiveStatsPanel] = useState(() => (
     typeof window === "undefined" ? "tabla" : getStatsPanelFromHash(window.location.hash)
   ));
+
+  useEffect(() => {
+    preloadLeagueImages(league);
+  }, [league]);
+
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(() => loadLastCompetitionId(league) || getDefaultCompetitionId(league));
   const [isCompetitionSheetOpen, setCompetitionSheetOpen] = useState(false);
   const [showCompetitionGate, setShowCompetitionGate] = useState(() => (
@@ -677,6 +682,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             <PublicHomeDashboard
               activeCompetition={activeCompetition}
               announcements={activeAnnouncements}
+              featuredMatch={featuredMatch}
               heroImage={heroImage}
               league={publicContentLeague}
               latestResults={latestResults}
@@ -923,7 +929,22 @@ function PublicLegalFooter({ legalPath, league, onNavigate }) {
 }
 
 function PublicPhotoFeedScreen({ competition, league, media = [], onBack }) {
+  const [activeType, setActiveType] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(9);
   const feedItems = getPublicPhotoFeedItems(media, league, competition);
+  const filteredItems = activeType === "all" ? feedItems : feedItems.filter((item) => item.type === activeType);
+  const visibleItems = filteredItems.slice(0, visibleCount);
+  const typeCounts = feedItems.reduce((counts, item) => {
+    counts[item.type || "gallery"] = (counts[item.type || "gallery"] || 0) + 1;
+    return counts;
+  }, {});
+  const filters = [
+    { id: "all", label: "Todas", count: feedItems.length },
+    { id: "hero", label: "Portada", count: typeCounts.hero || 0 },
+    { id: "moment", label: "Momentos", count: typeCounts.moment || 0 },
+    { id: "gallery", label: "Galeria", count: typeCounts.gallery || 0 }
+  ].filter((item) => item.id === "all" || item.count > 0);
+
   return (
     <section className="public-photo-feed-screen" id="fotos">
       <PublicScreenHeader eyebrow="Galería" title="Fotos de la liga" onBack={onBack} />
@@ -935,8 +956,24 @@ function PublicPhotoFeedScreen({ competition, league, media = [], onBack }) {
           <small>{feedItems.length} foto(s) disponibles</small>
         </div>
       </article>
+      <div className="photo-feed-toolbar" aria-label="Filtros de galeria">
+        {filters.map((filter) => (
+          <button
+            className={activeType === filter.id ? "active" : ""}
+            key={filter.id}
+            type="button"
+            onClick={() => {
+              setActiveType(filter.id);
+              setVisibleCount(9);
+            }}
+          >
+            <span>{filter.label}</span>
+            <b>{filter.count}</b>
+          </button>
+        ))}
+      </div>
       <div className="photo-feed-list" aria-label="Feed de fotos">
-        {feedItems.map((item) => (
+        {visibleItems.map((item) => (
           <article className="photo-feed-card" key={item.id}>
             <LoadableImage alt={item.title || "Foto de la liga"} src={item.imageUrl} />
             <div>
@@ -948,6 +985,11 @@ function PublicPhotoFeedScreen({ competition, league, media = [], onBack }) {
           </article>
         ))}
       </div>
+      {visibleItems.length < filteredItems.length && (
+        <button className="photo-feed-more-button" type="button" onClick={() => setVisibleCount((count) => count + 9)}>
+          Mostrar mas fotos
+        </button>
+      )}
     </section>
   );
 }
@@ -3432,7 +3474,8 @@ function drawCanvasFittedText(context, text, x, y, maxWidth, startSize, minSize,
 function getFeaturedPublicMatch(league, standings) {
   const scheduled = sortPublicMatchesByRound(league.matches.filter(isPublicPlayableScheduledMatch));
   if (scheduled.length) {
-    const targetRound = getNextScheduledRound(scheduled);
+    const scheduledRounds = [...new Set(scheduled.map((match) => Number(match.round || 0)).filter(Boolean))].sort((a, b) => a - b);
+    const targetRound = getNextPlayableRound(scheduled, scheduledRounds) || getNextScheduledRound(scheduled);
     const roundMatches = scheduled.filter((match) => Number(match.round || 0) === targetRound);
     const candidates = roundMatches.length ? roundMatches : scheduled;
 
@@ -3497,6 +3540,8 @@ function getFeaturedMatchScore(match, standings, rules) {
   score += Math.max(0, 16 - bestRank * 1.5);
 
   if (bestRank === 1 && worstRank <= 3) score += 80;
+  if (bestRank === 2 && worstRank === 3) score += 88;
+  if (bestRank === 1 && worstRank === 2) score += 76;
   if (bestRank <= 2 && worstRank <= 4) score += 54;
   if (home.rank <= 3 && away.rank <= 3) score += 46;
   if (bothTopSix) score += 34;
@@ -3777,6 +3822,7 @@ function ShareActionButton({ className = "", label, onClick }) {
 function PublicHomeDashboard({
   activeCompetition,
   announcements = [],
+  featuredMatch: selectedFeaturedMatch,
   heroImage,
   league,
   latestResults,
@@ -3801,7 +3847,7 @@ function PublicHomeDashboard({
   const heroMedia = getPublicHomeMedia(media, "hero")[0];
   const momentMedia = getPublicHomeMedia(media, "moment")[0] || getPublicHomeMedia(media, "gallery")[0];
   const galleryMedia = getPublicHomeMedia(media, "gallery").slice(0, 6);
-  const featuredMatch = nextMatches[0] || latestResults[0] || league.matches[0];
+  const featuredMatch = selectedFeaturedMatch || nextMatches[0] || latestResults[0] || league.matches[0];
   const featuredHome = featuredMatch ? getTeam(league, featuredMatch.homeTeamId) : null;
   const featuredAway = featuredMatch ? getTeam(league, featuredMatch.awayTeamId) : null;
   const activeAnnouncement = announcements[0];
@@ -5273,7 +5319,7 @@ function PlayerAvatar({ player, className = "" }) {
       {canShowPhoto && (
         <LoadableImage
           alt=""
-          loading="lazy"
+          loading="eager"
           src={player.photoUrl}
         />
       )}
@@ -5282,13 +5328,35 @@ function PlayerAvatar({ player, className = "" }) {
   );
 }
 
-function LoadableImage({ alt = "", className = "", loading = "lazy", src }) {
-  const [isLoaded, setIsLoaded] = useState(false);
+function preloadImage(src) {
+  if (!src || typeof window === "undefined") return;
+  const image = new window.Image();
+  image.decoding = "async";
+  image.src = src;
+}
+
+function preloadLeagueImages(league) {
+  const urls = new Set([
+    league?.identity?.logoUrl,
+    league?.logoUrl,
+    ...(league?.teams || []).map((team) => team.logoUrl),
+    ...(league?.players || [])
+      .filter((player) => player.photoAuthorized === true)
+      .map((player) => player.photoUrl),
+    ...(league?.sponsors || []).map((sponsor) => sponsor.imageUrl),
+    ...(league?.media || []).map((item) => item.imageUrl)
+  ].filter(Boolean));
+  urls.forEach(preloadImage);
+}
+
+function LoadableImage({ alt = "", className = "", loading = "eager", src }) {
+  const [isLoaded, setIsLoaded] = useState(true);
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
-    setIsLoaded(false);
+    setIsLoaded(true);
     setHasError(false);
+    preloadImage(src);
   }, [src]);
 
   if (!src || hasError) return null;
@@ -6076,7 +6144,6 @@ function PublicSuspensionsBoard({ league, notices }) {
       <div className="public-suspension-list-blue">
         {notices.map((notice) => {
           const originLabel = getSuspensionOriginLabel(league, notice);
-          const returnLabel = getSuspensionReturnLabel(league, notice);
           return (
             <article className={`public-suspension-card ${notice.pendingReview ? "review" : ""}`} key={notice.id}>
               <div className="public-suspension-card-main">
@@ -6096,7 +6163,6 @@ function PublicSuspensionsBoard({ league, notices }) {
               {notice.reason && <small className="public-suspension-reason">{notice.reason}</small>}
               <div className="public-suspension-meta">
                 <span><strong>Origen</strong>{originLabel}</span>
-                {returnLabel && <span><strong>Regreso</strong>{returnLabel}</span>}
               </div>
             </article>
           );
@@ -6126,14 +6192,6 @@ function getSuspensionOriginLabel(league, notice) {
   }
   if (notice?.origin?.date) return formatDate(notice.origin.date);
   return "Origen pendiente";
-}
-
-function getSuspensionReturnLabel(league, notice) {
-  if (notice?.returnMatch) {
-    return `J${notice.returnMatch.round || "-"} | ${getMatchShortTitle(league, notice.returnMatch)} | ${formatDate(notice.returnMatch.date)}`;
-  }
-  if (notice?.nextMatch) return `Proximo bloqueo: J${notice.nextMatch.round || "-"} | ${getMatchShortTitle(league, notice.nextMatch)}`;
-  return "";
 }
 
 function ShareGlyph() {

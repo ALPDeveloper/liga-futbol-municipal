@@ -1,6 +1,6 @@
 export const PLAYER_PHOTO_OUTPUT_SIZE = 800;
 export const PLAYER_PHOTO_QUALITY = 0.78;
-export const PLAYER_PHOTO_MAX_ORIGINAL_BYTES = 10 * 1024 * 1024;
+export const PLAYER_PHOTO_MAX_ORIGINAL_BYTES = 15 * 1024 * 1024;
 export const PLAYER_PHOTO_ACCEPT = "image/png,image/jpeg,image/webp";
 
 const ALLOWED_PLAYER_PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -11,7 +11,7 @@ export function validatePlayerPhotoFile(file) {
     throw new Error("Solo se permiten fotos JPG, PNG o WebP.");
   }
   if (file.size > PLAYER_PHOTO_MAX_ORIGINAL_BYTES) {
-    throw new Error("La imagen es demasiado pesada. El maximo permitido es 10 MB.");
+    throw new Error("La imagen original es demasiado pesada. El maximo permitido es 15 MB.");
   }
 }
 

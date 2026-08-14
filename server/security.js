@@ -13,6 +13,7 @@ const ADMIN_PERMISSIONS = new Set([
   "discipline",
   "delegates",
   "settings",
+  "media",
   "users",
   "read_only"
 ]);

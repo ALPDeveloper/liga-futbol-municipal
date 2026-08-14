@@ -2,6 +2,7 @@ import {
   addLeague,
   addAnnouncement,
   addCompetition,
+  addMediaItem,
   addAppearanceAdjustment,
   addDisciplineAdjustment,
   addDisciplineLink,
@@ -22,6 +23,7 @@ import {
   deleteDisciplineLink,
   deleteDisciplineReset,
   deleteLeague,
+  deleteMediaItem,
   deletePlayer,
   deletePlayerInjury,
   deletePlayerSanction,
@@ -42,6 +44,7 @@ import {
   updateAnnouncement,
   updateCompetition,
   updateMatch,
+  updateMediaItem,
   updatePlayer,
   updatePlayerInjury,
   updateSponsor,
@@ -334,6 +337,7 @@ export function AdminRoute({
       onAddDisciplineReset={(payload) => commit(addDisciplineReset(store, league.id, payload))}
       onAddLeague={createLeagueWithAdmin}
       onAddMatch={createMatchFromPanel}
+      onAddMediaItem={(payload) => commit(addMediaItem(store, league.id, payload))}
       onAddPlayer={createPlayerFromPanel}
       onAddPlayerInjury={(payload) => commit(addPlayerInjury(store, league.id, payload))}
       onAddSponsor={(leagueId, payload) => commit(addSponsor(store, leagueId, payload))}
@@ -350,6 +354,7 @@ export function AdminRoute({
       onDeleteMatch={deleteMatchFromPanel}
       onDeletePlayoffMatches={(payload) => commit(deletePlayoffMatches(store, league.id, payload))}
       onDeleteLeague={deleteLeagueWithCleanup}
+      onDeleteMediaItem={(mediaId) => commit(deleteMediaItem(store, league.id, mediaId))}
       onDeletePlayer={deletePlayerFromPanel}
       onDeletePlayerInjury={(injuryId) => commit(deletePlayerInjury(store, league.id, injuryId))}
       onDeletePlayerSanction={(sanctionId) => commit(deletePlayerSanction(store, league.id, sanctionId))}
@@ -372,6 +377,7 @@ export function AdminRoute({
       onUpdateCompetition={(competitionId, payload) => commit(updateCompetition(store, league.id, competitionId, payload))}
       onUpdateLeagueMembership={(leagueId, payload) => commit(updateLeagueMembership(store, leagueId, payload))}
       onUpdateMatch={updateMatchFromPanel}
+      onUpdateMediaItem={(mediaId, payload) => commit(updateMediaItem(store, league.id, mediaId, payload))}
       onUpdatePlayerInjury={(injuryId, payload) => commit(updatePlayerInjury(store, league.id, injuryId, payload))}
       onUpdateSponsor={(leagueId, sponsorId, payload) => commit(updateSponsor(store, leagueId, sponsorId, payload))}
       onUpdatePlayer={updatePlayerFromPanel}

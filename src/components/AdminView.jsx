@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
 import { createBackup, downloadBackup, fetchBackups, verifyBackup } from "../lib/backupApi.js";
-import { MAX_IMAGE_DATA_URL_LENGTH, calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, scopeLeagueToCompetition } from "../lib/domain.js";
+import { calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, scopeLeagueToCompetition } from "../lib/domain.js";
+import { IMAGE_BANNER_MAX_SIZE, IMAGE_LOGO_MAX_SIZE, IMAGE_UPLOAD_ACCEPT, optimizeWebImageFile } from "../lib/imageProcessing.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
@@ -27,9 +28,6 @@ const PLAYER_STATUS_OPTIONS = [
   { value: "active", label: "Activo" },
   { value: "historical", label: "Solo historial" }
 ];
-const ALLOWED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const IMAGE_UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp";
-const MAX_UPLOAD_SIZE_MB = Math.round((MAX_IMAGE_DATA_URL_LENGTH / 1024 / 1024) * 10) / 10;
 const ADMIN_MATCH_REPORT_STATUSES = "finalized,pending_captain_review,correction_requested,both_signed";
 const ADMIN_SHEET_STEPS = [
   { id: "match", number: 1, label: "Partido", hint: "Info" },
@@ -125,6 +123,7 @@ export function AdminView({
   onAddDisciplineLink,
   onAddDisciplineReset,
   onAddMatch,
+  onAddMediaItem,
   onAddPlayer,
   onAddPlayerInjury,
   onAddPlayerSanction,
@@ -140,6 +139,7 @@ export function AdminView({
   onDeleteDisciplineLink,
   onDeleteDisciplineReset,
   onDeleteLeague,
+  onDeleteMediaItem,
   onDeletePlayer,
   onDeletePlayerInjury,
   onDeletePlayerSanction,
@@ -160,6 +160,7 @@ export function AdminView({
   onUpdateCompetition,
   onUpdateLeagueMembership,
   onUpdateMatch,
+  onUpdateMediaItem,
   onUpdatePlayer,
   onUpdatePlayerInjury,
   onUpdateSponsor,
@@ -222,6 +223,7 @@ export function AdminView({
               onAddDisciplineLink={onAddDisciplineLink}
               onAddDisciplineReset={onAddDisciplineReset}
               onAddMatch={onAddMatch}
+              onAddMediaItem={onAddMediaItem}
               onAddPlayer={onAddPlayer}
               onAddPlayerInjury={onAddPlayerInjury}
               onAddPlayerSanction={onAddPlayerSanction}
@@ -235,6 +237,7 @@ export function AdminView({
               onDeleteDisciplineAdjustment={onDeleteDisciplineAdjustment}
               onDeleteDisciplineLink={onDeleteDisciplineLink}
               onDeleteDisciplineReset={onDeleteDisciplineReset}
+              onDeleteMediaItem={onDeleteMediaItem}
               onDeletePlayer={onDeletePlayer}
               onDeletePlayerInjury={onDeletePlayerInjury}
               onDeletePlayerSanction={onDeletePlayerSanction}
@@ -250,6 +253,7 @@ export function AdminView({
               onUpdateAnnouncement={onUpdateAnnouncement}
               onUpdateCompetition={onUpdateCompetition}
               onUpdateMatch={onUpdateMatch}
+              onUpdateMediaItem={onUpdateMediaItem}
               onUpdatePlayer={onUpdatePlayer}
               onUpdatePlayerInjury={onUpdatePlayerInjury}
               onUpdateTeam={onUpdateTeam}
@@ -295,6 +299,7 @@ function LeagueAdmin({
   onAddDisciplineLink,
   onAddDisciplineReset,
   onAddMatch,
+  onAddMediaItem,
   onAddPlayer,
   onAddPlayerInjury,
   onAddPlayerSanction,
@@ -308,6 +313,7 @@ function LeagueAdmin({
   onDeleteDisciplineAdjustment,
   onDeleteDisciplineLink,
   onDeleteDisciplineReset,
+  onDeleteMediaItem,
   onDeletePlayer,
   onDeletePlayerInjury,
   onDeletePlayerSanction,
@@ -323,6 +329,7 @@ function LeagueAdmin({
   onUpdateAnnouncement,
   onUpdateCompetition,
   onUpdateMatch,
+  onUpdateMediaItem,
   onUpdatePlayer,
   onUpdatePlayerInjury,
   onUpdateTeam,
@@ -341,7 +348,7 @@ function LeagueAdmin({
   const activeRole = selectedAccess?.role || currentUser?.role;
   const accessPermissions = new Set(Array.isArray(selectedAccess?.permissions) ? selectedAccess.permissions : []);
   const hasFullLeagueAccess = ["super_admin", "league_admin"].includes(activeRole);
-  const limitedSectionIds = new Set(["capture", "lists", "delegates", "referees", "rules", "sheet", "sanctions"]);
+  const limitedSectionIds = new Set(["capture", "lists", "delegates", "referees", "rules", "sheet", "sanctions", "media"]);
   const canUseSection = (requiredPermissions = []) => (
     hasFullLeagueAccess ||
     (activeRole === "admin_limited" &&
@@ -358,6 +365,7 @@ function LeagueAdmin({
     { id: "venues", label: "Canchas", shortLabel: "Canchas", icon: "venues", group: "Calendario", permissions: ["settings", "calendar"], description: "Administra sedes y disponibilidad para programación.", metric: `${league.venues?.length || 0} canchas` },
     { id: "tournaments", label: "Torneos", shortLabel: "Torneos", icon: "tournaments", group: "Configuracion", permissions: ["settings"], description: "Controla categorias, temporadas e historicos.", metric: `${league.competitions?.length || 0} torneos` },
     { id: "announcements", label: "Avisos", shortLabel: "Avisos", icon: "announcements", group: "Comunicacion", permissions: ["settings"], description: "Publica comunicados visibles para usuarios y publico.", metric: `${league.announcements?.length || 0} avisos` },
+    { id: "media", label: "Galeria publica", shortLabel: "Galeria", icon: "identity", group: "Comunicacion", permissions: ["settings", "media"], description: "Administra portada, momento destacado y fotos por torneo.", metric: `${league.media?.length || 0} fotos` },
     { id: "discipline", label: "Disciplina", shortLabel: "Disciplina", icon: "discipline", group: "Comision", permissions: ["discipline"], description: "Controla amarillas, acumulaciones y ajustes disciplinarios.", metric: "Amarillas" },
     { id: "sanctions", label: "Sanciones", shortLabel: "Sanciones", icon: "sanctions", group: "Comision", permissions: ["discipline"], description: "Resuelve rojas, sanciones extraordinarias y comision.", metric: `${league.sanctions?.length || 0} casos` },
     { id: "injuries", label: "Lesiones", shortLabel: "Lesiones", icon: "injuries", group: "Comision", permissions: ["players", "discipline"], description: "Registra lesiones, cirugias y apoyos requeridos.", metric: `${league.injuries?.length || 0} registros` },
@@ -396,6 +404,10 @@ function LeagueAdmin({
   const featuredSections = ["capture", "lists", "sheet", "delegates"]
     .map((sectionId) => visibleSections.find((section) => section.id === sectionId))
     .filter(Boolean);
+
+  useEffect(() => {
+    preloadAdminLeagueImages(league);
+  }, [league]);
 
   useEffect(() => {
     const isHome = activeSection === "home";
@@ -644,6 +656,16 @@ function LeagueAdmin({
               />
             )}
 
+            {activeSection === "media" && (
+              <PublicMediaPanel
+                authToken={authToken}
+                league={league}
+                onAddMediaItem={onAddMediaItem}
+                onDeleteMediaItem={onDeleteMediaItem}
+                onUpdateMediaItem={onUpdateMediaItem}
+              />
+            )}
+
             {activeSection === "lists" && (
               <ManagementBoard
                 authToken={authToken}
@@ -884,13 +906,14 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
                 const file = event.currentTarget.files?.[0];
                 if (!file) return;
                 try {
-                  setLogoPreview(await readFileAsDataUrl(file));
+                  setLogoPreview(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE }));
                 } catch (error) {
-                  setIdentityNotice(error.message || "No se pudo leer el logo.");
+                  setIdentityNotice(error.message || "No se pudo optimizar el logo.");
                   event.currentTarget.value = "";
                 }
               }}
             />
+            <small>PNG, JPG o WebP. Puedes subir una imagen grande; LIGATEC la optimiza para web antes de guardarla.</small>
           </label>
           <input name="logoUrl" type="hidden" value={logoPreview} readOnly />
           {logoPreview && (
@@ -4395,6 +4418,182 @@ function AdminMatchEditorCard({
       </form>
     </details>
   );
+}
+
+function PublicMediaPanel({ authToken, league, onAddMediaItem, onDeleteMediaItem, onUpdateMediaItem }) {
+  const [notice, setNotice] = useState("");
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState(league.currentCompetitionId || league.competitions?.[0]?.id || "");
+  const [visibleMediaCount, setVisibleMediaCount] = useState(8);
+  const media = [...(league.media || [])].sort((a, b) => (
+    String(a.competitionId || "").localeCompare(String(b.competitionId || "")) ||
+    Number(a.sortOrder || 0) - Number(b.sortOrder || 0) ||
+    String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+  ));
+  const competitionMedia = media.filter((item) => (item.competitionId || "") === selectedCompetitionId);
+  const visibleCompetitionMedia = competitionMedia.slice(0, visibleMediaCount);
+  const activeCount = competitionMedia.filter((item) => (item.status || "active") === "active").length;
+  const heroItem = competitionMedia.find((item) => item.type === "hero" && (item.status || "active") === "active");
+  const momentItem = competitionMedia.find((item) => item.type === "moment" && (item.status || "active") === "active");
+  const galleryCount = competitionMedia.filter((item) => item.type === "gallery" && (item.status || "active") === "active").length;
+
+  useEffect(() => {
+    if (!league.competitions?.some((competition) => competition.id === selectedCompetitionId)) {
+      setSelectedCompetitionId(league.currentCompetitionId || league.competitions?.[0]?.id || "");
+    }
+  }, [league.competitions, league.currentCompetitionId, selectedCompetitionId]);
+
+  async function buildMediaPayload(form, fallbackImageUrl = "") {
+    const payload = getFormPayload(form);
+    const file = form.elements.imageFile?.files?.[0];
+    const imageUrl = file?.size
+      ? await resolveImageUpload(file, { authToken, leagueId: league.id, scope: "league-media" })
+      : fallbackImageUrl;
+    return {
+      ...payload,
+      competitionId: payload.competitionId || selectedCompetitionId,
+      imageUrl
+    };
+  }
+
+  async function submitNewMedia(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      const payload = await buildMediaPayload(form);
+      if (!payload.imageUrl) {
+        setNotice("Selecciona una imagen para publicar.");
+        return;
+      }
+      onAddMediaItem(payload);
+      setNotice("Foto publica guardada correctamente.");
+      form.reset();
+      form.elements.competitionId.value = selectedCompetitionId;
+    } catch (error) {
+      setNotice(error.message || "No se pudo guardar la foto.");
+    }
+  }
+
+  async function updateMedia(event, item) {
+    event.preventDefault();
+    try {
+      onUpdateMediaItem(item.id, await buildMediaPayload(event.currentTarget, item.imageUrl || ""));
+      setNotice("Foto actualizada correctamente.");
+    } catch (error) {
+      setNotice(error.message || "No se pudo actualizar la foto.");
+    }
+  }
+
+  function deleteMedia(item) {
+    if (!window.confirm(`¿Eliminar "${item.title}" de la galeria publica?`)) return;
+    onDeleteMediaItem(item.id);
+    setNotice("Foto eliminada correctamente.");
+  }
+
+  return (
+    <section className="panel public-media-admin-panel">
+      <SectionHeading eyebrow="Comunicacion" title="Galeria publica por torneo" />
+      <div className="public-media-hero">
+        <div>
+          <span>Portada publica</span>
+          <strong>{activeCount} imagen(es) activas</strong>
+          <small>Configura portada, momento destacado y galeria para cada torneo.</small>
+        </div>
+        <label>Torneo
+          <select
+            value={selectedCompetitionId}
+            onChange={(event) => {
+              setSelectedCompetitionId(event.target.value);
+              setVisibleMediaCount(8);
+            }}
+          >
+            {(league.competitions || []).map((competition) => (
+              <option key={competition.id} value={competition.id}>{competition.name} | {competition.season}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="public-media-summary">
+        <article className={heroItem ? "ready" : ""}><strong>Portada</strong><span>{heroItem ? heroItem.title : "Sin imagen activa"}</span></article>
+        <article className={momentItem ? "ready" : ""}><strong>Momento</strong><span>{momentItem ? momentItem.title : "Sin imagen activa"}</span></article>
+        <article className={galleryCount ? "ready" : ""}><strong>Galeria</strong><span>{galleryCount} foto(s)</span></article>
+      </div>
+      {notice && <p className={notice.includes("No se") || notice.includes("Selecciona") ? "auth-error" : "auth-ok"}>{notice}</p>}
+
+      <form className="public-media-form" onSubmit={submitNewMedia}>
+        <input type="hidden" name="competitionId" value={selectedCompetitionId} readOnly />
+        <label>Uso
+          <select name="type" defaultValue="gallery">
+            <option value="hero">Portada principal</option>
+            <option value="moment">Momento destacado</option>
+            <option value="gallery">Galeria</option>
+          </select>
+        </label>
+        <label>Titulo<input name="title" required placeholder="Ej. Final jornada 11" /></label>
+        <label>Orden<input name="sortOrder" type="number" min="0" defaultValue="0" /></label>
+        <label>Estado
+          <select name="status" defaultValue="active">
+            <option value="active">Publicado</option>
+            <option value="archived">Archivado</option>
+          </select>
+        </label>
+        <label className="wide-field">Imagen<input name="imageFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} required /></label>
+        <label className="wide-field">Descripcion<textarea name="caption" placeholder="Texto corto para contexto publico." /></label>
+        <button className="primary" type="submit">Agregar a galeria</button>
+      </form>
+
+      <div className="public-media-list">
+        {visibleCompetitionMedia.map((item) => (
+          <details className="public-media-card" key={item.id}>
+            <summary>
+              <span className="public-media-thumb">{item.imageUrl ? <img alt="" src={item.imageUrl} /> : <b>IMG</b>}</span>
+              <div>
+                <strong>{item.title}</strong>
+                <small>{getPublicMediaTypeLabel(item.type)} · {(item.status || "active") === "active" ? "Publicado" : "Archivado"} · Orden {item.sortOrder || 0}</small>
+                <p>{item.caption || "Sin descripcion"}</p>
+              </div>
+              <em>Editar</em>
+            </summary>
+            <form onSubmit={(event) => updateMedia(event, item)}>
+              <input type="hidden" name="competitionId" value={selectedCompetitionId} readOnly />
+              <label>Uso
+                <select name="type" defaultValue={item.type || "gallery"}>
+                  <option value="hero">Portada principal</option>
+                  <option value="moment">Momento destacado</option>
+                  <option value="gallery">Galeria</option>
+                </select>
+              </label>
+              <label>Titulo<input name="title" defaultValue={item.title} required /></label>
+              <label>Orden<input name="sortOrder" type="number" min="0" defaultValue={item.sortOrder || 0} /></label>
+              <label>Estado
+                <select name="status" defaultValue={item.status || "active"}>
+                  <option value="active">Publicado</option>
+                  <option value="archived">Archivado</option>
+                </select>
+              </label>
+              <label className="wide-field">Reemplazar imagen<input name="imageFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} /></label>
+              <label className="wide-field">Descripcion<textarea name="caption" defaultValue={item.caption || ""} /></label>
+              <div className="public-media-actions">
+                <button className="primary" type="submit">Guardar cambios</button>
+                <button className="danger" type="button" onClick={() => deleteMedia(item)}>Eliminar</button>
+              </div>
+            </form>
+          </details>
+        ))}
+        {!competitionMedia.length && <p className="empty">Este torneo aun no tiene fotos publicas cargadas.</p>}
+        {visibleCompetitionMedia.length < competitionMedia.length && (
+          <button className="secondary public-media-load-more" type="button" onClick={() => setVisibleMediaCount((count) => count + 8)}>
+            Mostrar 8 mas
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function getPublicMediaTypeLabel(type) {
+  if (type === "hero") return "Portada principal";
+  if (type === "moment") return "Momento destacado";
+  return "Galeria";
 }
 
 function ManagementBoard({
@@ -8157,26 +8356,10 @@ function SuperAdminSettingsPanel({ onResetDemo }) {
   );
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    if (!file) return resolve("");
-    if (!ALLOWED_UPLOAD_TYPES.has(file.type)) {
-      reject(new Error("Solo se permiten imagenes PNG, JPG o WebP."));
-      return;
-    }
-    if (file.size > MAX_IMAGE_DATA_URL_LENGTH) {
-      reject(new Error(`La imagen debe pesar menos de ${MAX_UPLOAD_SIZE_MB} MB.`));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
-    reader.readAsDataURL(file);
-  });
-}
-
 async function resolveImageUpload(file, { authToken, leagueId, scope } = {}) {
-  const dataUrl = await readFileAsDataUrl(file);
+  if (!file) return "";
+  const maxSize = scope === "sponsors" ? IMAGE_BANNER_MAX_SIZE : IMAGE_LOGO_MAX_SIZE;
+  const dataUrl = await optimizeWebImageFile(file, { maxSize });
   return resolveImageDataUrlUpload(dataUrl, { authToken, leagueId, scope });
 }
 
@@ -8489,6 +8672,7 @@ const ADMIN_PERMISSION_OPTIONS = [
   { id: "match_sheets", label: "Capturar actas/resultados" },
   { id: "discipline", label: "Comision disciplinaria" },
   { id: "delegates", label: "Delegados" },
+  { id: "media", label: "Galeria publica" },
   { id: "settings", label: "Reglas de liga" }
 ];
 const ADMIN_ACCESS_ROLES = new Set(["super_admin", "league_admin", "admin_limited"]);
@@ -9174,4 +9358,25 @@ function PlayerPositionSelect({ name, defaultValue = "Delantero", ariaLabel }) {
       {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
     </select>
   );
+}
+
+function preloadAdminImage(src) {
+  if (!src || typeof window === "undefined") return;
+  const image = new window.Image();
+  image.decoding = "async";
+  image.src = src;
+}
+
+function preloadAdminLeagueImages(league) {
+  const urls = new Set([
+    league?.identity?.logoUrl,
+    league?.logoUrl,
+    ...(league?.teams || []).map((team) => team.logoUrl),
+    ...(league?.players || [])
+      .filter((player) => player.photoAuthorized === true)
+      .map((player) => player.photoUrl),
+    ...(league?.sponsors || []).map((sponsor) => sponsor.imageUrl),
+    ...(league?.media || []).map((item) => item.imageUrl)
+  ].filter(Boolean));
+  urls.forEach(preloadAdminImage);
 }

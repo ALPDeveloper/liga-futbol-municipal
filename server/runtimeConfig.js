@@ -40,7 +40,7 @@ export const runtimeConfig = {
   port: Number(process.env.API_PORT || process.env.PORT || 3001),
   host: process.env.API_HOST || "127.0.0.1",
   trustProxy: parseBoolean(process.env.TRUST_PROXY, IS_PRODUCTION),
-  jsonBodyLimit: process.env.JSON_BODY_LIMIT || "2mb",
+  jsonBodyLimit: process.env.JSON_BODY_LIMIT || "4mb",
   corsOrigin: parseCorsOrigin(),
   loginMaxAttempts: Number(process.env.LOGIN_MAX_ATTEMPTS || 5),
   loginLockMinutes: Number(process.env.LOGIN_LOCK_MINUTES || 15),
