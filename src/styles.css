@@ -5221,6 +5221,160 @@ button.public-schedule-match:focus-visible {
   }
 }
 
+/* Final production guard: keep admin actas in the clean app-style layout. */
+.admin-console-page .admin-sheet-app {
+  width: 100% !important;
+  max-width: 460px !important;
+  margin-inline: auto !important;
+  color: #f7fbff !important;
+}
+
+.admin-console-page .admin-sheet-shell {
+  width: 100% !important;
+  gap: 12px !important;
+  padding: 14px !important;
+  border: 0 !important;
+  border-radius: 24px !important;
+  background:
+    radial-gradient(circle at 50% -12%, rgba(32, 239, 130, 0.13), transparent 34%),
+    linear-gradient(180deg, rgba(7, 17, 20, 0.98), rgba(4, 12, 15, 0.98)) !important;
+  box-shadow: none !important;
+}
+
+.admin-console-page .admin-sheet-hero {
+  min-height: 44px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.admin-console-page .admin-sheet-screen {
+  min-height: 0 !important;
+  gap: 13px !important;
+  padding: 4px 0 14px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.admin-console-page .admin-sheet-picker,
+.admin-console-page .admin-sheet-match-grid button,
+.admin-console-page .admin-sheet-event-team-select button,
+.admin-console-page .admin-sheet-action-grid button {
+  border: 1px solid rgba(226, 237, 241, 0.13) !important;
+  background: rgba(255, 255, 255, 0.035) !important;
+  box-shadow: none !important;
+}
+
+.admin-console-page .admin-sheet-picker {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.admin-console-page .admin-sheet-picker label {
+  min-width: 0 !important;
+}
+
+.admin-console-page .admin-sheet-picker select,
+.admin-console-page .admin-sheet-picker input,
+.admin-console-page .admin-search-input-wrap {
+  border-color: rgba(226, 237, 241, 0.15) !important;
+  background: rgba(255, 255, 255, 0.045) !important;
+  color: #f7fbff !important;
+}
+
+.admin-console-page .admin-sheet-screen-head {
+  align-items: center !important;
+  min-width: 0 !important;
+}
+
+.admin-console-page .admin-sheet-screen-head div {
+  min-width: 0 !important;
+}
+
+.admin-console-page .admin-sheet-screen-head strong {
+  max-width: 100% !important;
+  color: #f7fbff !important;
+  line-height: 1.08 !important;
+  overflow-wrap: normal !important;
+}
+
+.admin-console-page .admin-sheet-screen-head small {
+  min-width: max-content !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: rgba(224, 236, 240, 0.68) !important;
+}
+
+.admin-console-page .admin-sheet-stepper {
+  border: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+}
+
+.admin-console-page .admin-sheet-stepper button {
+  min-width: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.admin-console-page .admin-sheet-match-grid {
+  grid-template-columns: 1fr !important;
+}
+
+.admin-console-page .admin-sheet-match-grid button {
+  min-height: 104px !important;
+  padding: 12px !important;
+  border-radius: 14px !important;
+}
+
+.admin-console-page .admin-sheet-match-teams {
+  grid-template-columns: 38px minmax(0, 1fr) 34px 38px minmax(0, 1fr) !important;
+  gap: 7px !important;
+}
+
+.admin-console-page .admin-sheet-match-teams .admin-sheet-team-badge {
+  width: 36px !important;
+  height: 36px !important;
+}
+
+.admin-console-page .admin-sheet-match-teams .admin-sheet-match-team-name {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: #f7fbff !important;
+  line-height: 1.08 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.admin-console-page .admin-sheet-score-edit article,
+.admin-console-page .admin-sheet-info-card,
+.admin-console-page .admin-sheet-final-card,
+.admin-console-page .admin-sheet-event-composer,
+.admin-console-page .admin-sheet-event-list,
+.admin-console-page .sheet-observations,
+.admin-console-page .admin-sheet-type-controls,
+.admin-console-page .admin-sheet-advanced {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.admin-console-page .admin-sheet-actions {
+  position: static !important;
+  width: 100% !important;
+  margin: 12px 0 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 10px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
 /* Referee assignment polish: centered metrics, clearer match cards and modal actions. */
 .admin-console-page .referee-metric-grid {
   align-items: stretch !important;

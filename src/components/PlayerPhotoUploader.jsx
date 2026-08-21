@@ -8,6 +8,11 @@ import {
 
 const CROP_SIZE = 280;
 
+function showPhotoUploadAlert(message) {
+  if (!message || typeof window === "undefined") return;
+  window.alert(message);
+}
+
 export function PlayerPhotoUploader({
   existingPhotoUrl = "",
   defaultAuthorized = false,
@@ -58,8 +63,10 @@ export function PlayerPhotoUploader({
         }
       } catch (processingError) {
         if (!cancelled) {
+          const message = processingError.message || "No se pudo procesar la imagen.";
           setPhotoDataUrl("");
-          setError(processingError.message || "No se pudo procesar la imagen.");
+          setError(message);
+          showPhotoUploadAlert(message);
         }
       } finally {
         if (!cancelled) setIsProcessing(false);
@@ -78,7 +85,9 @@ export function PlayerPhotoUploader({
     if (!file) return;
     if (!authorized) {
       event.target.value = "";
-      setError("Marca la autorizacion de foto antes de subir el archivo.");
+      const message = "Marca la autorizacion de foto antes de subir el archivo.";
+      setError(message);
+      showPhotoUploadAlert(message);
       return;
     }
 
@@ -92,10 +101,12 @@ export function PlayerPhotoUploader({
       setRemoved(false);
       setCrop({ zoom: 1, offsetX: 0, offsetY: 0 });
     } catch (validationError) {
+      const message = validationError.message || "No se pudo cargar la foto.";
       event.target.value = "";
       setSourceUrl("");
       setPhotoDataUrl("");
-      setError(validationError.message || "No se pudo cargar la foto.");
+      setError(message);
+      showPhotoUploadAlert(message);
     }
   }
 
@@ -210,7 +221,6 @@ export function PlayerPhotoUploader({
         </div>
       )}
 
-      {error && <p className="auth-error">{error}</p>}
     </div>
   );
 }

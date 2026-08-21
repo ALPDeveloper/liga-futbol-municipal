@@ -51,6 +51,14 @@ function needsAdminMatchReportAttention(report) {
   return report?.status === "finalized" || report?.payload?.signatureIssue?.status === "pending_admin_attention";
 }
 
+function showAdminAlert(message, type = "success") {
+  if (!message || typeof window === "undefined") return;
+  const prefix = type === "error"
+    ? "No se pudo completar el movimiento."
+    : "Movimiento capturado correctamente.";
+  window.alert(`${prefix}\n\n${message}`);
+}
+
 function getAdminInitials(name) {
   const words = String(name || "US")
     .trim()
@@ -4005,12 +4013,12 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
       const result = await action(payload);
       if (result === false) return;
       const message = successMessage(payload);
-      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      showAdminAlert(message);
       if (options.reset !== false) event.currentTarget.reset();
     } catch (error) {
       const message = error.message || "No se pudo completar el movimiento.";
       setCaptureError(message);
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     }
   }
 
@@ -4024,14 +4032,14 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
       if (!window.confirm("¿Confirmas registrar este jugador en el equipo seleccionado?")) return;
       const result = await onAddPlayer(payload);
       if (result === false) return;
-      window.alert("Movimiento capturado correctamente.\n\nJugador registrado correctamente.");
+      showAdminAlert("Jugador registrado correctamente.");
       form.reset();
       setPlayerPhotoResetKey((value) => value + 1);
       if (form.elements.photoFile) form.elements.photoFile.value = "";
     } catch (error) {
       const message = error.message || "No se pudo registrar el jugador.";
       setCaptureError(message);
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     }
   }
 
@@ -4043,13 +4051,14 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
     try {
       const payload = await getTeamPayload(form, "", { authToken, leagueId: league.id, scope: "teams" });
       if (!window.confirm("¿Confirmas registrar este equipo en la categoria seleccionada?")) return;
+      const result = await onAddTeam(payload);
+      if (result === false) return;
       resetTeamForm(form);
-      onAddTeam(payload);
-      window.alert("Movimiento capturado correctamente.\n\nEquipo registrado correctamente.");
+      showAdminAlert("Equipo registrado correctamente.");
     } catch (error) {
       const message = error.message || "No se pudo registrar el equipo.";
       setCaptureError(message);
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     }
   }
 
@@ -4106,14 +4115,14 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
       if (!window.confirm("¿Confirmas crear este partido con los equipos, fecha y cancha capturados?")) return;
       const result = await onAddMatch(payload);
       if (result === false) return;
-      window.alert("Movimiento capturado correctamente.\n\nPartido creado correctamente.");
+      showAdminAlert("Partido creado correctamente.");
       setMatchHomeTeamId("");
       setMatchAwayTeamId("");
       setMatchVenue("");
     } catch (error) {
       const message = error.message || "No se pudo crear el partido.";
       setCaptureError(message);
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     }
   }
 
@@ -4328,7 +4337,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
           {captureMode === "schedule" && (
             <form
               className="capture-form schedule-generator-form"
-              onSubmit={(event) => {
+              onSubmit={async (event) => {
                 event.preventDefault();
                 const payload = getFormPayload(event.currentTarget);
                 const message = payload.mode === "late"
@@ -4338,15 +4347,16 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                 setCaptureNotice("");
                 setCaptureError("");
                 try {
-                  onGenerateSchedule(payload);
+                  const result = await onGenerateSchedule(payload);
+                  if (result === false) return;
                   const successMessage = payload.roundTrip === "on"
                   ? "Calendario ida y vuelta generado correctamente."
                   : "Calendario generado correctamente.";
-                  window.alert(`Movimiento capturado correctamente.\n\n${successMessage}`);
+                  showAdminAlert(successMessage);
                 } catch (error) {
                   const errorMessage = error.message || "No se pudo generar el calendario.";
                   setCaptureError(errorMessage);
-                  window.alert(`No se pudo completar el movimiento.\n\n${errorMessage}`);
+                  showAdminAlert(errorMessage, "error");
                 }
               }}
             >
@@ -4376,7 +4386,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
           {captureMode === "playoffs" && (
             <form
               className="capture-form schedule-generator-form"
-              onSubmit={(event) => {
+              onSubmit={async (event) => {
                 event.preventDefault();
                 const payload = getFormPayload(event.currentTarget);
                 const phase = PLAYOFF_PHASE_OPTIONS.find((item) => item.value === payload.phase) || PLAYOFF_PHASE_OPTIONS[2];
@@ -4389,12 +4399,13 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                 setCaptureNotice("");
                 setCaptureError("");
                 try {
-                  onGeneratePlayoffBracket(payload);
-                  window.alert(`Movimiento capturado correctamente.\n\n${phase.label} generada correctamente.`);
+                  const result = await onGeneratePlayoffBracket(payload);
+                  if (result === false) return;
+                  showAdminAlert(`${phase.label} generada correctamente.`);
                 } catch (error) {
                   const errorMessage = error.message || "No se pudo generar la liguilla.";
                   setCaptureError(errorMessage);
-                  window.alert(`No se pudo completar el movimiento.\n\n${errorMessage}`);
+                  showAdminAlert(errorMessage, "error");
                 }
               }}
             >
@@ -4924,7 +4935,6 @@ function AdminMatchEditorCard({
 }
 
 function PublicMediaPanel({ authToken, league, onAddMediaItem, onDeleteMediaItem, onUpdateMediaItem }) {
-  const [notice, setNotice] = useState("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(league.currentCompetitionId || league.competitions?.[0]?.id || "");
   const [visibleMediaCount, setVisibleMediaCount] = useState(8);
   const media = [...(league.media || [])].sort((a, b) => (
@@ -4964,32 +4974,39 @@ function PublicMediaPanel({ authToken, league, onAddMediaItem, onDeleteMediaItem
     try {
       const payload = await buildMediaPayload(form);
       if (!payload.imageUrl) {
-        setNotice("Selecciona una imagen para publicar.");
+        showAdminAlert("Selecciona una imagen para publicar.", "error");
         return;
       }
-      onAddMediaItem(payload);
-      setNotice("Foto publica guardada correctamente.");
+      const result = await onAddMediaItem(payload);
+      if (result === false) return;
+      showAdminAlert("Foto publica guardada correctamente.");
       form.reset();
       form.elements.competitionId.value = selectedCompetitionId;
     } catch (error) {
-      setNotice(error.message || "No se pudo guardar la foto.");
+      showAdminAlert(error.message || "No se pudo guardar la foto.", "error");
     }
   }
 
   async function updateMedia(event, item) {
     event.preventDefault();
     try {
-      onUpdateMediaItem(item.id, await buildMediaPayload(event.currentTarget, item.imageUrl || ""));
-      setNotice("Foto actualizada correctamente.");
+      const result = await onUpdateMediaItem(item.id, await buildMediaPayload(event.currentTarget, item.imageUrl || ""));
+      if (result === false) return;
+      showAdminAlert("Foto actualizada correctamente.");
     } catch (error) {
-      setNotice(error.message || "No se pudo actualizar la foto.");
+      showAdminAlert(error.message || "No se pudo actualizar la foto.", "error");
     }
   }
 
-  function deleteMedia(item) {
+  async function deleteMedia(item) {
     if (!window.confirm(`¿Eliminar "${item.title}" de la galeria publica?`)) return;
-    onDeleteMediaItem(item.id);
-    setNotice("Foto eliminada correctamente.");
+    try {
+      const result = await onDeleteMediaItem(item.id);
+      if (result === false) return;
+      showAdminAlert("Foto eliminada correctamente.");
+    } catch (error) {
+      showAdminAlert(error.message || "No se pudo eliminar la foto.", "error");
+    }
   }
 
   return (
@@ -5020,8 +5037,6 @@ function PublicMediaPanel({ authToken, league, onAddMediaItem, onDeleteMediaItem
         <article className={momentItem ? "ready" : ""}><strong>Momento</strong><span>{momentItem ? momentItem.title : "Sin imagen activa"}</span></article>
         <article className={galleryCount ? "ready" : ""}><strong>Galeria</strong><span>{galleryCount} foto(s)</span></article>
       </div>
-      {notice && <p className={notice.includes("No se") || notice.includes("Selecciona") ? "auth-error" : "auth-ok"}>{notice}</p>}
-
       <form className="public-media-form" onSubmit={submitNewMedia}>
         <input type="hidden" name="competitionId" value={selectedCompetitionId} readOnly />
         <label>Uso
@@ -5280,9 +5295,16 @@ function ManagementBoard({
 
   async function confirmDelete(label, callback, successMessage = "Registro eliminado correctamente.") {
     if (!window.confirm(`¿Seguro que quieres eliminar ${label}? Esta accion puede afectar informacion relacionada.`)) return;
-    const result = await callback();
-    if (result === false) return;
-    setListNotice(successMessage);
+    try {
+      const result = await callback();
+      if (result === false) return;
+      setListNotice("");
+      showAdminAlert(successMessage);
+    } catch (error) {
+      const message = error.message || "No se pudo eliminar el registro.";
+      setListNotice("");
+      showAdminAlert(message, "error");
+    }
   }
 
   function toggleRound(round) {
@@ -5307,9 +5329,16 @@ function ManagementBoard({
       return;
     }
     if (!window.confirm("¿Guardar cambios de este partido?")) return;
-    const result = await onUpdateMatch(matchId, payload);
-    if (result === false) return;
-    setListNotice("Datos del partido guardados correctamente.");
+    try {
+      const result = await onUpdateMatch(matchId, payload);
+      if (result === false) return;
+      setListNotice("");
+      showAdminAlert("Datos del partido guardados correctamente.");
+    } catch (error) {
+      const message = error.message || "No se pudo guardar el partido.";
+      setListNotice("");
+      showAdminAlert(message, "error");
+    }
   }
 
   async function handlePlayerSave(player, form) {
@@ -5318,9 +5347,12 @@ function ManagementBoard({
       const payload = await getPlayerPayload(form, player.photoUrl || "", { authToken, leagueId: league.id, scope: "player-photos" });
       const result = await onUpdatePlayer(player.id, payload);
       if (result === false) return;
-      setListNotice("Datos del jugador guardados correctamente.");
+      setListNotice("");
+      showAdminAlert("Datos del jugador guardados correctamente.");
     } catch (error) {
-      window.alert(error.message || "No se pudo cargar la imagen.");
+      const message = error.message || "No se pudo guardar el jugador.";
+      setListNotice("");
+      showAdminAlert(message, "error");
     }
   }
 
@@ -5329,7 +5361,7 @@ function ManagementBoard({
     try {
       payload = await getTeamPayload(form, team.logoUrl || "", { authToken, leagueId: league.id, scope: "team-logos" });
     } catch (error) {
-      window.alert(error.message || "No se pudo cargar la imagen.");
+      showAdminAlert(error.message || "No se pudo cargar la imagen.", "error");
       return;
     }
     const previousStatus = team.status || "active";
@@ -5354,12 +5386,21 @@ function ManagementBoard({
 
     if (previousStatus === nextStatus && !window.confirm(`¿Guardar cambios del equipo ${team.name}?`)) return;
 
-    onUpdateTeam(team.id, payload);
-    setListNotice(nextStatus === "withdrawn"
+    try {
+      const result = await onUpdateTeam(team.id, payload);
+      if (result === false) return;
+      const message = nextStatus === "withdrawn"
       ? "Equipo dado de baja correctamente."
       : nextStatus === "active" && previousStatus === "withdrawn"
         ? "Equipo reactivado y defaults por baja restaurados correctamente."
-        : "Datos del equipo guardados correctamente.");
+        : "Datos del equipo guardados correctamente.";
+      setListNotice("");
+      showAdminAlert(message);
+    } catch (error) {
+      const message = error.message || "No se pudo guardar el equipo.";
+      setListNotice("");
+      showAdminAlert(message, "error");
+    }
   }
 
   function renderDataTeamMark(team, side = "home") {
@@ -5508,7 +5549,6 @@ function ManagementBoard({
           </button>
         ))}
       </div>
-      {listNotice && <p className="auth-ok">{listNotice}</p>}
       <div className="management-grid">
         {activeList === "teams" && <div className="operation-data-section">
           <div className="operation-data-section-head">
@@ -6201,12 +6241,15 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     const localNeedsPlayers = expectedHomeGoals > 0 && !getPlayersForTeam(selectedMatch.homeTeamId).length;
     const awayNeedsPlayers = expectedAwayGoals > 0 && !getPlayersForTeam(selectedMatch.awayTeamId).length;
     if (localNeedsPlayers || awayNeedsPlayers) {
-      setValidationMessage("Para completar goles, los equipos con goles deben tener jugadores registrados.");
+      const message = "Para completar goles, los equipos con goles deben tener jugadores registrados.";
+      setValidationMessage("");
+      showAdminAlert(message, "error");
       return;
     }
 
     setValidationMessage("");
-    setSheetNotice("Se agregaron eventos de gol pendientes. Selecciona jugador y minuto antes de guardar.");
+    setSheetNotice("");
+    showAdminAlert("Se agregaron eventos de gol pendientes. Selecciona jugador y minuto antes de guardar.");
     setEvents((current) => {
       const homeMissing = buildMissingGoalEvents(selectedMatch.homeTeamId, current);
       const withHome = [...current, ...homeMissing];
@@ -6621,7 +6664,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         event.preventDefault();
         const error = validateMatchSheet();
         if (error) {
-          setValidationMessage(error);
+          setValidationMessage("");
+          showAdminAlert(error, "error");
           return;
         }
 
@@ -6658,15 +6702,15 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             : isEditingSavedSheet
               ? "Acta corregida y publicada correctamente."
               : "Acta publicada correctamente.";
-          setSheetNotice(successMessage);
-          window.alert(successMessage);
+          setSheetNotice("");
+          showAdminAlert(successMessage);
           setMatchId("");
           setMatchStatusFilter("scheduled");
           setSheetStep("select");
         } catch (saveError) {
           const message = saveError.message || "No se pudo guardar el acta.";
-          setValidationMessage(message);
-          window.alert(message);
+          setValidationMessage("");
+          showAdminAlert(message, "error");
         }
       }}
     >
@@ -7056,9 +7100,6 @@ function MatchSheet({ league, onSaveMatchSheet }) {
             </div>
           </section>
         )}
-
-        {validationMessage && <p className="sheet-alert">{validationMessage}</p>}
-        {sheetNotice && <p className="auth-ok">{sheetNotice}</p>}
 
         {sheetStep !== "select" && !eventDraft && (
         <div className="admin-sheet-actions">
