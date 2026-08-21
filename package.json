@@ -40,7 +40,7 @@
     "import:postgres": "node scripts/import-postgres-store.js",
     "preview": "vite preview --host 127.0.0.1",
     "preview:lan": "vite preview --host 0.0.0.0",
-    "test": "node scripts/domain-smoke-test.js && node scripts/referee-workflow-smoke-test.js && node scripts/live-clock-smoke-test.js"
+    "test": "node scripts/domain-smoke-test.js && node scripts/referee-workflow-smoke-test.js && node scripts/live-clock-smoke-test.js && node scripts/access-request-role-smoke-test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

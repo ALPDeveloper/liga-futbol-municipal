@@ -158,7 +158,7 @@ export function PublicAccessRequestSheet({ league, onClose }) {
           <div>
             <span>Acceso a {league.name}</span>
             <strong>Solicitar cuenta</strong>
-            <small>Tu cuenta queda pendiente hasta que el administrador la apruebe.</small>
+            <small>Si ya tienes cuenta, usa tu mismo correo y contraseña actual para pedir otro acceso.</small>
           </div>
           <button type="button" aria-label="Cerrar solicitud" onClick={onClose}>X</button>
         </div>
@@ -228,8 +228,8 @@ export function PublicAccessRequestSheet({ league, onClose }) {
             <label>Nombre completo<input name="name" required placeholder="Nombre y apellidos" /></label>
             <label>Telefono<input name="phone" required inputMode="tel" placeholder="Telefono de contacto" /></label>
             <label>Correo electronico<input name="email" required type="email" placeholder="correo@ejemplo.com" /></label>
-            <label>Contraseña<input name="password" required type="password" autoComplete="new-password" placeholder="Minimo 10 caracteres" /></label>
-            <label>Confirmar contraseña<input name="confirmPassword" required type="password" autoComplete="new-password" placeholder="Repite la contraseña" /></label>
+            <label>Contraseña<input name="password" required type="password" autoComplete="current-password" placeholder="Nueva o actual si ya tienes cuenta" /></label>
+            <label>Confirmar contraseña<input name="confirmPassword" required type="password" autoComplete="current-password" placeholder="Repite la contraseña" /></label>
           </div>
 
           {notice && <p className="auth-ok">{notice}</p>}

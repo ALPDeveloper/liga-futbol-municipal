@@ -2160,11 +2160,17 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     try {
       const response = await deleteReferee(authToken, referee.userId);
       setReferees(response.referees || []);
-      setNotice(response.userDeleted ? "Arbitro eliminado definitivamente." : "Arbitro eliminado.");
+      const successMessage = response.userDeleted
+        ? "Arbitro eliminado definitivamente."
+        : "Acceso de arbitro retirado correctamente.";
+      window.alert(successMessage);
+      setNotice(successMessage);
       setError("");
     } catch (saveError) {
       setNotice("");
-      setError(saveError.message || "No se pudo eliminar definitivamente el arbitro.");
+      const errorMessage = saveError.message || "No se pudo eliminar definitivamente el arbitro.";
+      window.alert(errorMessage);
+      setError(errorMessage);
     } finally {
       setBusyAction("");
     }

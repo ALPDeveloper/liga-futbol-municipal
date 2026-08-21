@@ -263,6 +263,33 @@ function hasAnyNonDelegateAccess(user) {
   return (user.accesses || []).some((access) => access.role !== "team_delegate" && access.status !== "deleted");
 }
 
+async function findUserByEmailIncludingInactive(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+  const user = (await listUsersData()).find((item) => String(item.email || "").toLowerCase() === normalizedEmail);
+  return user ? getUserById(user.id) : null;
+}
+
+function hasExistingDelegateAccess(user, leagueId, teamId) {
+  return Boolean((user?.accesses || []).some((access) => (
+    access.role === "team_delegate" &&
+    access.status !== "deleted" &&
+    access.leagueId === leagueId &&
+    access.teamId === teamId
+  )));
+}
+
+function hasExistingRefereeAccess(user, leagueId = "") {
+  return Boolean(
+    user?.role === "referee" ||
+    (user?.accesses || []).some((access) => (
+      access.role === "referee" &&
+      access.status !== "deleted" &&
+      (!leagueId || !access.leagueId || access.leagueId === leagueId)
+    ))
+  );
+}
+
 function getFallbackPrimaryRoleFromAccesses(user, excludedAccessIds = new Set()) {
   const remainingAccesses = (user?.accesses || []).filter((access) => (
     access.status !== "deleted" && !excludedAccessIds.has(access.id)
@@ -1532,8 +1559,6 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
   }
   if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido." });
   if (password !== confirmPassword) return response.status(400).json({ error: "Las contraseñas no coinciden." });
-  const passwordError = requireStrongPassword(password);
-  if (passwordError) return response.status(400).json({ error: passwordError });
 
   const store = await getStoreData();
   const league = (store.leagues || []).find((item) => item.id === leagueId);
@@ -1547,11 +1572,26 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
     }
   }
 
-  const existingUser = (await listUsersData()).find((item) => String(item.email || "").toLowerCase() === email && item.status !== "deleted");
+  const existingUser = await findUserByEmailIncludingInactive(email);
   if (existingUser) {
-    return response.status(409).json({
-      error: "Ya existe una cuenta con ese correo. Inicia sesion o solicita al administrador que agregue este acceso a tu usuario actual."
-    });
+    if (existingUser.status === "deleted") {
+      return response.status(409).json({ error: "Ese correo pertenece a una cuenta eliminada. Solicita al administrador recuperar la cuenta o usa otro correo." });
+    }
+    if (!["active", "disabled"].includes(existingUser.status)) {
+      return response.status(409).json({ error: "Ese correo ya tiene una cuenta pendiente o suspendida. Solicita al administrador resolver esa cuenta primero." });
+    }
+    if (!verifyPassword(password, existingUser.password_hash)) {
+      return response.status(401).json({ error: "Ese correo ya tiene cuenta. Para solicitar otro acceso, escribe la contraseña actual de esa cuenta." });
+    }
+    if (requestedRole === "team_delegate" && hasExistingDelegateAccess(existingUser, leagueId, teamId)) {
+      return response.status(409).json({ error: "Ese correo ya tiene acceso de delegado para este equipo." });
+    }
+    if (requestedRole === "referee" && hasExistingRefereeAccess(existingUser, leagueId)) {
+      return response.status(409).json({ error: "Ese correo ya tiene acceso de arbitro activo o pendiente." });
+    }
+  } else {
+    const passwordError = requireStrongPassword(password);
+    if (passwordError) return response.status(400).json({ error: passwordError });
   }
 
   const pendingRequests = await listAccessRequestsData({ leagueId, status: "pending" });
@@ -1572,7 +1612,7 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
     name,
     email,
     phone,
-    passwordHash: hashPassword(password)
+    passwordHash: existingUser ? existingUser.password_hash : hashPassword(password)
   });
 
   await logAudit({
@@ -1656,10 +1696,18 @@ app.patch("/api/access-requests/:requestId", requireAuth, async (request, respon
     return response.status(400).json({ error: "El equipo solicitado ya no esta disponible." });
   }
 
-  const users = await listUsersData();
-  const existingUser = users.find((item) => String(item.email || "").toLowerCase() === String(accessRequest.email || "").toLowerCase() && item.status !== "deleted");
-  if (existingUser && existingUser.status !== "active") {
-    return response.status(409).json({ error: "Ese correo ya existe pero no esta activo. Resuelve primero esa cuenta." });
+  const existingUser = await findUserByEmailIncludingInactive(accessRequest.email);
+  if (existingUser?.status === "deleted") {
+    return response.status(409).json({ error: "Ese correo pertenece a una cuenta eliminada. Recupera la cuenta o usa otro correo." });
+  }
+  if (existingUser && !["active", "disabled"].includes(existingUser.status)) {
+    return response.status(409).json({ error: "Ese correo ya existe pero esta pendiente o suspendido. Resuelve primero esa cuenta." });
+  }
+  if (existingUser && accessRequest.requestedRole === "team_delegate" && hasExistingDelegateAccess(existingUser, accessRequest.leagueId, accessRequest.teamId)) {
+    return response.status(409).json({ error: "Este usuario ya tiene acceso de delegado para ese equipo." });
+  }
+  if (existingUser && accessRequest.requestedRole === "referee" && hasExistingRefereeAccess(existingUser, accessRequest.leagueId)) {
+    return response.status(409).json({ error: "Este usuario ya tiene acceso de arbitro." });
   }
 
   const userId = existingUser?.id || `user-${crypto.randomUUID()}`;
@@ -1676,6 +1724,15 @@ app.patch("/api/access-requests/:requestId", requireAuth, async (request, respon
         role: accessRequest.requestedRole,
         status: "active",
         passwordHash: accessRequest.passwordHash
+      });
+    } else if (existingUser.status === "disabled") {
+      await updateUserData(userId, {
+        leagueId: existingUser.league_id ?? existingUser.leagueId ?? null,
+        name: existingUser.name || accessRequest.name,
+        email: existingUser.email || accessRequest.email,
+        phone: existingUser.phone || accessRequest.phone,
+        role: existingUser.role,
+        status: "active"
       });
     }
 
