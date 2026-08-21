@@ -17,6 +17,7 @@ import {
   createMatchReportData,
   createMatchReportSignatureData,
   createMatchSessionOperationData,
+  createAccessRequestData,
   countTeamDelegateAssignmentsData,
   createMatchParticipationData,
   createRefereeMatchSheetData,
@@ -35,6 +36,7 @@ import {
   deleteUserData,
   disableUserData,
   getActiveUserByEmail,
+  getAccessRequestData,
   getAdminActivationByHashData,
   getStoreData,
   getPendingRefereeMatchSheetForMatchData,
@@ -53,6 +55,7 @@ import {
   importStoreData,
   initializeData,
   listActivePasswordResetRequests,
+  listAccessRequestsData,
   listBackupRecordsData,
   listRefereeMatchSheetsData,
   listRefereeMatchSheetsForRefereeData,
@@ -80,6 +83,7 @@ import {
   setTeamRosterPermissionData,
   revokeTeamDelegateActivationsData,
   activateTeamDelegateUserData,
+  updateAccessRequestReviewData,
   updateTeamDelegateStatusData,
   updateMatchRefereesData,
   updateMatchWorkflowData,
@@ -209,6 +213,12 @@ const activationLimiter = createRateLimiter({
   keyGenerator: (request) => `activation:${request.ip}`
 });
 
+const accessRequestLimiter = createRateLimiter({
+  windowMs: runtimeConfig.activationWindowMinutes * 60 * 1000,
+  max: Math.min(runtimeConfig.activationMaxRequests, 20),
+  keyGenerator: (request) => `access-request:${request.ip}:${String(request.body?.email || "").trim().toLowerCase()}`
+});
+
 const uploadLimiter = createRateLimiter({
   windowMs: runtimeConfig.uploadWindowMinutes * 60 * 1000,
   max: runtimeConfig.uploadMaxRequests,
@@ -311,6 +321,24 @@ function getAppBaseUrl(request) {
   const configured = String(runtimeConfig.appBaseUrl || "").trim();
   if (configured) return configured.replace(/\/+$/, "");
   return `${request.protocol}://${request.get("host")}`;
+}
+
+function toPublicAccessRequest(requestRecord) {
+  if (!requestRecord) return null;
+  const { passwordHash, ...safeRequest } = requestRecord;
+  return safeRequest;
+}
+
+function getAccessRequestPermission(role) {
+  if (role === "team_delegate") return "delegates";
+  if (role === "referee") return "referees";
+  return "";
+}
+
+function getAccessRequestRoleLabel(role) {
+  if (role === "team_delegate") return "delegado";
+  if (role === "referee") return "arbitro";
+  return "usuario";
 }
 
 async function createDelegateInvitation({ request, userId, assignmentId, delegateName, teamName }) {
@@ -453,6 +481,35 @@ function isValidTimeValue(value) {
   return value === "" || /^\d{2}:\d{2}$/.test(String(value || ""));
 }
 
+function getMatchScopeLabel(match) {
+  if ((match.stage || "regular") === "playoff") {
+    return match.playoffRound ? `la fase ${match.playoffRound}` : "esta fase de liguilla";
+  }
+  return `la jornada ${match.round || "-"}`;
+}
+
+function assertMatchTeamsAreAvailable(league, match, currentMatchId = "") {
+  const conflicts = (league.matches || []).filter((item) => {
+    if (currentMatchId && item.id === currentMatchId) return false;
+    if (String(item.competitionId || match.competitionId || "") !== String(match.competitionId || "")) return false;
+    if ((item.stage || "regular") !== (match.stage || "regular")) return false;
+    if ((match.stage || "regular") === "playoff") {
+      return upperText(item.playoffRound || "") === upperText(match.playoffRound || "") &&
+        upperText(item.playoffLeg || "") === upperText(match.playoffLeg || "");
+    }
+    return Number(item.round || 0) === Number(match.round || 0);
+  });
+  const repeatedTeamId = [match.homeTeamId, match.awayTeamId].find((teamId) => (
+    conflicts.some((item) => item.homeTeamId === teamId || item.awayTeamId === teamId)
+  ));
+  if (repeatedTeamId) {
+    const team = getTeam(league, repeatedTeamId);
+    const error = new Error(`${team?.name || "Ese equipo"} ya tiene partido en ${getMatchScopeLabel(match)}.`);
+    error.status = 400;
+    throw error;
+  }
+}
+
 function canEditMatchResults(user, leagueId) {
   return hasAdminPermission(user, leagueId, "match_sheets");
 }
@@ -580,6 +637,8 @@ function buildMatchPayload({ league, payload, currentMatch = null, canEditResult
     error.status = 403;
     throw error;
   }
+
+  assertMatchTeamsAreAvailable(league, next, currentMatch?.id || "");
 
   return next;
 }
@@ -717,7 +776,10 @@ async function buildTeamPortalPayload(userId) {
   const userById = new Map(users.map((user) => [user.id, user]));
   const getRefereeName = (userId) => userById.get(userId)?.name || "";
   const teamMatches = league ? (league.matches || [])
-    .filter((match) => (match.homeTeamId === context.teamId || match.awayTeamId === context.teamId))
+    .filter((match) => (
+      (match.homeTeamId === context.teamId || match.awayTeamId === context.teamId) &&
+      (!context.competitionId || match.competitionId === context.competitionId)
+    ))
     .sort((a, b) => (
       String(a.date || "").localeCompare(String(b.date || "")) ||
       String(a.time || "").localeCompare(String(b.time || ""))
@@ -1068,6 +1130,7 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
   }
   const sessionByMatchId = new Map();
   for (const session of matchSessions || []) {
+    if (session.status === "cancelled") continue;
     const current = sessionByMatchId.get(session.matchId);
     if (!current || String(session.updatedAt || "").localeCompare(String(current.updatedAt || "")) > 0) {
       sessionByMatchId.set(session.matchId, session);
@@ -1449,6 +1512,241 @@ app.post("/api/auth/reset-password", passwordResetCompleteLimiter, async (reques
   });
 
   response.json({ message: "Contraseña actualizada. Ya puedes iniciar sesion." });
+});
+
+app.post("/api/access-requests", accessRequestLimiter, async (request, response) => {
+  const leagueId = String(request.body.leagueId || "").trim();
+  const requestedRole = String(request.body.role || request.body.requestedRole || "").trim();
+  const teamId = String(request.body.teamId || "").trim();
+  const name = String(request.body.name || "").trim();
+  const email = String(request.body.email || "").trim().toLowerCase();
+  const phone = String(request.body.phone || "").trim();
+  const password = String(request.body.password || "");
+  const confirmPassword = String(request.body.confirmPassword || "");
+
+  if (!["team_delegate", "referee"].includes(requestedRole)) {
+    return response.status(400).json({ error: "Selecciona si deseas registrarte como delegado o arbitro." });
+  }
+  if (!leagueId || !name || !email || !phone) {
+    return response.status(400).json({ error: "Nombre, telefono, correo y liga son requeridos." });
+  }
+  if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido." });
+  if (password !== confirmPassword) return response.status(400).json({ error: "Las contraseñas no coinciden." });
+  const passwordError = requireStrongPassword(password);
+  if (passwordError) return response.status(400).json({ error: passwordError });
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === leagueId);
+  if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida." });
+
+  let team = null;
+  if (requestedRole === "team_delegate") {
+    team = (league.teams || []).find((item) => item.id === teamId);
+    if (!team || ["deleted", "withdrawn"].includes(team.status)) {
+      return response.status(400).json({ error: "Selecciona un equipo valido de esta liga." });
+    }
+  }
+
+  const existingUser = (await listUsersData()).find((item) => String(item.email || "").toLowerCase() === email && item.status !== "deleted");
+  if (existingUser) {
+    return response.status(409).json({
+      error: "Ya existe una cuenta con ese correo. Inicia sesion o solicita al administrador que agregue este acceso a tu usuario actual."
+    });
+  }
+
+  const pendingRequests = await listAccessRequestsData({ leagueId, status: "pending" });
+  const duplicateRequest = pendingRequests.find((item) => (
+    String(item.email || "").toLowerCase() === email &&
+    item.requestedRole === requestedRole &&
+    (requestedRole !== "team_delegate" || item.teamId === teamId)
+  ));
+  if (duplicateRequest) {
+    return response.status(409).json({ error: "Ya existe una solicitud pendiente con este correo." });
+  }
+
+  const accessRequest = await createAccessRequestData({
+    id: `access-request-${crypto.randomUUID()}`,
+    leagueId,
+    teamId: requestedRole === "team_delegate" ? teamId : null,
+    requestedRole,
+    name,
+    email,
+    phone,
+    passwordHash: hashPassword(password)
+  });
+
+  await logAudit({
+    user: { id: null, email, role: "public" },
+    leagueId,
+    action: "access_request_create",
+    entityType: "access_request",
+    entityId: accessRequest.id,
+    detail: `Solicitud publica de ${getAccessRequestRoleLabel(requestedRole)}${team ? ` para ${team.name}` : ""}`
+  });
+
+  response.status(201).json({
+    message: "Solicitud enviada. El administrador de la liga debe aprobarla antes de que puedas entrar.",
+    request: toPublicAccessRequest(accessRequest)
+  });
+});
+
+app.get("/api/access-requests", requireAuth, async (request, response) => {
+  const fallbackLeagueId = request.user.role === "super_admin" ? "" : getPrimaryAdminLeagueId(request.user, ["delegates", "referees", "users"]);
+  const leagueId = String(request.query.leagueId || request.user.leagueId || fallbackLeagueId || "");
+  const status = String(request.query.status || "pending");
+  const role = String(request.query.role || "");
+  if (leagueId && !hasAnyAdminPermission(request.user, ["delegates", "referees", "users"])) {
+    return response.status(403).json({ error: "No puedes ver solicitudes de acceso." });
+  }
+  if (leagueId && !canManageLeague(request.user, leagueId)) {
+    return response.status(403).json({ error: "No puedes ver solicitudes de esta liga." });
+  }
+  if (!leagueId && request.user.role !== "super_admin") {
+    return response.status(403).json({ error: "Selecciona una liga valida." });
+  }
+  const requests = await listAccessRequestsData({ leagueId, status, role });
+  const filtered = requests.filter((item) => {
+    const permission = getAccessRequestPermission(item.requestedRole);
+    return request.user.role === "super_admin" || hasAdminPermission(request.user, item.leagueId, permission);
+  });
+  response.json(filtered.map(toPublicAccessRequest));
+});
+
+app.patch("/api/access-requests/:requestId", requireAuth, async (request, response) => {
+  const accessRequest = await getAccessRequestData(request.params.requestId);
+  if (!accessRequest) return response.status(404).json({ error: "Solicitud no encontrada." });
+  const permission = getAccessRequestPermission(accessRequest.requestedRole);
+  if (!permission || !hasAdminPermission(request.user, accessRequest.leagueId, permission)) {
+    return response.status(403).json({ error: "No puedes resolver esta solicitud." });
+  }
+  if (accessRequest.status !== "pending") {
+    return response.status(400).json({ error: "Esta solicitud ya fue resuelta." });
+  }
+
+  const action = String(request.body.action || "").trim();
+  const reviewNote = String(request.body.reviewNote || "").trim();
+  if (action === "reject") {
+    const rejected = await updateAccessRequestReviewData(accessRequest.id, {
+      status: "rejected",
+      reviewNote,
+      reviewedByUserId: request.user.id
+    });
+    await logAudit({
+      user: request.user,
+      leagueId: accessRequest.leagueId,
+      action: "access_request_reject",
+      entityType: "access_request",
+      entityId: accessRequest.id,
+      detail: `Rechazo solicitud de ${getAccessRequestRoleLabel(accessRequest.requestedRole)} ${accessRequest.email}`
+    });
+    return response.json({
+      request: toPublicAccessRequest(rejected),
+      requests: (await listAccessRequestsData({ leagueId: accessRequest.leagueId, status: "pending" })).map(toPublicAccessRequest)
+    });
+  }
+  if (action !== "approve") return response.status(400).json({ error: "Accion invalida." });
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === accessRequest.leagueId);
+  if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida." });
+  const team = accessRequest.requestedRole === "team_delegate"
+    ? (league.teams || []).find((item) => item.id === accessRequest.teamId)
+    : null;
+  if (accessRequest.requestedRole === "team_delegate" && (!team || ["deleted", "withdrawn"].includes(team.status))) {
+    return response.status(400).json({ error: "El equipo solicitado ya no esta disponible." });
+  }
+
+  const users = await listUsersData();
+  const existingUser = users.find((item) => String(item.email || "").toLowerCase() === String(accessRequest.email || "").toLowerCase() && item.status !== "deleted");
+  if (existingUser && existingUser.status !== "active") {
+    return response.status(409).json({ error: "Ese correo ya existe pero no esta activo. Resuelve primero esa cuenta." });
+  }
+
+  const userId = existingUser?.id || `user-${crypto.randomUUID()}`;
+  const accessId = `access-${accessRequest.requestedRole === "team_delegate" ? "delegate" : "referee"}-${crypto.randomUUID()}`;
+  let assignmentId = "";
+  try {
+    if (!existingUser) {
+      await createUserData({
+        id: userId,
+        leagueId: accessRequest.requestedRole === "team_delegate" ? accessRequest.leagueId : null,
+        name: accessRequest.name,
+        email: accessRequest.email,
+        phone: accessRequest.phone,
+        role: accessRequest.requestedRole,
+        status: "active",
+        passwordHash: accessRequest.passwordHash
+      });
+    }
+
+    if (accessRequest.requestedRole === "team_delegate") {
+      const existingDelegateAssignment = (await listTeamDelegatesData(accessRequest.leagueId)).find((item) => (
+        item.userId === userId &&
+        item.teamId === accessRequest.teamId &&
+        item.status !== "deleted"
+      ));
+      if (existingDelegateAssignment) {
+        return response.status(409).json({ error: "Este usuario ya es delegado de ese equipo." });
+      }
+      assignmentId = `delegate-${crypto.randomUUID()}`;
+      await createTeamDelegateAssignmentData({
+        id: assignmentId,
+        leagueId: accessRequest.leagueId,
+        teamId: accessRequest.teamId,
+        userId,
+        status: "active"
+      });
+      await createUserAccessData({
+        id: accessId,
+        userId,
+        leagueId: accessRequest.leagueId,
+        teamId: accessRequest.teamId,
+        role: "team_delegate",
+        status: "active"
+      });
+    } else {
+      const municipality = upperText(league.city || league.name || "");
+      const existingReferee = existingUser ? await getRefereeProfileData(userId) : null;
+      if (!existingReferee) await createRefereeProfileData({ userId, municipality });
+      await createUserAccessData({
+        id: accessId,
+        userId,
+        leagueId: accessRequest.leagueId,
+        role: "referee",
+        status: "active"
+      });
+    }
+  } catch (error) {
+    if (String(error?.message || "").toLowerCase().includes("unique")) {
+      return response.status(409).json({ error: "No se pudo aprobar: ya existe una cuenta o acceso con estos datos." });
+    }
+    throw error;
+  }
+
+  const approved = await updateAccessRequestReviewData(accessRequest.id, {
+    status: "approved",
+    reviewNote,
+    reviewedByUserId: request.user.id,
+    createdUserId: userId,
+    createdAccessId: accessId,
+    createdAssignmentId: assignmentId
+  });
+
+  await logAudit({
+    user: request.user,
+    leagueId: accessRequest.leagueId,
+    action: "access_request_approve",
+    entityType: "access_request",
+    entityId: accessRequest.id,
+    detail: `Aprobo solicitud de ${getAccessRequestRoleLabel(accessRequest.requestedRole)} ${accessRequest.email}`
+  });
+
+  response.json({
+    request: toPublicAccessRequest(approved),
+    requests: (await listAccessRequestsData({ leagueId: accessRequest.leagueId, status: "pending" })).map(toPublicAccessRequest),
+    delegates: accessRequest.requestedRole === "team_delegate" ? await listTeamDelegatesData(accessRequest.leagueId) : undefined,
+    referees: accessRequest.requestedRole === "referee" ? await listRefereesData(request.user.role === "super_admin" ? "" : upperText(league.city || league.name || "")) : undefined
+  });
 });
 
 app.get("/api/team-delegate-activations/:token", activationLimiter, async (request, response) => {
@@ -3278,6 +3576,46 @@ app.post("/api/referee-portal/matches/:matchId/suspend", requireAuth, async (req
     entityType: "match",
     entityId: context.match.id,
     detail: `Arbitro suspendio partido: ${reason}`
+  });
+
+  response.json({
+    session,
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
+});
+
+app.post("/api/referee-portal/matches/:matchId/cancel-live", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const session = await upsertMatchSessionData({
+    id: sessionId,
+    leagueId: context.league.id,
+    matchId: context.match.id,
+    refereeUserId: request.user.id,
+    captureMode: MATCH_CAPTURE_MODES.MANUAL,
+    status: "cancelled",
+    period: "",
+    clockState: request.body.clockState || {},
+    metadata: {
+      ...(request.body.metadata && typeof request.body.metadata === "object" ? request.body.metadata : {}),
+      cancelledByUserId: request.user.id,
+      cancelledAt: new Date().toISOString()
+    }
+  });
+  await updateMatchWorkflowData({
+    matchId: context.match.id,
+    workflowStatus: MATCH_WORKFLOW_STATUSES.SCHEDULED,
+    captureMode: MATCH_CAPTURE_MODES.MANUAL
+  });
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "referee_match_session_cancel_live",
+    entityType: "match",
+    entityId: context.match.id,
+    detail: "Arbitro cancelo captura en vivo para rehacer acta"
   });
 
   response.json({

@@ -56,10 +56,31 @@ function upperLines(items = []) {
   return items.map((item) => upperText(item)).filter(Boolean);
 }
 
+export function getEventCardDetail(event) {
+  return event?.cardDetail || event?.subtype || event?.metadata?.cardDetail || "";
+}
+
+export function isSecondYellowDismissal(event) {
+  return Boolean(event) && event.type === "yellow" && getEventCardDetail(event) === "double_yellow_second";
+}
+
+export function isDoubleYellowRedEvent(event) {
+  return Boolean(event) && event.type === "red" && ["double_yellow", "double_yellow_second"].includes(getEventCardDetail(event));
+}
+
+function hasCompanionDoubleYellowRedEvent(events, event) {
+  if (!isSecondYellowDismissal(event)) return false;
+  return (events || []).some((item) => (
+    isDoubleYellowRedEvent(item) &&
+    item.playerId === event.playerId &&
+    item.teamId === event.teamId
+  ));
+}
+
 export function isAccumulatingYellowCard(event) {
   if (!event || event.type !== "yellow") return false;
   if (event.countsForAccumulation === false || event.excludedFromAccumulation === true) return false;
-  return !["double_yellow_first", "double_yellow_second"].includes(event.cardDetail);
+  return !["double_yellow_first", "double_yellow_second"].includes(getEventCardDetail(event));
 }
 
 function venueIdFromName(name) {
@@ -329,7 +350,10 @@ export function normalizeStore(data) {
             eventTeamSide: event.eventTeamSide || event.event_team_side || "",
             secondaryPlayerId: event.secondaryPlayerId || event.secondary_player_id || "",
             assistPlayerId: event.assistPlayerId || event.assist_player_id || "",
-            subtype: event.subtype || "",
+            subtype: event.subtype || event.cardDetail || event.metadata?.cardDetail || "",
+            cardDetail: event.cardDetail || event.subtype || event.metadata?.cardDetail || "",
+            countsForAccumulation: event.countsForAccumulation ?? event.metadata?.countsForAccumulation,
+            sourceYellowCardMinutes: event.sourceYellowCardMinutes || event.metadata?.sourceYellowCardMinutes || [],
             suspensionMatches: Number(event.suspensionMatches || 0),
             suspensionIndefinite: Boolean(event.suspensionIndefinite),
             disciplinaryPending: Boolean(event.disciplinaryPending),
@@ -706,14 +730,14 @@ export function calculatePlayerStats(league) {
         row.yellowCards += 1;
         registerTeamActivity(row, event.teamId);
       }
-      if (event.type === "red") {
+      if (event.type === "red" || (isSecondYellowDismissal(event) && !hasCompanionDoubleYellowRedEvent(match.events, event))) {
         row.redCards += 1;
         if (event.suspensionIndefinite) {
           row.suspensionIndefinite = true;
         } else {
           row.suspensionMatches += Number(event.suspensionMatches || 1);
         }
-        row.reasons.push(event.reason || "Tarjeta roja");
+        row.reasons.push(event.reason || (isSecondYellowDismissal(event) || isDoubleYellowRedEvent(event) ? "Segunda amarilla" : "Tarjeta roja"));
         registerTeamActivity(row, event.teamId);
       }
     }
@@ -885,8 +909,16 @@ export function calculateYellowCardDiscipline(league) {
     ...sortMatches(finishedMatches(league)).flatMap((match) => [
       { movementType: "match-start", date: match.date, round: match.round, match },
       ...(match.events || [])
-        .filter(isAccumulatingYellowCard)
-        .map((event) => ({ movementType: "yellow", date: match.date, round: match.round, match, event }))
+        .flatMap((event) => {
+          const movements = [];
+          if (isAccumulatingYellowCard(event)) {
+            movements.push({ movementType: "yellow", date: match.date, round: match.round, match, event });
+          }
+          if (isSecondYellowDismissal(event)) {
+            movements.push({ movementType: "double-yellow-reset", date: match.date, round: match.round, match, event });
+          }
+          return movements;
+        })
     ]),
     ...(league.disciplineAdjustments || [])
       .filter((adjustment) => adjustment.status !== "revoked" && Number(adjustment.value || 0))
@@ -937,6 +969,22 @@ export function calculateYellowCardDiscipline(league) {
       if (state.yellowCards >= yellowLimit) {
         state.yellowCards = yellowLimit;
         state.suspensionOrigin = { date: match.date, round: match.round, matchId: match.id };
+      }
+      continue;
+    }
+
+    if (movement.movementType === "double-yellow-reset") {
+      const { event, match } = movement;
+      const player = getPlayer(league, event.playerId);
+      const isHistoricalRecordedEvent = isPlayerHistoricalOnly(player) && involvesTeam(match, event.teamId);
+      if (!player || !involvesTeam(match, event.teamId) || (!isHistoricalRecordedEvent && !isPlayerEligibleForTeam(league, event.playerId, event.teamId))) continue;
+
+      for (const item of states.values()) {
+        if (!item.playerIds.includes(event.playerId)) continue;
+        if ((match.competitionId || player.competitionId || "") && item.competitionId !== (match.competitionId || player.competitionId || "")) continue;
+        item.yellowCards = 0;
+        item.suspensionOrigin = null;
+        item.sources = [];
       }
       continue;
     }
@@ -1000,8 +1048,9 @@ export function calculateYellowCardDiscipline(league) {
 function movementOrder(type) {
   if (type === "match-start") return 0;
   if (type === "yellow") return 1;
-  if (type === "adjustment") return 2;
-  if (type === "reset") return 3;
+  if (type === "double-yellow-reset") return 2;
+  if (type === "adjustment") return 3;
+  if (type === "reset") return 4;
   return 9;
 }
 
@@ -1186,6 +1235,17 @@ export function calculateSuspensionNotices(league) {
 
   for (const match of finishedMatches(league)) {
     for (const event of match.events || []) {
+      if (isSecondYellowDismissal(event) && !hasCompanionDoubleYellowRedEvent(match.events, event)) {
+        notices.push(buildSuspensionNotice(league, {
+          playerId: event.playerId,
+          totalMatches: event.suspensionMatches || 1,
+          reason: event.reason || "Segunda amarilla",
+          type: "Expulsion",
+          origin: { date: match.date, round: match.round, matchId: match.id },
+          indefinite: false
+        }));
+        continue;
+      }
       if (event.type !== "red") continue;
       if (event.disciplinaryPending) {
         const hasCommissionResolution = (league.sanctions || []).some((sanction) => (

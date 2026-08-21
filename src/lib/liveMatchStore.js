@@ -89,6 +89,25 @@ export async function clearLiveMatchState(matchId) {
   await runStore(STATE_STORE, "readwrite", (store) => store.delete(matchId));
 }
 
+export async function clearLiveMatchOperations(matchId) {
+  if (!matchId) return;
+  const db = await openLiveDb();
+  if (!db) return;
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(OPERATIONS_STORE, "readwrite");
+    const store = tx.objectStore(OPERATIONS_STORE);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const rows = Array.isArray(request.result) ? request.result : [];
+      rows
+        .filter((item) => item.matchId === matchId && ["pending", "failed", "conflict"].includes(item.syncStatus))
+        .forEach((item) => store.delete(item.operationId));
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("No se pudo limpiar la cola local."));
+  });
+}
+
 export async function enqueueLiveOperation(operation) {
   if (!operation?.matchId || !operation?.operationType) return null;
   const payload = {

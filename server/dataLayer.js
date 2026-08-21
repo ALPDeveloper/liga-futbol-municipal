@@ -90,6 +90,33 @@ function normalizeRefereeRow(row) {
   };
 }
 
+function normalizeAccessRequestRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    leagueId: row.league_id ?? row.leagueId,
+    leagueName: row.league_name ?? row.leagueName ?? "",
+    teamId: row.team_id ?? row.teamId ?? "",
+    teamName: row.team_name ?? row.teamName ?? "",
+    competitionId: row.competition_id ?? row.competitionId ?? "",
+    competitionName: row.competition_name ?? row.competitionName ?? "",
+    requestedRole: row.requested_role ?? row.requestedRole,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    passwordHash: row.password_hash ?? row.passwordHash ?? "",
+    status: row.status || "pending",
+    reviewNote: row.review_note ?? row.reviewNote ?? "",
+    reviewedByUserId: row.reviewed_by_user_id ?? row.reviewedByUserId ?? "",
+    reviewedByName: row.reviewed_by_name ?? row.reviewedByName ?? "",
+    reviewedAt: normalizeDateTime(row.reviewed_at ?? row.reviewedAt),
+    createdUserId: row.created_user_id ?? row.createdUserId ?? "",
+    createdAccessId: row.created_access_id ?? row.createdAccessId ?? "",
+    createdAssignmentId: row.created_assignment_id ?? row.createdAssignmentId ?? "",
+    createdAt: normalizeDateTime(row.created_at ?? row.createdAt)
+  };
+}
+
 function parseJsonValue(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   if (typeof value === "object") return value;
@@ -587,6 +614,126 @@ export async function updateUserData(userId, payload) {
     `).run(payload.passwordHash, userId);
   }
   return getUserById(userId);
+}
+
+function accessRequestSelectSql() {
+  return `
+    SELECT ar.*,
+      l.name AS league_name,
+      t.name AS team_name,
+      t.competition_id,
+      c.name AS competition_name,
+      reviewer.name AS reviewed_by_name
+    FROM access_requests ar
+    JOIN leagues l ON l.id = ar.league_id
+    LEFT JOIN teams t ON t.id = ar.team_id
+    LEFT JOIN competitions c ON c.id = t.competition_id
+    LEFT JOIN users reviewer ON reviewer.id = ar.reviewed_by_user_id
+  `;
+}
+
+export async function createAccessRequestData({
+  id,
+  leagueId,
+  teamId = null,
+  requestedRole,
+  name,
+  email,
+  phone,
+  passwordHash
+}) {
+  const createdAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO access_requests (
+        id, league_id, team_id, requested_role, name, email, phone, password_hash, status, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
+    `, [id, leagueId, teamId || null, requestedRole, name, email, phone, passwordHash, createdAt]);
+    return getAccessRequestData(id);
+  }
+  db.prepare(`
+    INSERT INTO access_requests (
+      id, league_id, team_id, requested_role, name, email, phone, password_hash, status, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+  `).run(id, leagueId, teamId || null, requestedRole, name, email, phone, passwordHash, createdAt);
+  return getAccessRequestData(id);
+}
+
+export async function listAccessRequestsData({ leagueId = "", status = "pending", role = "" } = {}) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      ${accessRequestSelectSql()}
+      WHERE ($1::text = '' OR ar.league_id = $1)
+        AND ($2::text = 'all' OR ar.status = $2)
+        AND ($3::text = '' OR ar.requested_role = $3)
+      ORDER BY
+        CASE ar.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+        ar.created_at DESC
+    `, [leagueId || "", status || "pending", role || ""]);
+    return rows.map(normalizeAccessRequestRow);
+  }
+  return db.prepare(`
+    ${accessRequestSelectSql()}
+    WHERE (? = '' OR ar.league_id = ?)
+      AND (? = 'all' OR ar.status = ?)
+      AND (? = '' OR ar.requested_role = ?)
+    ORDER BY
+      CASE ar.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+      datetime(ar.created_at) DESC
+  `).all(leagueId || "", leagueId || "", status || "pending", status || "pending", role || "", role || "").map(normalizeAccessRequestRow);
+}
+
+export async function getAccessRequestData(requestId) {
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      ${accessRequestSelectSql()}
+      WHERE ar.id = $1
+    `, [requestId]);
+    return normalizeAccessRequestRow(rows[0]);
+  }
+  return normalizeAccessRequestRow(db.prepare(`
+    ${accessRequestSelectSql()}
+    WHERE ar.id = ?
+  `).get(requestId));
+}
+
+export async function updateAccessRequestReviewData(requestId, {
+  status,
+  reviewNote = "",
+  reviewedByUserId = "",
+  createdUserId = "",
+  createdAccessId = "",
+  createdAssignmentId = ""
+}) {
+  const reviewedAt = new Date().toISOString();
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE access_requests
+      SET status = $1,
+          review_note = $2,
+          reviewed_by_user_id = $3,
+          reviewed_at = $4,
+          created_user_id = $5,
+          created_access_id = $6,
+          created_assignment_id = $7
+      WHERE id = $8
+    `, [status, reviewNote, reviewedByUserId || null, reviewedAt, createdUserId || null, createdAccessId || null, createdAssignmentId || null, requestId]);
+    return getAccessRequestData(requestId);
+  }
+  db.prepare(`
+    UPDATE access_requests
+    SET status = ?,
+        review_note = ?,
+        reviewed_by_user_id = ?,
+        reviewed_at = ?,
+        created_user_id = ?,
+        created_access_id = ?,
+        created_assignment_id = ?
+    WHERE id = ?
+  `).run(status, reviewNote, reviewedByUserId || null, reviewedAt, createdUserId || null, createdAccessId || null, createdAssignmentId || null, requestId);
+  return getAccessRequestData(requestId);
 }
 
 export async function listTeamDelegatesData(leagueId = "") {

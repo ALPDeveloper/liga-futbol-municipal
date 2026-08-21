@@ -22,6 +22,10 @@ const PLAYER_POSITION_LABELS = {
   Mediocampista: "Medios",
   Delantero: "Delanteros"
 };
+const PLAYER_POSITION_ORDER = PLAYER_POSITION_OPTIONS.reduce((order, position, index) => {
+  order[position] = index;
+  return order;
+}, {});
 
 function getTeamInitials(name) {
   const words = String(name || "EQ")
@@ -44,6 +48,34 @@ function formatDate(value) {
   const date = new Date(`${value}T12:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("es-MX", { weekday: "short", day: "2-digit", month: "short" }).format(date);
+}
+
+function getMatchTimestamp(match, fallbackTime = "12:00") {
+  if (!match?.date) return Number.POSITIVE_INFINITY;
+  const time = match.time || fallbackTime;
+  const timestamp = new Date(`${match.date}T${time}:00`).getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
+}
+
+function sortDelegatePendingMatches(items, now = new Date()) {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const todayTimestamp = today.getTime();
+  return [...items].sort((a, b) => {
+    const aTimestamp = getMatchTimestamp(a);
+    const bTimestamp = getMatchTimestamp(b);
+    const aFuture = aTimestamp >= todayTimestamp;
+    const bFuture = bTimestamp >= todayTimestamp;
+    if (aFuture !== bFuture) return aFuture ? -1 : 1;
+    if (aFuture) return aTimestamp - bTimestamp;
+    return bTimestamp - aTimestamp;
+  });
+}
+
+function getDelegateMatchOpponentLine(match) {
+  if (!match) return "Rival por definir";
+  const role = getDelegateMatchRoleLabel(match);
+  return `${match.opponentName || "Rival"} | ${role}`;
 }
 
 function getDelegateMatchStatus(match) {
@@ -415,8 +447,6 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const [error, setError] = useState("");
   const [photoResetKey, setPhotoResetKey] = useState(0);
   const [playerQuery, setPlayerQuery] = useState("");
-  const [positionFilter, setPositionFilter] = useState("");
-  const [rosterFiltersOpen, setRosterFiltersOpen] = useState(true);
   const [editingPlayerId, setEditingPlayerId] = useState("");
   const [busyPlayerId, setBusyPlayerId] = useState("");
   const [busyMatchId, setBusyMatchId] = useState("");
@@ -436,36 +466,65 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     const query = normalizeSearch(playerQuery);
     return rosterPlayers.filter((player) => {
       const matchesQuery = !query || normalizeSearch(`${player.name} ${player.number || ""} ${player.originTeamName || ""} ${player.isAffiliate ? "afiliado" : "propio"}`).includes(query);
-      const playerPosition = getPlayerPositionOptionValue(player.position);
-      const matchesPosition = !positionFilter || playerPosition === positionFilter;
-      return matchesQuery && matchesPosition;
+      return matchesQuery;
     });
-  }, [playerQuery, positionFilter, rosterPlayers]);
+  }, [playerQuery, rosterPlayers]);
   const visibleRosterPlayers = useMemo(() => {
     return [...filteredPlayers].sort((a, b) => {
+      const positionA = PLAYER_POSITION_ORDER[getPlayerPositionOptionValue(a.position)] ?? 99;
+      const positionB = PLAYER_POSITION_ORDER[getPlayerPositionOptionValue(b.position)] ?? 99;
+      if (positionA !== positionB) return positionA - positionB;
       const numberA = Number(a.number || 9999);
       const numberB = Number(b.number || 9999);
       if (numberA !== numberB) return numberA - numberB;
       return String(a.name || "").localeCompare(String(b.name || ""), "es");
     });
   }, [filteredPlayers]);
+  const groupedRosterPlayers = useMemo(() => (
+    PLAYER_POSITION_OPTIONS
+      .map((position) => ({
+        position,
+        label: PLAYER_POSITION_LABELS[position],
+        players: visibleRosterPlayers.filter((player) => getPlayerPositionOptionValue(player.position) === position)
+      }))
+      .filter((group) => group.players.length > 0)
+  ), [visibleRosterPlayers]);
+  const rosterSearchSuggestions = useMemo(() => {
+    const query = normalizeSearch(playerQuery);
+    if (!query) return [];
+    return visibleRosterPlayers
+      .filter((player) => normalizeSearch(`${player.name} ${player.number || ""} ${player.originTeamName || ""}`).includes(query))
+      .slice(0, 5);
+  }, [playerQuery, visibleRosterPlayers]);
+  const portalMatches = useMemo(() => {
+    if (!context?.competitionId) return matches;
+    return matches.filter((match) => match.competitionId === context.competitionId);
+  }, [context?.competitionId, matches]);
   const selectedMatch = useMemo(
-    () => matches.find((match) => match.id === selectedMatchId) || matches[0] || null,
-    [matches, selectedMatchId]
+    () => portalMatches.find((match) => match.id === selectedMatchId) || portalMatches[0] || null,
+    [portalMatches, selectedMatchId]
   );
   const upcomingMatchItems = useMemo(
-    () => matches.filter((match) => match.status !== "finished" && match.status !== "walkover" && match.reportStatus !== "published"),
-    [matches]
+    () => portalMatches.filter((match) => match.status !== "finished" && match.status !== "walkover" && match.reportStatus !== "published"),
+    [portalMatches]
   );
   const historicalMatchItems = useMemo(
-    () => matches.filter((match) => match.status === "finished" || match.status === "walkover" || match.reportStatus === "published" || hasDelegateActaAvailable(match)),
-    [matches]
+    () => portalMatches.filter((match) => match.status === "finished" || match.status === "walkover" || match.reportStatus === "published" || hasDelegateActaAvailable(match)),
+    [portalMatches]
+  );
+  const lineupPendingMatches = useMemo(
+    () => sortDelegatePendingMatches(portalMatches.filter((match) => (
+      isDelegateMatchOperational(match) &&
+      !hasDelegateActaAvailable(match) &&
+      !match.participationSubmitted
+    ))),
+    [portalMatches]
   );
   const visibleMatchItems = delegateMatchTab === "upcoming"
     ? upcomingMatchItems
     : delegateMatchTab === "history"
     ? historicalMatchItems
-    : matches;
+    : portalMatches;
   const groupedMatches = useMemo(() => {
     const sortedMatches = [...visibleMatchItems].sort((a, b) => (
       String(a.date || "9999-12-31").localeCompare(String(b.date || "9999-12-31")) ||
@@ -520,12 +579,17 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   }, [authToken, currentUser?.id]);
 
   useEffect(() => {
-    if (!matches.length) {
+    if (!portalMatches.length) {
       setSelectedMatchId("");
       return;
     }
-    setSelectedMatchId((current) => matches.some((match) => match.id === current) ? current : matches[0].id);
-  }, [matches]);
+    setSelectedMatchId((current) => portalMatches.some((match) => match.id === current) ? current : portalMatches[0].id);
+  }, [portalMatches]);
+
+  useEffect(() => {
+    if (activeView !== "lineup" || !lineupPendingMatches.length) return;
+    setSelectedMatchId((current) => lineupPendingMatches.some((match) => match.id === current) ? current : lineupPendingMatches[0].id);
+  }, [activeView, lineupPendingMatches]);
 
   useEffect(() => {
     if (!context || activeView !== "newPlayer" || canManageRoster) return;
@@ -536,7 +600,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
 
   useEffect(() => {
     scrollDelegatePortalToTop();
-  }, [activeView, selectedMatchId]);
+  }, [activeView]);
 
   function applyPortalPayload(payload) {
     const nextEligiblePlayers = payload.eligiblePlayers || [];
@@ -716,13 +780,11 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     );
   }
 
-  const operationalUpcomingMatches = upcomingMatchItems.filter(isDelegateMatchOperational);
-  const nextMatch = operationalUpcomingMatches[0] || upcomingMatchItems[0] || matches[0] || null;
-  const nextLineupMatch = operationalUpcomingMatches.find((match) => !hasDelegateActaAvailable(match) && !match.participationSubmitted) ||
-    operationalUpcomingMatches.find((match) => !hasDelegateActaAvailable(match)) ||
-    null;
-  const submittedRosters = matches.filter((match) => match.participationSubmitted).length;
-  const openRosterMatches = matches.filter((match) => !match.participationSubmitted).length;
+  const operationalUpcomingMatches = sortDelegatePendingMatches(upcomingMatchItems.filter(isDelegateMatchOperational));
+  const nextLineupMatch = lineupPendingMatches[0] || null;
+  const nextMatch = nextLineupMatch || operationalUpcomingMatches[0] || upcomingMatchItems[0] || portalMatches[0] || null;
+  const submittedRosters = portalMatches.filter((match) => match.participationSubmitted).length;
+  const openRosterMatches = lineupPendingMatches.length;
   const positionCounts = PLAYER_POSITION_OPTIONS.map((position) => ({
     position,
     count: rosterPlayers.filter((player) => getPlayerPositionOptionValue(player.position) === position).length
@@ -731,6 +793,9 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const affiliateRosterCount = rosterPlayers.filter((player) => player.isAffiliate).length;
   const nextMatchStatus = getDelegateMatchStatus(nextMatch);
   const activeMatch = selectedMatch || nextMatch;
+  const secondaryLineupMatches = activeMatch
+    ? lineupPendingMatches.filter((match) => match.id !== activeMatch.id)
+    : lineupPendingMatches.slice(1);
   const activeMatchStatus = getDelegateMatchStatus(activeMatch);
   const activeScore = getTeamScore(activeMatch);
   const activeHomeTeamName = activeMatch ? (activeMatch.isHome ? context.teamName : activeMatch.opponentName) : "";
@@ -753,7 +818,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const activeLineupAvailable = Boolean(
     activeMatch &&
     !activeMatch.participationSubmitted &&
-    (isDelegateMatchOperational(activeMatch) || hasDelegateActaAvailable(activeMatch))
+    isDelegateMatchOperational(activeMatch) &&
+    !hasDelegateActaAvailable(activeMatch)
   );
   const activeDraft = activeMatch
     ? rosterDrafts[activeMatch.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" }
@@ -809,8 +875,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     setActiveView(match.participationSubmitted ? "acta" : "lineup");
   };
   const openDelegateNextAction = () => {
-    if (nextAction.target === "lineup" && nextMatch) {
-      setSelectedMatchId(nextMatch.id);
+    if (nextAction.target === "lineup" && nextLineupMatch) {
+      setSelectedMatchId(nextLineupMatch.id);
       setActiveView("lineup");
       return;
     }
@@ -988,7 +1054,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                   <PortalNavIcon type="history" /><span>Historial</span><b>{historicalMatchItems.length}</b>
                 </button>
                 <button className={delegateMatchTab === "all" ? "active" : ""} type="button" onClick={() => setDelegateMatchTab("all")}>
-                  <RosterIcon type="filters" /><span>Todos</span><b>{matches.length}</b>
+                  <RosterIcon type="filters" /><span>Todos</span><b>{portalMatches.length}</b>
                 </button>
               </div>
               <div className="delegate-match-board-list">
@@ -1243,6 +1309,31 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                       <span><RosterIcon type="all" />Jornada {activeMatch.round || "-"}</span>
                     </div>
                   </article>
+                  {secondaryLineupMatches.length > 0 && (
+                    <section className="delegate-lineup-pending-queue" aria-label="Partidos pendientes compactados">
+                      <div className="delegate-lineup-pending-head">
+                        <div>
+                          <strong>Otros pendientes</strong>
+                          <small>El principal queda abierto; al enviar participantes se retira de esta lista.</small>
+                        </div>
+                        <span>{secondaryLineupMatches.length}</span>
+                      </div>
+                      <div className="delegate-lineup-pending-list">
+                        {secondaryLineupMatches.map((match) => (
+                          <button
+                            className={selectedMatchId === match.id ? "active" : ""}
+                            key={match.id}
+                            type="button"
+                            onClick={() => setSelectedMatchId(match.id)}
+                          >
+                            <span>J{match.round || "-"}</span>
+                            <strong>{match.opponentName || "Rival"}</strong>
+                            <small>{formatDate(match.date)} · {match.time || "--:--"} · {getDelegateMatchOpponentLine(match)}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
                   <div className="delegate-lineup-summary">
                     <span><b>{activeDraft.playerIds?.length || 0}</b> Participantes</span>
                     <span><b>{activeDraft.captainPlayerId ? 1 : 0}</b> Capitan</span>
@@ -1395,65 +1486,73 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                     <input
                       value={playerQuery}
                       onChange={(event) => setPlayerQuery(event.target.value)}
-                      placeholder="Buscar jugador..."
+                      placeholder="Buscar nombre, numero o equipo origen"
                     />
+                    {playerQuery && (
+                      <button className="delegate-search-clear" type="button" aria-label="Limpiar busqueda" onClick={() => setPlayerQuery("")}>
+                        ×
+                      </button>
+                    )}
                   </label>
-                  <button
-                    className={`delegate-filter-button ${rosterFiltersOpen ? "active" : ""}`}
-                    type="button"
-                    aria-expanded={rosterFiltersOpen}
-                    onClick={() => setRosterFiltersOpen((current) => !current)}
-                  >
-                    <span aria-hidden="true"><RosterIcon type="filters" /></span>
-                    Filtros
-                  </button>
                 </div>
-                <div className={`delegate-position-tabs ${rosterFiltersOpen ? "open" : ""}`} role="group" aria-label="Filtrar por posicion">
-                  <button className={!positionFilter ? "active" : ""} type="button" onClick={() => setPositionFilter("")}><span aria-hidden="true"><RosterIcon type="all" /></span>Todos</button>
-                  {PLAYER_POSITION_OPTIONS.map((position) => (
-                    <button className={positionFilter === position ? "active" : ""} key={position} type="button" onClick={() => setPositionFilter(position)}>
-                      <span aria-hidden="true"><RosterIcon type={position === "Arquero" ? "goalkeeper" : position === "Defensor" ? "defense" : position === "Mediocampista" ? "midfield" : "forward"} /></span>{PLAYER_POSITION_LABELS[position]}
-                    </button>
-                  ))}
-                </div>
+                {rosterSearchSuggestions.length > 0 && (
+                  <div className="delegate-roster-suggestions" role="listbox" aria-label="Coincidencias de jugadores">
+                    {rosterSearchSuggestions.map((player) => (
+                      <button type="button" key={player.id} onClick={() => setPlayerQuery(player.name)}>
+                        <b>#{player.number || "-"}</b>
+                        <span>{player.name}</span>
+                        <small>{getPlayerPositionOptionValue(player.position)}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="delegate-roster-list-head">
                 <strong>Jugadores ({filteredPlayers.length})</strong>
-                <span>Ordenar: Numero</span>
+                <span>Posicion y numero</span>
               </div>
               <div className="team-portal-player-list delegate-roster-list">
-                {visibleRosterPlayers.map((player) => {
-                  const isEditing = editingPlayerId === player.id;
-                  const playerStatus = getDelegatePlayerStatus(player);
-                  return (
-                    <article className={isEditing ? "editing" : ""} key={player.id}>
-                      <span className="player-avatar team-portal-avatar">
-                        {player.photoAuthorized && player.photoUrl ? <img alt="" loading="lazy" src={player.photoUrl} /> : null}
-                        <span>{getPlayerPhotoInitials(player.name)}</span>
-                      </span>
-                      <b className="delegate-player-number">{player.number || "-"}</b>
-                      <div>
-                        <strong>{player.name}</strong>
-                        <small>{player.isAffiliate ? `AFILIADO | ORIGEN: ${player.originTeamName || "EQUIPO ORIGEN"}` : getPlayerPositionOptionValue(player.position).toUpperCase()}</small>
-                        <PlayoffProgress eligibility={player.playoffEligibility} />
-                      </div>
-                      <span className={`delegate-player-status ${playerStatus.className}`}><i />{playerStatus.label}</span>
-                      <button
-                        className="delegate-player-edit-button"
-                        type="button"
-                        aria-label={`${player.isAffiliate || !context.canManageRoster ? "Editar numero" : "Editar"} ${player.name}`}
-                        onClick={() => {
-                          setEditingPlayerId(player.id);
-                          setActiveView("player");
-                        }}
-                      >
-                        ›
-                      </button>
-                    </article>
-                  );
-                })}
+                {groupedRosterPlayers.map((group) => (
+                  <section className="delegate-roster-position-group" key={group.position}>
+                    <header>
+                      <span><RosterIcon type={group.position === "Arquero" ? "goalkeeper" : group.position === "Defensor" ? "defense" : group.position === "Mediocampista" ? "midfield" : "forward"} /></span>
+                      <strong>{group.label}</strong>
+                      <small>{group.players.length}</small>
+                    </header>
+                    {group.players.map((player) => {
+                      const isEditing = editingPlayerId === player.id;
+                      const playerStatus = getDelegatePlayerStatus(player);
+                      return (
+                        <article className={isEditing ? "editing" : ""} key={player.id}>
+                          <span className="player-avatar team-portal-avatar">
+                            {player.photoAuthorized && player.photoUrl ? <img alt="" loading="lazy" src={player.photoUrl} /> : null}
+                            <span>{getPlayerPhotoInitials(player.name)}</span>
+                          </span>
+                          <b className="delegate-player-number">{player.number || "-"}</b>
+                          <div>
+                            <strong>{player.name}</strong>
+                            <small>{player.isAffiliate ? `AFILIADO | ORIGEN: ${player.originTeamName || "EQUIPO ORIGEN"}` : getPlayerPositionOptionValue(player.position).toUpperCase()}</small>
+                            <PlayoffProgress eligibility={player.playoffEligibility} />
+                          </div>
+                          <span className={`delegate-player-status ${playerStatus.className}`}><i />{playerStatus.label}</span>
+                          <button
+                            className="delegate-player-edit-button"
+                            type="button"
+                            aria-label={`${player.isAffiliate || !context.canManageRoster ? "Editar numero" : "Editar"} ${player.name}`}
+                            onClick={() => {
+                              setEditingPlayerId(player.id);
+                              setActiveView("player");
+                            }}
+                          >
+                            ›
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </section>
+                ))}
                 {!rosterPlayers.length && <p className="empty">Aun no hay jugadores registrados o afiliados en este equipo.</p>}
-                {rosterPlayers.length > 0 && !filteredPlayers.length && <p className="empty">No hay jugadores con esos filtros.</p>}
+                {rosterPlayers.length > 0 && !filteredPlayers.length && <p className="empty">No hay jugadores con esa busqueda.</p>}
               </div>
             </div>
           )}
@@ -1596,6 +1695,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                 <PlayerPhotoUploader
                   key={teamLogoResetKey}
                   addLabel="Agregar escudo"
+                  authorizationHint="Para subir escudo, primero marca la autorizacion del equipo."
+                  authorizeFirstLabel="Autoriza escudo primero"
                   authorizedLabel="Escudo autorizado"
                   changeLabel="Cambiar escudo"
                   defaultAuthorized={Boolean(context.teamLogoUrl)}

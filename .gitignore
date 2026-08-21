@@ -12,3 +12,5 @@ scripts/prepare-local-internal-test-league.js
 .env.local
 .DS_Store
 npm-debug.log*
+browser-*.json
+render-*

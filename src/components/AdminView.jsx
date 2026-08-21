@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
 import { createBackup, downloadBackup, fetchBackups, verifyBackup } from "../lib/backupApi.js";
-import { calculatePlayerAppearanceEligibility, calculateStandings, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, scopeLeagueToCompetition } from "../lib/domain.js";
+import { calculatePlayerAppearanceEligibility, calculateStandings, calculateSuspensionNotices, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, scopeLeagueToCompetition, upperText } from "../lib/domain.js";
 import { IMAGE_BANNER_MAX_SIZE, IMAGE_LOGO_MAX_SIZE, IMAGE_UPLOAD_ACCEPT, optimizeWebImageFile } from "../lib/imageProcessing.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
 import { createUser, deleteUser, disableUser, fetchUsers, resendUserInvitation, updateUser } from "../lib/userApi.js";
+import { fetchAccessRequests, reviewAccessRequest } from "../lib/accessRequestApi.js";
 import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamDelegateInvitation, updateTeamDelegate, updateTeamRosterPermission, updateTeamRosterPermissionsBulk } from "../lib/teamDelegateApi.js";
 import { createReferee, deleteReferee, fetchFinalizedMatchReports, fetchReferees, fetchRefereeMatchSheets, publishFinalizedMatchReport, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
@@ -40,7 +41,7 @@ const ADMIN_SHEET_EVENT_ACTIONS = [
   { type: "goal", label: "Gol", icon: "⚽", className: "event-goal" },
   { type: "yellow", label: "Amarilla", icon: "🟨", className: "event-yellow" },
   { type: "red", label: "Roja", icon: "🟥", className: "event-red" },
-  { type: "own_goal", label: "Autogol", icon: "🥅", className: "event-own-goal" },
+  { type: "own_goal", label: "Autogol", icon: "⚽", className: "event-own-goal" },
   { type: "injury_note", label: "Lesion", icon: "✚", className: "event-injury" },
   { type: "other_note", label: "Otro", icon: "⋯", className: "event-other" }
 ];
@@ -48,6 +49,16 @@ const ADMIN_SHEET_OBSERVATION_CHIPS = ["Juego limpio", "Lluvia", "Retraso", "Sus
 
 function needsAdminMatchReportAttention(report) {
   return report?.status === "finalized" || report?.payload?.signatureIssue?.status === "pending_admin_attention";
+}
+
+function getAdminInitials(name) {
+  const words = String(name || "US")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "US";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
 }
 
 function AdminIcon({ type = "home" }) {
@@ -342,7 +353,22 @@ function LeagueAdmin({
   const identity = league.identity || DEFAULT_IDENTITY;
   const currentCompetitionId = getDefaultCompetitionId(league);
   const currentCompetition = getCompetition(league, currentCompetitionId);
-  const currentCompetitionLeague = scopeLeagueToCompetition(league, currentCompetitionId);
+  const activeCompetitionIds = new Set((league.competitions || [])
+    .filter((competition) => competition.status !== "archived")
+    .map((competition) => competition.id));
+  const activeCompetitionCount = activeCompetitionIds.size || (league.competitions || []).length;
+  const adminActiveLeague = {
+    ...league,
+    teams: activeCompetitionIds.size
+      ? (league.teams || []).filter((team) => !team.competitionId || activeCompetitionIds.has(team.competitionId))
+      : (league.teams || []),
+    players: activeCompetitionIds.size
+      ? (league.players || []).filter((player) => !player.competitionId || activeCompetitionIds.has(player.competitionId))
+      : (league.players || []),
+    matches: activeCompetitionIds.size
+      ? (league.matches || []).filter((match) => !match.competitionId || activeCompetitionIds.has(match.competitionId))
+      : (league.matches || [])
+  };
   const [activeSection, setActiveSection] = useState("home");
   const [identityNotice, setIdentityNotice] = useState("");
   const activeRole = selectedAccess?.role || currentUser?.role;
@@ -355,12 +381,12 @@ function LeagueAdmin({
       requiredPermissions.some((permission) => accessPermissions.has(permission)))
   );
   const sections = [
-    { id: "capture", label: "Captura", shortLabel: "Captura", icon: "capture", group: "Operacion", permissions: ["matches", "teams", "players"], description: "Alta rapida de equipos, jugadores, partidos y calendarios.", metric: `${currentCompetitionLeague.matches.filter((match) => match.status !== "finished" && match.status !== "walkover").length} activos` },
-    { id: "lists", label: "Partidos y datos", shortLabel: "Partidos", icon: "matches", group: "Operacion", permissions: ["matches", "teams", "players", "read_only"], description: "Edita calendario, marcadores, equipos y jugadores existentes.", metric: `${currentCompetitionLeague.matches.length} partidos` },
-    { id: "sheet", label: "Actas", shortLabel: "Actas", icon: "sheet", group: "Operacion", permissions: ["match_sheets"], description: "Captura actas administrativas y publica resultados oficiales.", metric: `${currentCompetitionLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover").length} capturadas` },
+    { id: "capture", label: "Captura", shortLabel: "Captura", icon: "capture", group: "Operacion", permissions: ["matches", "teams", "players"], description: "Alta rapida de equipos, jugadores, partidos y calendarios.", metric: `${adminActiveLeague.matches.filter((match) => match.status !== "finished" && match.status !== "walkover").length} activos` },
+    { id: "lists", label: "Partidos y datos", shortLabel: "Partidos", icon: "matches", group: "Operacion", permissions: ["matches", "teams", "players", "read_only"], description: "Edita calendario, marcadores, equipos y jugadores existentes.", metric: `${adminActiveLeague.matches.length} partidos` },
+    { id: "sheet", label: "Actas", shortLabel: "Actas", icon: "sheet", group: "Operacion", permissions: ["match_sheets"], description: "Captura actas administrativas y publica resultados oficiales.", metric: `${adminActiveLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover").length} capturadas` },
     { id: "delegates", label: "Delegados", shortLabel: "Delegados", icon: "delegates", group: "Usuarios", permissions: ["delegates"], description: "Gestiona accesos de delegados y permisos de plantilla.", metric: "Equipos" },
     { id: "referees", label: "Arbitros", shortLabel: "Arbitros", icon: "referees", group: "Usuarios", permissions: ["referees"], description: "Crea arbitros, asignaciones y seguimiento de actas digitales.", metric: league.city || "Municipio" },
-    { id: "squads", label: "Plantillas", shortLabel: "Plantillas", icon: "squads", group: "Equipos", permissions: ["players", "teams", "read_only"], description: "Consulta plantillas por equipo en una vista limpia.", metric: `${currentCompetitionLeague.players.length} jugadores` },
+    { id: "squads", label: "Plantillas", shortLabel: "Plantillas", icon: "squads", group: "Equipos", permissions: ["players", "teams", "read_only"], description: "Consulta plantillas por equipo en una vista limpia.", metric: `${adminActiveLeague.players.length} jugadores` },
     { id: "affiliations", label: "Afiliaciones", shortLabel: "Afiliaciones", icon: "affiliations", group: "Equipos", permissions: ["players", "teams"], description: "Relaciona equipos, fusiona duplicados y controla afiliados.", metric: `${league.teamAffiliations?.length || 0} activas` },
     { id: "venues", label: "Canchas", shortLabel: "Canchas", icon: "venues", group: "Calendario", permissions: ["settings", "calendar"], description: "Administra sedes y disponibilidad para programación.", metric: `${league.venues?.length || 0} canchas` },
     { id: "tournaments", label: "Torneos", shortLabel: "Torneos", icon: "tournaments", group: "Configuracion", permissions: ["settings"], description: "Controla categorias, temporadas e historicos.", metric: `${league.competitions?.length || 0} torneos` },
@@ -428,9 +454,9 @@ function LeagueAdmin({
     return () => document.documentElement.classList.remove("operation-data-active");
   }, [activeSection]);
 
-  const activeScheduledMatches = currentCompetitionLeague.matches.filter((match) => isActiveScheduleStatus(match.status));
-  const finishedMatches = currentCompetitionLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover");
-  const pendingSheets = currentCompetitionLeague.matches.filter((match) => (
+  const activeScheduledMatches = adminActiveLeague.matches.filter((match) => isActiveScheduleStatus(match.status));
+  const finishedMatches = adminActiveLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover");
+  const pendingSheets = adminActiveLeague.matches.filter((match) => (
     match.status === "finished" || match.status === "walkover"
   ) && !match.sheetPublished).length;
   const hiddenCompetitionCount = (league.competitions || []).filter((competition) => competition.publicVisibility === "hidden" || competition.hidden).length;
@@ -447,7 +473,7 @@ function LeagueAdmin({
           <div>
             <span>{activeSection === "home" ? "Admin de liga" : activeWorkspace?.label || activeSectionMeta?.group || "Modulo"}</span>
             <h2>{activeSection === "home" ? league.name : activeWorkspace?.shortLabel || activeSectionMeta?.label}</h2>
-            <small>{activeWorkspace?.description || activeSectionMeta?.description || `${currentCompetition?.name || "TORNEO"} · ${currentCompetition?.season || league.season}`}</small>
+            <small>{activeWorkspace?.description || activeSectionMeta?.description || `${activeCompetitionCount} torneo(s) activo(s) · ${currentCompetition?.season || league.season}`}</small>
           </div>
         </div>
         {activeRole === "super_admin" && onOpenSuperAdmin && (
@@ -458,7 +484,7 @@ function LeagueAdmin({
         )}
         <div className="admin-league-status">
           <span>{league.status === "active" ? "Liga activa" : getMatchStatusLabel(league.status)}</span>
-          <strong>{currentCompetitionLeague.teams.length} equipos</strong>
+          <strong>{adminActiveLeague.teams.length} equipos</strong>
         </div>
       </header>
 
@@ -499,17 +525,17 @@ function LeagueAdmin({
             <div className="admin-operation-head">
               <span>Centro operativo</span>
               <strong>{league.name}</strong>
-              <small>{currentCompetition?.name || "TORNEO"} · {currentCompetition?.season || league.season}</small>
+              <small>{activeCompetitionCount} torneo(s) activo(s) · {currentCompetition?.season || league.season}</small>
             </div>
             <div className="admin-operation-overview" aria-label="Resumen operativo de la liga">
               <div>
                 <span><AdminIcon type="teams" /></span>
-                <strong>{currentCompetitionLeague.teams.length}</strong>
+                <strong>{adminActiveLeague.teams.length}</strong>
                 <small>Equipos activos</small>
               </div>
               <div>
                 <span><AdminIcon type="player" /></span>
-                <strong>{currentCompetitionLeague.players.length}</strong>
+                <strong>{adminActiveLeague.players.length}</strong>
                 <small>Jugadores registrados</small>
               </div>
               <div>
@@ -539,8 +565,8 @@ function LeagueAdmin({
           </article>
 
           <div className="admin-league-summary" aria-label="Resumen administrativo">
-            <article><span>Equipos</span><strong>{currentCompetitionLeague.teams.length}</strong></article>
-            <article><span>Jugadores</span><strong>{currentCompetitionLeague.players.length}</strong></article>
+            <article><span>Equipos</span><strong>{adminActiveLeague.teams.length}</strong></article>
+            <article><span>Jugadores</span><strong>{adminActiveLeague.players.length}</strong></article>
             <article><span>Programados</span><strong>{activeScheduledMatches.length}</strong></article>
             <article><span>Finalizados</span><strong>{finishedMatches.length}</strong></article>
           </div>
@@ -584,7 +610,7 @@ function LeagueAdmin({
       )}
 
       {isModuleScreen && (
-        <section className={`admin-module-screen ${activeSection === "lists" ? "operation-data-module-screen" : ""}`}>
+        <section className={`admin-module-screen ${activeSection === "lists" ? "operation-data-module-screen" : ""} ${activeSectionMeta?.group === "Usuarios" ? "users-module-screen" : ""}`}>
           <div className="admin-section-tabs compact" aria-label="Cambiar modulo">
             {(visibleWorkspaces.find((item) => item.group === activeSectionMeta?.group)?.sections || visibleSections).map((section) => (
               <button
@@ -1063,6 +1089,98 @@ function SquadsPanel({ league }) {
   );
 }
 
+function AccessRequestsInbox({ authToken, league, onResolved, role }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
+  const [error, setError] = useState("");
+  const roleLabel = role === "team_delegate" ? "delegados" : "arbitros";
+
+  async function reload() {
+    setLoading(true);
+    try {
+      setRequests(await fetchAccessRequests(authToken, { leagueId: league.id, role, status: "pending" }));
+      setError("");
+    } catch (loadError) {
+      setError(loadError.message || "No se pudieron cargar las solicitudes.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    reload();
+  }, [authToken, league.id, role]);
+
+  async function resolveRequest(requestItem, action) {
+    const isApprove = action === "approve";
+    let reviewNote = "";
+    if (isApprove) {
+      const detail = requestItem.requestedRole === "team_delegate"
+        ? `${requestItem.name} como delegado de ${requestItem.teamName}`
+        : `${requestItem.name} como arbitro`;
+      if (!window.confirm(`¿Aprobar solicitud de ${detail}?\n\nAl aprobar, esta cuenta podra iniciar sesion con los permisos correspondientes.`)) return;
+    } else {
+      const typedNote = window.prompt(`Motivo para rechazar la solicitud de ${requestItem.name}:`, "");
+      if (typedNote === null) return;
+      reviewNote = typedNote.trim();
+    }
+
+    setBusyId(`${action}-${requestItem.id}`);
+    try {
+      const response = await reviewAccessRequest(authToken, requestItem.id, { action, reviewNote });
+      setRequests(response.requests || []);
+      setError("");
+      onResolved?.(response);
+    } catch (reviewError) {
+      setError(reviewError.message || "No se pudo resolver la solicitud.");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  return (
+    <section className={`access-request-inbox ${!loading && !requests.length ? "is-empty" : ""}`} aria-label={`Solicitudes de ${roleLabel}`}>
+      <div className="access-request-inbox-head">
+        <div>
+          <span>Solicitudes</span>
+          <strong>{requests.length} pendiente(s) de {roleLabel}</strong>
+        </div>
+        <button className="access-refresh-button" type="button" onClick={reload} disabled={loading} aria-label="Actualizar solicitudes">
+          <span aria-hidden="true">{loading ? "..." : "↻"}</span>
+        </button>
+      </div>
+      {error && <p className="auth-error">{error}</p>}
+      {!loading && !requests.length && <p className="access-request-empty">No hay solicitudes pendientes.</p>}
+      {requests.length > 0 && (
+        <div className="access-request-list">
+          {requests.map((requestItem) => (
+            <article className="access-request-card" key={requestItem.id}>
+              <span className="access-request-avatar">{getInitials(requestItem.name)}</span>
+              <div className="access-request-main">
+                <small>{requestItem.requestedRole === "team_delegate" ? "Delegado" : "Arbitro"} · {requestItem.createdAt ? new Date(requestItem.createdAt).toLocaleDateString("es-MX") : "Pendiente"}</small>
+                <strong>{requestItem.name}</strong>
+                <span>{requestItem.email} · {requestItem.phone}</span>
+                {requestItem.requestedRole === "team_delegate" && (
+                  <em>{requestItem.teamName || "Equipo no disponible"} · {requestItem.competitionName || "Categoria"}</em>
+                )}
+              </div>
+              <div className="access-request-actions">
+                <button type="button" disabled={Boolean(busyId)} onClick={() => resolveRequest(requestItem, "approve")}>
+                  {busyId === `approve-${requestItem.id}` ? "Aprobando..." : "Aprobar"}
+                </button>
+                <button className="danger ghost-danger" type="button" disabled={Boolean(busyId)} onClick={() => resolveRequest(requestItem, "reject")}>
+                  {busyId === `reject-${requestItem.id}` ? "Rechazando..." : "Rechazar"}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TeamDelegatesPanel({ authToken, league }) {
   const [delegates, setDelegates] = useState([]);
   const [notice, setNotice] = useState("");
@@ -1075,11 +1193,19 @@ function TeamDelegatesPanel({ authToken, league }) {
   const [delegateCompetitionFilter, setDelegateCompetitionFilter] = useState("all");
   const [delegateStatusFilter, setDelegateStatusFilter] = useState("all");
   const [delegateListTab, setDelegateListTab] = useState("delegates");
+  const [delegateCreateOpen, setDelegateCreateOpen] = useState(false);
   const [bulkRosterUntil, setBulkRosterUntil] = useState("");
+  const [bulkCompetitionId, setBulkCompetitionId] = useState("");
   const [delegateTeamSearch, setDelegateTeamSearch] = useState("");
   const [selectedDelegateTeamId, setSelectedDelegateTeamId] = useState("");
   const teams = useMemo(() => [...(league.teams || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.teams]);
   const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
+  const bulkDefaultCompetitionId = useMemo(() => {
+    const competitionWithTeams = competitions.find((competition) => (
+      teams.some((team) => (team.competitionId || getDefaultCompetitionId(league)) === competition.id)
+    ));
+    return competitionWithTeams?.id || competitions[0]?.id || "";
+  }, [competitions, league, teams]);
   const filteredTeams = useMemo(() => {
     const query = normalizeAdminSearchTerm(delegateSearch);
     return teams.filter((team) => {
@@ -1123,8 +1249,9 @@ function TeamDelegatesPanel({ authToken, league }) {
       return normalizeAdminSearchTerm(`${team.name} ${competition?.name || ""}`).includes(query);
     });
   }, [createTeamOptions, delegateTeamSearch, league]);
-  const activeBulkCompetitionId = delegateCompetitionFilter !== "all" ? delegateCompetitionFilter : "";
+  const activeBulkCompetitionId = bulkCompetitionId || (delegateCompetitionFilter !== "all" ? delegateCompetitionFilter : bulkDefaultCompetitionId);
   const activeBulkCompetition = competitions.find((competition) => competition.id === activeBulkCompetitionId);
+  const activeBulkTeamCount = teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === activeBulkCompetitionId).length;
   const assignedTeamIds = useMemo(() => new Set(delegates.map((delegate) => delegate.teamId)), [delegates]);
 
   function setCardMessage(key, message, type = "ok") {
@@ -1158,6 +1285,11 @@ function TeamDelegatesPanel({ authToken, league }) {
     setSelectedDelegateTeamId(createTeamSearchOptions[0].id);
   }, [createTeamSearchOptions, selectedDelegateTeamId]);
 
+  useEffect(() => {
+    if (bulkCompetitionId && competitions.some((competition) => competition.id === bulkCompetitionId)) return;
+    setBulkCompetitionId(bulkDefaultCompetitionId);
+  }, [bulkCompetitionId, bulkDefaultCompetitionId, competitions]);
+
   async function submitDelegate(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1173,6 +1305,7 @@ function TeamDelegatesPanel({ authToken, league }) {
       form.reset();
       setDelegateTeamSearch("");
       setSelectedDelegateTeamId(createTeamOptions[0]?.id || "");
+      setDelegateCreateOpen(false);
     } catch (saveError) {
       setNotice("");
       setError(saveError.message || "No se pudo crear el delegado.");
@@ -1193,10 +1326,13 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice(message);
       setCardMessage(delegate.id, message, "ok");
       setError("");
+      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo regenerar la invitacion.";
       setNotice("");
-      setError(saveError.message || "No se pudo regenerar la invitacion.");
-      setCardMessage(delegate.id, saveError.message || "No se pudo regenerar la invitacion.", "error");
+      setError(message);
+      setCardMessage(delegate.id, message, "error");
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     } finally {
       setBusyAction("");
     }
@@ -1221,10 +1357,13 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice(message);
       setCardMessage(actionKey, message, "ok");
       setError("");
+      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo actualizar el permiso.";
       setNotice("");
-      setError(saveError.message || "No se pudo actualizar el permiso.");
-      setCardMessage(actionKey, saveError.message || "No se pudo actualizar el permiso.", "error");
+      setError(message);
+      setCardMessage(actionKey, message, "error");
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     } finally {
       setBusyAction("");
     }
@@ -1232,12 +1371,16 @@ function TeamDelegatesPanel({ authToken, league }) {
 
   async function bulkUpdateRosterPermissions(registrationEnabled) {
     if (!activeBulkCompetitionId) {
-      setError("Selecciona un torneo o categoria para aplicar la accion masiva.");
+      const message = "Selecciona un torneo o categoria para abrir o cerrar registros.";
+      setError(message);
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
       return;
     }
     const scopedTeams = teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === activeBulkCompetitionId);
     if (!scopedTeams.length) {
-      setError("No hay equipos en esa categoria.");
+      const message = "No hay equipos en esa categoria.";
+      setError(message);
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
       return;
     }
     const actionLabel = registrationEnabled ? "abrir" : "cerrar";
@@ -1257,10 +1400,14 @@ function TeamDelegatesPanel({ authToken, league }) {
           : "Registro cerrado por lote"
       });
       setDelegates(nextDelegates);
-      setNotice(`Listo: registro ${registrationEnabled ? "abierto" : "cerrado"} para ${scopedTeams.length} equipo(s) de ${activeBulkCompetition?.name || "la categoria"}.`);
+      const message = `Listo: registro ${registrationEnabled ? "abierto" : "cerrado"} para ${scopedTeams.length} equipo(s) de ${activeBulkCompetition?.name || "la categoria"}.`;
+      setNotice(message);
+      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
     } catch (saveError) {
+      const message = saveError.message || "No se pudieron actualizar los registros por categoria.";
       setNotice("");
-      setError(saveError.message || "No se pudieron actualizar los registros por categoria.");
+      setError(message);
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     } finally {
       setBusyAction("");
     }
@@ -1281,10 +1428,13 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice(message);
       setCardMessage(delegate.id, message, "ok");
       setError("");
+      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo actualizar el delegado.";
       setNotice("");
-      setError(saveError.message || "No se pudo actualizar el delegado.");
-      setCardMessage(delegate.id, saveError.message || "No se pudo actualizar el delegado.", "error");
+      setError(message);
+      setCardMessage(delegate.id, message, "error");
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     } finally {
       setBusyAction("");
     }
@@ -1308,10 +1458,13 @@ function TeamDelegatesPanel({ authToken, league }) {
         : "Delegado quitado del equipo correctamente.";
       setNotice(message);
       setError("");
+      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo quitar el delegado.";
       setNotice("");
-      setError(saveError.message || "No se pudo quitar el delegado.");
-      setCardMessage(delegate.id, saveError.message || "No se pudo quitar el delegado.", "error");
+      setError(message);
+      setCardMessage(delegate.id, message, "error");
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     } finally {
       setBusyAction("");
     }
@@ -1342,10 +1495,13 @@ function TeamDelegatesPanel({ authToken, league }) {
         : "Acceso del delegado eliminado.";
       setNotice(message);
       setError("");
+      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo eliminar definitivamente el usuario.";
       setNotice("");
-      setError(saveError.message || "No se pudo eliminar definitivamente el usuario.");
-      setCardMessage(delegate.id, saveError.message || "No se pudo eliminar definitivamente el usuario.", "error");
+      setError(message);
+      setCardMessage(delegate.id, message, "error");
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     } finally {
       setBusyAction("");
     }
@@ -1356,8 +1512,6 @@ function TeamDelegatesPanel({ authToken, league }) {
   }
 
   const activeDelegates = delegates.filter((delegate) => delegate.status === "active").length;
-  const pendingDelegates = delegates.filter((delegate) => delegate.status === "pending_activation").length;
-  const inactiveDelegates = delegates.filter((delegate) => delegate.status === "disabled" || delegate.status === "suspended").length;
   const teamsWithoutDelegate = Math.max(teams.length - assignedTeamIds.size, 0);
 
   return (
@@ -1369,13 +1523,9 @@ function TeamDelegatesPanel({ authToken, league }) {
           <h2>Centro de delegados</h2>
           <p>Gestiona responsables por equipo, invitaciones y control de registro de plantillas.</p>
         </div>
-        <a href="#delegate-create" className="delegate-hero-action">Crear delegado</a>
-      </div>
-
-      <div className="delegate-quick-actions" aria-label="Acciones rapidas de delegados">
-        <a href="#delegate-create"><span aria-hidden="true">+</span><b>Crear delegado</b><small>Invita a un responsable</small></a>
-        <button type="button" onClick={() => setDelegateListTab("delegates")}><span aria-hidden="true">☷</span><b>Delegados y equipos</b><small>Ver asignaciones</small></button>
-        <button type="button" onClick={() => setDelegateListTab("teams")}><span aria-hidden="true">□</span><b>Plantillas</b><small>Permisos de registro</small></button>
+        <button className="delegate-hero-action" type="button" onClick={() => setDelegateCreateOpen((value) => !value)}>
+          {delegateCreateOpen ? "Cerrar alta" : "Crear delegado"}
+        </button>
       </div>
 
       {notice && <p className="auth-ok">{notice}</p>}
@@ -1386,11 +1536,31 @@ function TeamDelegatesPanel({ authToken, league }) {
         <span><strong>{activeDelegates}</strong> activos</span>
         <span><strong>{teams.length}</strong> equipos</span>
         <span><strong>{teamsWithoutDelegate}</strong> sin delegado</span>
-        <span><strong>{pendingDelegates}</strong> invitaciones pendientes</span>
-        <span><strong>{inactiveDelegates}</strong> inactivos</span>
       </div>
 
-      <form className="delegate-create-form delegate-wizard-card" id="delegate-create" onSubmit={submitDelegate}>
+      <AccessRequestsInbox
+        authToken={authToken}
+        league={league}
+        role="team_delegate"
+        onResolved={(response) => {
+          if (response.delegates) setDelegates(response.delegates);
+          setNotice("Solicitud de delegado resuelta correctamente.");
+          setError("");
+        }}
+      />
+
+      <details
+        className="delegate-create-drawer"
+        id="delegate-create"
+        open={delegateCreateOpen}
+        onToggle={(event) => setDelegateCreateOpen(event.currentTarget.open)}
+      >
+        <summary>
+          <span>Crear delegado</span>
+          <strong>Nueva invitacion</strong>
+          <small>Captura datos solo cuando necesites generar un acceso.</small>
+        </summary>
+      <form className="delegate-create-form delegate-wizard-card" onSubmit={submitDelegate}>
         <div className="delegate-wizard-head">
           <div>
             <small>Crear delegado</small>
@@ -1455,6 +1625,7 @@ function TeamDelegatesPanel({ authToken, league }) {
           {busyAction === "create-delegate" ? "Creando invitacion..." : "Crear y generar invitacion"}
         </button>
       </form>
+      </details>
 
       {lastInvitation && (
         <div className="delegate-invitation-box">
@@ -1517,18 +1688,26 @@ function TeamDelegatesPanel({ authToken, league }) {
           </div>
           <div className="delegate-bulk-permissions">
             <div>
-              <strong>{activeBulkCompetition?.name || "Selecciona categoria"}</strong>
-              <small>La accion masiva solo afecta equipos de esta liga y categoria.</small>
+              <strong>Registro de plantillas</strong>
+              <small>Afecta solo esta liga y la categoria seleccionada.</small>
             </div>
+            <label>Categoria
+              <select value={activeBulkCompetitionId} onChange={(event) => setBulkCompetitionId(event.target.value)}>
+                {competitions.map((competition) => (
+                  <option key={competition.id} value={competition.id}>{competition.name}</option>
+                ))}
+              </select>
+              <small>{activeBulkTeamCount} equipo(s)</small>
+            </label>
             <label>Abierto hasta
               <input type="datetime-local" value={bulkRosterUntil} onChange={(event) => setBulkRosterUntil(event.target.value)} />
             </label>
             <div className="inline-actions">
               <button type="button" disabled={!activeBulkCompetitionId || busyAction === `bulk-roster-${activeBulkCompetitionId}`} onClick={() => bulkUpdateRosterPermissions(true)}>
-                Abrir registro a todos
+                Abrir categoria
               </button>
               <button className="danger ghost-danger" type="button" disabled={!activeBulkCompetitionId || busyAction === `bulk-roster-${activeBulkCompetitionId}`} onClick={() => bulkUpdateRosterPermissions(false)}>
-                Cerrar registro a todos
+                Cerrar categoria
               </button>
             </div>
           </div>
@@ -1545,21 +1724,26 @@ function TeamDelegatesPanel({ authToken, league }) {
                     const actionKey = `permission-${team.id}`;
                     const cardMessage = cardMessages[actionKey];
                     return (
-                      <form className="delegate-card compact" key={team.id} onSubmit={(event) => savePermission(event, team)}>
+                      <form className="delegate-card compact delegate-permission-card" key={team.id} onSubmit={(event) => savePermission(event, team)}>
                         <div className="delegate-card-head">
-                          <strong>{team.name}</strong>
-                          <small>{permission.userName ? `Delegado: ${permission.userName}` : "Sin delegado asignado"}</small>
+                          <span>
+                            <strong>{team.name}</strong>
+                            <small>{permission.userName ? `Delegado: ${permission.userName}` : "Sin delegado asignado"}</small>
+                          </span>
+                          <b className={permission.registrationEnabled ? "is-open" : "is-closed"}>{permission.registrationEnabled ? "Registro abierto" : "Registro cerrado"}</b>
                         </div>
-                        <label className="checkbox-field compact-checkbox">
-                          <input name="registrationEnabled" type="checkbox" defaultChecked={permission.registrationEnabled === true} />
-                          Registro abierto
-                        </label>
-                        <label>Abierto hasta
-                          <input name="enabledUntil" type="datetime-local" defaultValue={permission.enabledUntil ? permission.enabledUntil.slice(0, 16) : ""} />
-                        </label>
-                        <label>Nota
-                          <input name="notes" defaultValue={permission.notes || ""} placeholder="Ej. Cierre viernes 8 pm" />
-                        </label>
+                        <div className="delegate-permission-fields">
+                          <label className="checkbox-field compact-checkbox">
+                            <input name="registrationEnabled" type="checkbox" defaultChecked={permission.registrationEnabled === true} />
+                            Permitir altas de plantilla
+                          </label>
+                          <label>Abierto hasta
+                            <input name="enabledUntil" type="datetime-local" defaultValue={permission.enabledUntil ? permission.enabledUntil.slice(0, 16) : ""} />
+                          </label>
+                          <label>Nota interna
+                            <input name="notes" defaultValue={permission.notes || ""} placeholder="Ej. Cierre viernes 8 pm" />
+                          </label>
+                        </div>
                         {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
                         <button type="submit" disabled={busyAction === actionKey}>
                           {busyAction === actionKey ? "Guardando..." : "Guardar permiso"}
@@ -1602,39 +1786,49 @@ function TeamDelegatesPanel({ authToken, league }) {
                     return (
                     <details className="delegate-card compact delegate-user-card" key={delegate.id}>
                       <summary>
-                        <span>
+                        <span className="delegate-user-avatar" aria-hidden="true">{getAdminInitials(delegate.userName)}</span>
+                        <span className="delegate-user-summary">
                           <strong>{delegate.userName}</strong>
-                          <small>{delegate.teamName} | Usuario {getDelegateStatusLabel(delegate.status)}</small>
+                          <small>{delegate.teamName}</small>
                         </span>
-                        <b>{delegate.registrationEnabled ? "Registro abierto" : "Registro cerrado"}</b>
+                        <b className={`delegate-user-status ${delegate.status}`}>{getDelegateStatusLabel(delegate.status)}</b>
                       </summary>
-                      <span>{delegate.userEmail}</span>
-                      {delegate.userPhone && <span>{delegate.userPhone}</span>}
-                      <small>{delegate.competitionName || group.name}</small>
+                      <div className="delegate-user-meta">
+                        <span>{delegate.userEmail}</span>
+                        {delegate.userPhone && <span>{delegate.userPhone}</span>}
+                        <span>{delegate.competitionName || group.name}</span>
+                        <b className={delegate.registrationEnabled ? "is-open" : "is-closed"}>{delegate.registrationEnabled ? "Plantilla abierta" : "Plantilla cerrada"}</b>
+                      </div>
                       {cardMessage && <small className={`delegate-message ${cardMessage.type}`}>{cardMessage.message}</small>}
-                      <details className="delegate-card-actions">
-                        <summary>Acciones de acceso</summary>
-                        <div className="inline-actions delegate-action-grid">
+                      <div className="delegate-access-panel">
+                        <div className="delegate-access-summary">
+                          <span>Acceso</span>
+                          <strong>{getDelegateStatusLabel(delegate.status)}</strong>
+                          <small>{delegate.userEmail}</small>
+                        </div>
+                        <div className="delegate-access-actions">
                           <button type="button" disabled={delegate.status === "active" || delegate.status === "pending_activation" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "active")}>
-                            {isActivating ? "Activando..." : "Activar usuario"}
+                            {isActivating ? "Activando..." : "Activar"}
                           </button>
                           <button type="button" disabled={isBusyDelegate} onClick={() => regenerateInvitation(delegate)}>
-                            {isInviting ? "Generando..." : delegate.status === "pending_activation" ? "Reenviar invitacion" : "Regenerar invitacion"}
-                          </button>
-                          <button className="danger" type="button" disabled={delegate.status === "disabled" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "disabled")}>
-                            {isDisabling ? "Desactivando..." : "Desactivar usuario"}
-                          </button>
-                          <button className="danger" type="button" disabled={delegate.status === "suspended" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "suspended")}>
-                            {isSuspending ? "Suspendiendo..." : "Suspender usuario"}
-                          </button>
-                          <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => removeDelegate(delegate)}>
-                            {isRemoving ? "Quitando..." : "Quitar acceso al equipo"}
-                          </button>
-                          <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => deleteDelegateUser(delegate)}>
-                            {isDeleting ? "Eliminando..." : "Eliminar usuario definitivo"}
+                            {isInviting ? "Generando..." : delegate.status === "pending_activation" ? "Reenviar" : "Nuevo enlace"}
                           </button>
                         </div>
-                      </details>
+                        <div className="delegate-danger-actions">
+                          <button className="danger" type="button" disabled={delegate.status === "disabled" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "disabled")}>
+                            {isDisabling ? "Desactivando..." : "Desactivar"}
+                          </button>
+                          <button className="danger" type="button" disabled={delegate.status === "suspended" || isBusyDelegate} onClick={() => changeDelegateStatus(delegate, "suspended")}>
+                            {isSuspending ? "Suspendiendo..." : "Suspender"}
+                          </button>
+                          <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => removeDelegate(delegate)}>
+                            {isRemoving ? "Quitando..." : "Quitar equipo"}
+                          </button>
+                          <button className="danger ghost-danger" type="button" disabled={isBusyDelegate} onClick={() => deleteDelegateUser(delegate)}>
+                            {isDeleting ? "Eliminando..." : "Eliminar usuario"}
+                          </button>
+                        </div>
+                      </div>
                     </details>
                     );
                   })}
@@ -1680,7 +1874,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     () => scopeLeagueToCompetition(league, selectedCompetitionId || getDefaultCompetitionId(league)),
     [league, selectedCompetitionId]
   );
-  const displayRound = useMemo(() => getCurrentDisplayRound(competitionLeague.matches), [competitionLeague.matches]);
+  const displayRound = useMemo(() => getNextUnplayedRegularRound(competitionLeague.matches), [competitionLeague.matches]);
   const roundOptions = useMemo(() => (
     [...new Set(competitionLeague.matches.map((match) => match.round).filter(Boolean))]
       .sort((a, b) => Number(a) - Number(b))
@@ -1824,9 +2018,12 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   useEffect(() => {
     if (!selectedAssignmentMatch && !showAdvancedFilters) return undefined;
     const previousOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
     };
   }, [selectedAssignmentMatch, showAdvancedFilters]);
 
@@ -1977,17 +2174,36 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     const submitter = event.nativeEvent?.submitter;
-    if (submitter?.value === "central-only") {
-      payload.assistantReferee1UserId = "";
-      payload.assistantReferee2UserId = "";
-      payload.fourthRefereeUserId = "";
-    }
     if (submitter?.value === "clear") {
       if (!window.confirm("¿Eliminar toda la designacion arbitral de este partido?")) return;
       payload.centralRefereeUserId = "";
       payload.assistantReferee1UserId = "";
       payload.assistantReferee2UserId = "";
       payload.fourthRefereeUserId = "";
+    } else {
+      if (!payload.centralRefereeUserId) {
+        const message = "Debes seleccionar arbitro central para guardar la designacion.";
+        setNotice("");
+        setError(message);
+        setAssignmentFeedback((current) => ({
+          ...current,
+          [match.id]: { type: "error", message }
+        }));
+        window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+        return;
+      }
+      const assistantCount = [payload.assistantReferee1UserId, payload.assistantReferee2UserId].filter(Boolean).length;
+      if (assistantCount === 1) {
+        const message = "Si agregas auxiliares, debes seleccionar Auxiliar 1 y Auxiliar 2. Tambien puedes guardar solo con arbitro central.";
+        setNotice("");
+        setError(message);
+        setAssignmentFeedback((current) => ({
+          ...current,
+          [match.id]: { type: "error", message }
+        }));
+        window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+        return;
+      }
     }
     const selectedReferees = [
       payload.centralRefereeUserId,
@@ -1996,8 +2212,14 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       payload.fourthRefereeUserId
     ].filter(Boolean);
     if (new Set(selectedReferees).size !== selectedReferees.length) {
+      const message = "Un arbitro no puede ocupar dos posiciones en el mismo partido.";
       setNotice("");
-      setError("Un arbitro no puede ocupar dos posiciones en el mismo partido.");
+      setError(message);
+      setAssignmentFeedback((current) => ({
+        ...current,
+        [match.id]: { type: "error", message }
+      }));
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
       return;
     }
     const actionKey = `match-referees-${match.id}`;
@@ -2014,6 +2236,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       setNotice(successMessage);
       setError("");
       setSelectedAssignmentMatch(null);
+      window.alert(`Movimiento capturado correctamente.\n\n${successMessage}`);
     } catch (saveError) {
       const errorMessage = saveError.message || "No se pudo guardar la designacion arbitral.";
       setAssignmentFeedback((current) => ({
@@ -2022,6 +2245,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       }));
       setNotice("");
       setError(errorMessage);
+      window.alert(`No se pudo completar el movimiento.\n\n${errorMessage}`);
     } finally {
       setBusyAction("");
     }
@@ -2046,20 +2270,24 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           <h2>Centro de Operaciones Arbitrales</h2>
           <p>Gestiona arbitros, designaciones y actas de la liga.</p>
         </div>
-        <button aria-label="Ayuda de arbitraje" type="button" onClick={() => setShowRefereeHelp((value) => !value)}>i</button>
       </div>
-      {showRefereeHelp && (
-        <div className="referee-help-box">
-          <strong>Operacion arbitral</strong>
-          <span>Programa designaciones, administra arbitros y da seguimiento a actas publicadas o casos legacy. Las actas finalizadas por el arbitro no requieren revision previa.</span>
-        </div>
-      )}
       {(notice || error) && (
         <div className={`referee-action-toast ${error ? "is-error" : "is-success"}`} role="status" aria-live="polite">
           <strong>{error ? "No se pudo completar" : "Accion completada"}</strong>
           <span>{error || notice}</span>
         </div>
       )}
+
+      <AccessRequestsInbox
+        authToken={authToken}
+        league={league}
+        role="referee"
+        onResolved={(response) => {
+          if (response.referees) setReferees(response.referees);
+          setNotice("Solicitud de arbitro resuelta correctamente.");
+          setError("");
+        }}
+      />
 
       <div className="referee-command-center">
         <button className={activeRefereeTask === "assign" ? "active" : ""} type="button" onClick={() => setActiveRefereeTask("assign")}>
@@ -2097,7 +2325,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
                 <span>Centro de operaciones</span>
                 <strong>{selectedCompetition?.name || "Torneo"} · Jornada {displayRound || "-"}</strong>
               </div>
-              <button type="button" aria-label="Ver actas" onClick={() => setActiveRefereeTask("review")}>{actaAttentionCount}</button>
+              <button type="button" aria-label="Ver actas" onClick={() => setActiveRefereeTask("review")}>Actas {actaAttentionCount}</button>
             </div>
             <div className="referee-progress-ring">
               <strong>{assignmentCompleteCount}</strong>
@@ -2463,6 +2691,66 @@ function isActiveScheduleStatus(status) {
   return ["scheduled", "rescheduled", "advanced"].includes(status || "scheduled");
 }
 
+function hasMatchResultCaptured(match) {
+  return ["finished", "walkover"].includes(match?.status || "") ||
+    (match?.homeGoals !== null && match?.homeGoals !== undefined) ||
+    (match?.awayGoals !== null && match?.awayGoals !== undefined) ||
+    (match?.events || []).length > 0;
+}
+
+function getNextUnplayedRegularRound(matches) {
+  const regularMatches = (matches || []).filter((match) => (match.stage || "regular") !== "playoff");
+  const pendingMatches = regularMatches
+    .filter((match) => isActiveScheduleStatus(match.status) && !hasMatchResultCaptured(match))
+    .sort((a, b) => (
+      Number(a.round || 0) - Number(b.round || 0) ||
+      String(a.date || "").localeCompare(String(b.date || "")) ||
+      String(a.time || "").localeCompare(String(b.time || ""))
+    ));
+  if (pendingMatches[0]?.round) return Number(pendingMatches[0].round);
+  return getCurrentDisplayRound(regularMatches);
+}
+
+function getExpectedTeamsForRound(teamCount) {
+  if (teamCount < 2) return teamCount;
+  return teamCount % 2 === 0 ? teamCount : teamCount - 1;
+}
+
+function getNextRoundForCapture(league) {
+  const teams = (league.teams || []).filter((team) => (team.status || "active") !== "withdrawn");
+  const expectedTeams = getExpectedTeamsForRound(teams.length);
+  const regularMatches = (league.matches || []).filter((match) => (match.stage || "regular") !== "playoff");
+  const rounds = [...new Set(regularMatches.map((match) => Number(match.round || 0)).filter(Boolean))].sort((a, b) => a - b);
+  for (const round of rounds) {
+    const usedTeamIds = new Set();
+    regularMatches
+      .filter((match) => Number(match.round || 0) === round)
+      .forEach((match) => {
+        if (match.homeTeamId) usedTeamIds.add(match.homeTeamId);
+        if (match.awayTeamId) usedTeamIds.add(match.awayTeamId);
+      });
+    if (!expectedTeams || usedTeamIds.size < expectedTeams) return round;
+  }
+  return rounds.length ? rounds.at(-1) + 1 : 1;
+}
+
+function getUsedTeamIdsForMatchScope(matches, { competitionId, stage, round, playoffRound, playoffLeg }) {
+  const usedTeamIds = new Set();
+  for (const match of matches || []) {
+    if (String(match.competitionId || "") !== String(competitionId || "")) continue;
+    if ((match.stage || "regular") !== (stage || "regular")) continue;
+    if ((stage || "regular") === "playoff") {
+      if (upperText(match.playoffRound || "") !== upperText(playoffRound || "")) continue;
+      if (upperText(match.playoffLeg || "") !== upperText(playoffLeg || "")) continue;
+    } else if (Number(match.round || 0) !== Number(round || 0)) {
+      continue;
+    }
+    if (match.homeTeamId) usedTeamIds.add(match.homeTeamId);
+    if (match.awayTeamId) usedTeamIds.add(match.awayTeamId);
+  }
+  return usedTeamIds;
+}
+
 function isValidScheduleDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
@@ -2515,16 +2803,28 @@ function RefereeMatchOpsCard({ feedback, focused = false, league, match, onOpen,
   const assignment = getAssignmentState(match);
   return (
     <article className={`referee-ops-match-card ${focused ? "is-focused" : ""}`} data-referee-match-id={match.id}>
-      <div className="referee-match-timebox">
-        <span>{match.time || "--:--"}</span>
-        <small>{match.date ? formatDate(match.date) : "Sin fecha"}</small>
-      </div>
+      <header className="referee-match-status-line">
+        <span>J{match.round || "-"}</span>
+        <strong>{match.date ? formatDate(match.date) : "Sin fecha"} · {match.time || "--:--"}</strong>
+        <b className={`referee-status-badge ${assignment.id}`}>{assignment.label}</b>
+      </header>
       <div className="referee-match-core">
-        <span className="referee-venue-pill">{match.venue || "Cancha por definir"}</span>
         <div className="referee-match-teams">
-          <strong>{homeTeam?.name || "LOCAL"}</strong>
+          <span className="referee-match-team">
+            <RefereeTeamBadge team={homeTeam} />
+            <strong>{homeTeam?.name || "LOCAL"}</strong>
+            <small>Local</small>
+          </span>
           <b>VS</b>
-          <strong>{awayTeam?.name || "VISITANTE"}</strong>
+          <span className="referee-match-team away">
+            <RefereeTeamBadge team={awayTeam} side="away" />
+            <strong>{awayTeam?.name || "VISITANTE"}</strong>
+            <small>Visitante</small>
+          </span>
+        </div>
+        <div className="referee-match-meta-row">
+          <span>{match.venue || "Cancha por definir"}</span>
+          <span>{getMatchStatusLabel(match.status)}</span>
         </div>
         <div className="referee-assignment-lines">
           <span>Central: <b>{getRefereeDisplayName(referees, match.centralRefereeUserId)}</b></span>
@@ -2535,11 +2835,19 @@ function RefereeMatchOpsCard({ feedback, focused = false, league, match, onOpen,
         {feedback?.message && <p className={feedback.type === "error" ? "auth-error inline-feedback" : "auth-ok inline-feedback"}>{feedback.message}</p>}
       </div>
       <div className="referee-match-action">
-        <span className={`referee-status-badge ${assignment.id}`}>{assignment.label}</span>
-        <small>{getMatchStatusLabel(match.status)}</small>
+        <small>Designacion</small>
         <button type="button" onClick={onOpen}>{assignment.action}</button>
       </div>
     </article>
+  );
+}
+
+function RefereeTeamBadge({ side = "home", team }) {
+  const initials = getTeamAbbreviation(team);
+  return (
+    <span className={`referee-admin-team-badge ${side}`}>
+      {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{initials}</b>}
+    </span>
   );
 }
 
@@ -2563,8 +2871,9 @@ function RefereeAssignmentSheet({ activeReferees, busyAction, league, match, mat
             <span>{getTeamAbbreviation(awayTeam)}</span>
           </div>
           <div>
+            <strong>{homeTeam?.name || "LOCAL"} vs {awayTeam?.name || "VISITANTE"}</strong>
             <span>{formatDate(match.date)} · {match.time || "Hora por definir"}</span>
-            <strong>{match.venue || "Cancha por definir"}</strong>
+            <em>{match.venue || "Cancha por definir"}</em>
             <small>{selectedCompetition?.name || "Torneo"} · Jornada {match.round || "-"}</small>
           </div>
         </div>
@@ -2573,10 +2882,10 @@ function RefereeAssignmentSheet({ activeReferees, busyAction, league, match, mat
           <RefereeSelect label="Auxiliar 1" match={match} matches={matches} name="assistantReferee1UserId" referees={activeReferees} defaultValue={match.assistantReferee1UserId || ""} />
           <RefereeSelect label="Auxiliar 2" match={match} matches={matches} name="assistantReferee2UserId" referees={activeReferees} defaultValue={match.assistantReferee2UserId || ""} />
           <RefereeSelect label="Cuarto arbitro" match={match} matches={matches} name="fourthRefereeUserId" referees={activeReferees} defaultValue={match.fourthRefereeUserId || ""} />
+          <p className="referee-assignment-rule">Central obligatorio. Auxiliares: ninguno o los dos. Cuarto arbitro opcional.</p>
         </div>
         <div className="referee-sheet-actions">
           <button className="referee-action-secondary" type="button" onClick={onClose}>Cancelar</button>
-          <button className="referee-action-central" type="submit" name="saveMode" value="central-only" disabled={busyAction === `match-referees-${match.id}`}>Guardar solo central</button>
           {(match.centralRefereeUserId || match.assistantReferee1UserId || match.assistantReferee2UserId || match.fourthRefereeUserId) && (
             <button className="danger ghost-danger" type="submit" name="saveMode" value="clear" disabled={busyAction === `match-referees-${match.id}`}>Eliminar designacion</button>
           )}
@@ -2652,7 +2961,8 @@ function AdminRefereeCard({ busyAction, onDelete, onInvite, onStatus, referee })
       <span className="admin-referee-avatar">{getRefereeInitials(referee.name)}</span>
       <div>
         <strong>{referee.name}</strong>
-        <small>{referee.phone || referee.email} · {referee.municipality}</small>
+        <small>{referee.email}</small>
+        <small>{referee.phone || "Telefono pendiente"} · {referee.municipality}</small>
         <div className="admin-referee-tags">
           <span>Central</span>
           <span>Auxiliar</span>
@@ -2736,7 +3046,7 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
                   <span><strong>{report.homeGoals ?? payload.homeGoals ?? 0}-{report.awayGoals ?? payload.awayGoals ?? 0}</strong> marcador</span>
                   <span>{events.filter((event) => event.type === "goal" || event.type === "own_goal").length} gol(es)</span>
                   <span>{events.filter((event) => event.type === "yellow").length} amarilla(s)</span>
-                  <span>{events.filter((event) => event.type === "red").length} roja(s)</span>
+                  <span>{events.filter(isAdminRedLikeEvent).length} roja(s)</span>
                 </div>
                 {payload.observations && <p>{payload.observations}</p>}
                 <details className="referee-review-events">
@@ -2747,7 +3057,7 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
                       const team = getTeam(league, event.teamId);
                       return (
                         <span key={`${report.id}-${index}`}>
-                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {getAdminMinuteText(event.minute) ? `| Min ${event.minute}` : ""}
+                          {getMatchEventLabel(event.type, event)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {getAdminEventMinuteText(event) ? `| Min ${getAdminEventMinuteText(event).replace("'", "")}` : ""}
                         </span>
                       );
                     })}
@@ -2795,7 +3105,7 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
                   <span><strong>{payload.homeGoals ?? 0}-{payload.awayGoals ?? 0}</strong> marcador</span>
                   <span>{events.filter((event) => event.type === "goal" || event.type === "own_goal").length} gol(es)</span>
                   <span>{events.filter((event) => event.type === "yellow").length} amarilla(s)</span>
-                  <span>{events.filter((event) => event.type === "red").length} roja(s)</span>
+                  <span>{events.filter(isAdminRedLikeEvent).length} roja(s)</span>
                 </div>
                 {payload.observations && <p>{payload.observations}</p>}
                 <details className="referee-review-events">
@@ -2806,7 +3116,7 @@ function RefereeSheetReviewPanel({ busyAction, finalizedReports = [], league, on
                       const team = getTeam(league, event.teamId);
                       return (
                         <span key={`${sheet.id}-${index}`}>
-                          {getMatchEventLabel(event.type)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {getAdminMinuteText(event.minute) ? `| Min ${event.minute}` : ""}
+                          {getMatchEventLabel(event.type, event)} | {player?.name || "Jugador"} | {team?.name || "Equipo"} {getAdminEventMinuteText(event) ? `| Min ${getAdminEventMinuteText(event).replace("'", "")}` : ""}
                         </span>
                       );
                     })}
@@ -3602,6 +3912,13 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
   const [captureError, setCaptureError] = useState("");
   const [selectedPlayerTeamId, setSelectedPlayerTeamId] = useState("");
   const [playerPhotoResetKey, setPlayerPhotoResetKey] = useState(0);
+  const [matchCompetitionId, setMatchCompetitionId] = useState("");
+  const [matchRoundValue, setMatchRoundValue] = useState("");
+  const [matchHomeTeamId, setMatchHomeTeamId] = useState("");
+  const [matchAwayTeamId, setMatchAwayTeamId] = useState("");
+  const [matchVenue, setMatchVenue] = useState("");
+  const [matchPlayoffRound, setMatchPlayoffRound] = useState("");
+  const [matchPlayoffLeg, setMatchPlayoffLeg] = useState("");
   const modes = [
     { id: "team", label: "Equipo", icon: "teams" },
     { id: "player", label: "Jugador", icon: "player" },
@@ -3612,12 +3929,25 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
   const defaultCompetitionId = getDefaultCompetitionId(league);
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(defaultCompetitionId);
   const activeCompetitionLeague = scopeLeagueToCompetition(league, selectedCompetitionId);
+  const activeMatchCompetitionLeague = matchCompetitionId
+    ? scopeLeagueToCompetition(league, matchCompetitionId)
+    : { ...league, teams: [], players: [], matches: [] };
   const playoffStandings = useMemo(
     () => calculateStandings(activeCompetitionLeague).filter((row) => row.team.status !== "withdrawn"),
     [activeCompetitionLeague]
   );
   const selectedPlayoffPhaseOption = PLAYOFF_PHASE_OPTIONS.find((phase) => phase.value === selectedPlayoffPhase) || PLAYOFF_PHASE_OPTIONS[2];
-  const nextRound = Math.max(1, ...activeCompetitionLeague.matches.map((match) => Number(match.round || 1)));
+  const suggestedMatchRound = matchCompetitionId ? getNextRoundForCapture(activeMatchCompetitionLeague) : "";
+  const usedTeamIdsForMatchScope = getUsedTeamIdsForMatchScope(activeMatchCompetitionLeague.matches, {
+    competitionId: matchCompetitionId,
+    stage: matchStage,
+    round: matchRoundValue,
+    playoffRound: matchPlayoffRound,
+    playoffLeg: matchPlayoffLeg
+  });
+  const disabledHomeTeamIds = new Set([...usedTeamIdsForMatchScope, matchAwayTeamId].filter(Boolean));
+  const disabledAwayTeamIds = new Set([...usedTeamIdsForMatchScope, matchHomeTeamId].filter(Boolean));
+  const captureSummaryLeague = captureMode === "match" ? activeMatchCompetitionLeague : activeCompetitionLeague;
   const nextScheduleRound = activeCompetitionLeague.matches.length
     ? Math.max(...activeCompetitionLeague.matches.map((match) => Number(match.round || 1))) + 1
     : 1;
@@ -3628,6 +3958,16 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
       setSelectedCompetitionId(defaultCompetitionId);
     }
   }, [defaultCompetitionId, league.competitions, selectedCompetitionId]);
+
+  useEffect(() => {
+    if (matchCompetitionId && !league.competitions?.some((competition) => competition.id === matchCompetitionId)) {
+      setMatchCompetitionId("");
+      setMatchRoundValue("");
+      setMatchHomeTeamId("");
+      setMatchAwayTeamId("");
+      setMatchVenue("");
+    }
+  }, [league.competitions, matchCompetitionId]);
 
   useEffect(() => {
     setSelectedPlayoffPhase(getPlayoffPhaseValueByTeams(league.rules?.playoffQualifiers ?? 8));
@@ -3653,29 +3993,39 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (confirmMessage && !window.confirm(confirmMessage(payload))) return;
-    const result = await action(payload);
-    if (result === false) return;
-    setCaptureNotice(successMessage(payload));
-    if (options.reset !== false) event.currentTarget.reset();
+    setCaptureNotice("");
+    setCaptureError("");
+    try {
+      const result = await action(payload);
+      if (result === false) return;
+      const message = successMessage(payload);
+      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      if (options.reset !== false) event.currentTarget.reset();
+    } catch (error) {
+      const message = error.message || "No se pudo completar el movimiento.";
+      setCaptureError(message);
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+    }
   }
 
   async function submitPlayer(event) {
     event.preventDefault();
     const form = event.currentTarget;
     setCaptureError("");
-    setCaptureNotice("Subiendo foto y guardando jugador...");
+    setCaptureNotice("");
     try {
       const payload = await getPlayerPayload(form, "", { authToken, leagueId: league.id, scope: "player-photos" });
       if (!window.confirm("¿Confirmas registrar este jugador en el equipo seleccionado?")) return;
       const result = await onAddPlayer(payload);
       if (result === false) return;
-      setCaptureNotice("Jugador registrado correctamente.");
+      window.alert("Movimiento capturado correctamente.\n\nJugador registrado correctamente.");
       form.reset();
       setPlayerPhotoResetKey((value) => value + 1);
       if (form.elements.photoFile) form.elements.photoFile.value = "";
     } catch (error) {
-      setCaptureNotice("");
-      setCaptureError(error.message || "No se pudo cargar la imagen.");
+      const message = error.message || "No se pudo registrar el jugador.";
+      setCaptureError(message);
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     }
   }
 
@@ -3683,24 +4033,87 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
     event.preventDefault();
     const form = event.currentTarget;
     setCaptureError("");
-    setCaptureNotice("Subiendo escudo y guardando equipo...");
+    setCaptureNotice("");
     try {
       const payload = await getTeamPayload(form, "", { authToken, leagueId: league.id, scope: "teams" });
       if (!window.confirm("¿Confirmas registrar este equipo en la categoria seleccionada?")) return;
       resetTeamForm(form);
       onAddTeam(payload);
-      setCaptureNotice("Equipo registrado correctamente.");
+      window.alert("Movimiento capturado correctamente.\n\nEquipo registrado correctamente.");
     } catch (error) {
-      setCaptureNotice("");
-      setCaptureError(error.message || "No se pudo cargar la imagen.");
+      const message = error.message || "No se pudo registrar el equipo.";
+      setCaptureError(message);
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+    }
+  }
+
+  function handleMatchCompetitionChange(event) {
+    const competitionId = event.target.value;
+    const competitionLeague = competitionId ? scopeLeagueToCompetition(league, competitionId) : { ...league, teams: [], matches: [] };
+    setMatchCompetitionId(competitionId);
+    setMatchRoundValue(competitionId && matchStage === "regular" ? String(getNextRoundForCapture(competitionLeague)) : "");
+    setMatchHomeTeamId("");
+    setMatchAwayTeamId("");
+    setMatchVenue("");
+  }
+
+  function handleMatchStageChange(event) {
+    const stage = event.target.value;
+    setMatchStage(stage);
+    setMatchRoundValue(stage === "regular" && matchCompetitionId ? String(getNextRoundForCapture(activeMatchCompetitionLeague)) : "");
+    setMatchHomeTeamId("");
+    setMatchAwayTeamId("");
+    setMatchVenue("");
+    setMatchPlayoffRound(stage === "playoff" ? "Cuartos de final" : "");
+    setMatchPlayoffLeg("");
+  }
+
+  async function submitMatch(event) {
+    event.preventDefault();
+    const payload = getFormPayload(event.currentTarget);
+    payload.competitionId = matchCompetitionId;
+    payload.stage = matchStage;
+    payload.round = matchStage === "playoff" ? "0" : matchRoundValue;
+    payload.homeTeamId = matchHomeTeamId;
+    payload.awayTeamId = matchAwayTeamId;
+    payload.venue = matchVenue;
+    payload.playoffRound = matchStage === "playoff" ? matchPlayoffRound : "";
+    payload.playoffLeg = matchStage === "playoff" ? matchPlayoffLeg : "";
+
+    setCaptureNotice("");
+    setCaptureError("");
+    try {
+      if (!matchCompetitionId) throw new Error("Elige categoria antes de crear el partido.");
+      if (matchStage === "regular" && (!Number.isInteger(Number(matchRoundValue)) || Number(matchRoundValue) < 1)) {
+        throw new Error("Captura una jornada valida para este partido.");
+      }
+      if (!matchHomeTeamId || !matchAwayTeamId) throw new Error("Elige equipo local y visitante.");
+      if (matchHomeTeamId === matchAwayTeamId) throw new Error("Local y visitante deben ser equipos diferentes.");
+      const repeatedTeam = [matchHomeTeamId, matchAwayTeamId].find((teamId) => usedTeamIdsForMatchScope.has(teamId));
+      if (repeatedTeam) {
+        const team = getTeam(activeMatchCompetitionLeague, repeatedTeam);
+        const scopeLabel = matchStage === "playoff"
+          ? `la fase ${matchPlayoffRound || "seleccionada"}`
+          : `la jornada ${matchRoundValue}`;
+        throw new Error(`${team?.name || "Ese equipo"} ya tiene partido en ${scopeLabel}.`);
+      }
+      if (!window.confirm("¿Confirmas crear este partido con los equipos, fecha y cancha capturados?")) return;
+      const result = await onAddMatch(payload);
+      if (result === false) return;
+      window.alert("Movimiento capturado correctamente.\n\nPartido creado correctamente.");
+      setMatchHomeTeamId("");
+      setMatchAwayTeamId("");
+      setMatchVenue("");
+    } catch (error) {
+      const message = error.message || "No se pudo crear el partido.";
+      setCaptureError(message);
+      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
     }
   }
 
   return (
     <section className="panel">
       <SectionHeading eyebrow={league.name} title="Captura operativa" />
-      {captureNotice && <p className="auth-ok">{captureNotice}</p>}
-      {captureError && <p className="auth-error">{captureError}</p>}
       <div className="capture-shell">
         <aside className="capture-menu">
           <div className="capture-mode-tabs" aria-label="Tipo de captura">
@@ -3717,9 +4130,9 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
             ))}
           </div>
           <div className="capture-summary">
-            <span><strong>{activeCompetitionLeague.teams.length}</strong> equipos categoria</span>
-            <span><strong>{activeCompetitionLeague.players.length}</strong> jugadores categoria</span>
-            <span><strong>{activeCompetitionLeague.matches.length}</strong> partidos del torneo actual</span>
+            <span><strong>{captureSummaryLeague.teams.length}</strong> equipos categoria</span>
+            <span><strong>{captureSummaryLeague.players.length}</strong> jugadores categoria</span>
+            <span><strong>{captureSummaryLeague.matches.length}</strong> partidos del torneo actual</span>
           </div>
         </aside>
 
@@ -3778,29 +4191,58 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
           {captureMode === "match" && (
             <form
               className="capture-form"
-              onSubmit={(event) => submitCaptureAction(
-                event,
-                onAddMatch,
-                () => "¿Confirmas crear este partido con los equipos, fecha y cancha capturados?",
-                () => "Partido creado correctamente."
-              )}
+              onSubmit={submitMatch}
             >
               <h3>Programar partido</h3>
-              <div className="capture-fields three-cols">
-                <label>Categoria<CompetitionSelect league={league} name="competitionId" value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.target.value)} /></label>
+              <div className="capture-fields three-cols match-capture-grid">
+                <label>Categoria
+                  <CompetitionSelect
+                    league={league}
+                    name="competitionId"
+                    value={matchCompetitionId}
+                    onChange={handleMatchCompetitionChange}
+                    placeholder="Elige categoria"
+                  />
+                </label>
                 <label>Tipo de partido
-                  <select name="stage" value={matchStage} onChange={(event) => setMatchStage(event.target.value)}>
+                  <select name="stage" value={matchStage} onChange={handleMatchStageChange}>
                     <option value="regular">Temporada regular</option>
                     <option value="playoff">Liguilla</option>
                   </select>
                 </label>
                 {matchStage === "regular" ? (
-                  <label>Jornada<input name="round" type="number" min="1" defaultValue={nextRound} required /></label>
+                  <label>Jornada
+                    <input
+                      name="round"
+                      type="number"
+                      min="1"
+                      value={matchRoundValue}
+                      onChange={(event) => {
+                        setMatchRoundValue(event.target.value);
+                        setMatchHomeTeamId("");
+                        setMatchAwayTeamId("");
+                        setMatchVenue("");
+                      }}
+                      placeholder={suggestedMatchRound ? `Sugerida ${suggestedMatchRound}` : "Elige categoria"}
+                      required
+                    />
+                  </label>
                 ) : (
                   <input type="hidden" name="round" value="0" />
                 )}
                 <label>Fase liguilla
-                  <select name="playoffRound" defaultValue={matchStage === "playoff" ? "Cuartos de final" : ""} required={matchStage === "playoff"}>
+                  <select
+                    name="playoffRound"
+                    value={matchPlayoffRound}
+                    onChange={(event) => {
+                      setMatchPlayoffRound(event.target.value);
+                      setMatchHomeTeamId("");
+                      setMatchAwayTeamId("");
+                      setMatchVenue("");
+                    }}
+                    required={matchStage === "playoff"}
+                    disabled={matchStage !== "playoff"}
+                  >
                     <option value="">{matchStage === "playoff" ? "Selecciona fase" : "No aplica"}</option>
                     {PLAYOFF_PHASE_OPTIONS.map((phase) => (
                       <option key={phase.value} value={phase.label}>{phase.label}</option>
@@ -3809,7 +4251,17 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                   </select>
                 </label>
                 <label>Juego
-                  <select name="playoffLeg" defaultValue="">
+                  <select
+                    name="playoffLeg"
+                    value={matchPlayoffLeg}
+                    onChange={(event) => {
+                      setMatchPlayoffLeg(event.target.value);
+                      setMatchHomeTeamId("");
+                      setMatchAwayTeamId("");
+                      setMatchVenue("");
+                    }}
+                    disabled={matchStage !== "playoff"}
+                  >
                     <option value="">Unico / no aplica</option>
                     <option value="Ida">Ida</option>
                     <option value="Vuelta">Vuelta</option>
@@ -3820,9 +4272,37 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                 )}
                 <label>Fecha<input name="date" type="date" /></label>
                 <label>Hora<input name="time" type="time" /></label>
-                <label>Cancha<VenueSelect league={league} /></label>
-                <label>Local<TeamSelect league={activeCompetitionLeague} name="homeTeamId" /></label>
-                <label>Visitante<TeamSelect league={activeCompetitionLeague} name="awayTeamId" /></label>
+                <label className="match-capture-venue-field">Cancha
+                  <VenueSelect
+                    className="match-capture-venue-select"
+                    league={league}
+                    value={matchVenue}
+                    onChange={(event) => setMatchVenue(event.target.value)}
+                    placeholder="Elige cancha"
+                  />
+                </label>
+                <label>Local
+                  <TeamSelect
+                    disabled={!matchCompetitionId}
+                    disabledTeamIds={disabledHomeTeamIds}
+                    league={activeMatchCompetitionLeague}
+                    name="homeTeamId"
+                    value={matchHomeTeamId}
+                    onChange={(event) => setMatchHomeTeamId(event.target.value)}
+                    placeholder="Elige equipo"
+                  />
+                </label>
+                <label>Visitante
+                  <TeamSelect
+                    disabled={!matchCompetitionId}
+                    disabledTeamIds={disabledAwayTeamIds}
+                    league={activeMatchCompetitionLeague}
+                    name="awayTeamId"
+                    value={matchAwayTeamId}
+                    onChange={(event) => setMatchAwayTeamId(event.target.value)}
+                    placeholder="Elige equipo"
+                  />
+                </label>
                 <label>Global local<input name="aggregateHome" type="number" min="0" placeholder="Opcional" /></label>
                 <label>Global visitante<input name="aggregateAway" type="number" min="0" placeholder="Opcional" /></label>
                 <label>Estado
@@ -3835,7 +4315,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                 </label>
               </div>
               <p className="helper-text wide-field">Puedes crear el rol completo aunque un juego quede sin fecha, hora o cancha. Si todavia no hay sede definida, guardalo como pospuesto y reprogramalo despues desde Partidos.</p>
-              <button className="primary" type="submit" disabled={activeCompetitionLeague.teams.length < 2}>Crear partido</button>
+              <button className="primary" type="submit" disabled={!matchCompetitionId || activeMatchCompetitionLeague.teams.length < 2}>Crear partido</button>
             </form>
           )}
 
@@ -3849,10 +4329,19 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                   ? "Se agregaran partidos para equipos nuevos sin borrar el calendario existente. ¿Continuar?"
                   : "Se generara el calendario regular con los equipos activos. ¿Continuar?";
                 if (!window.confirm(message)) return;
-                onGenerateSchedule(payload);
-                setCaptureNotice(payload.roundTrip === "on"
+                setCaptureNotice("");
+                setCaptureError("");
+                try {
+                  onGenerateSchedule(payload);
+                  const successMessage = payload.roundTrip === "on"
                   ? "Calendario ida y vuelta generado correctamente."
-                  : "Calendario generado correctamente.");
+                  : "Calendario generado correctamente.";
+                  window.alert(`Movimiento capturado correctamente.\n\n${successMessage}`);
+                } catch (error) {
+                  const errorMessage = error.message || "No se pudo generar el calendario.";
+                  setCaptureError(errorMessage);
+                  window.alert(`No se pudo completar el movimiento.\n\n${errorMessage}`);
+                }
               }}
             >
               <h3>Generar calendario</h3>
@@ -3891,8 +4380,16 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                 }
                 const message = `Se generara ${phase.label} con cruces por tabla: 1 vs ${phase.teams}, 2 vs ${phase.teams - 1}, etc. ¿Continuar?`;
                 if (!window.confirm(message)) return;
-                onGeneratePlayoffBracket(payload);
-                setCaptureNotice(`${phase.label} generada correctamente.`);
+                setCaptureNotice("");
+                setCaptureError("");
+                try {
+                  onGeneratePlayoffBracket(payload);
+                  window.alert(`Movimiento capturado correctamente.\n\n${phase.label} generada correctamente.`);
+                } catch (error) {
+                  const errorMessage = error.message || "No se pudo generar la liguilla.";
+                  setCaptureError(errorMessage);
+                  window.alert(`No se pudo completar el movimiento.\n\n${errorMessage}`);
+                }
               }}
             >
               <h3>Generar liguilla</h3>
@@ -4824,7 +5321,7 @@ function ManagementBoard({
   async function handleTeamSave(team, form) {
     let payload;
     try {
-      payload = await getTeamPayload(form, team.logoUrl || "", { authToken, leagueId: league.id, scope: "teams" });
+      payload = await getTeamPayload(form, team.logoUrl || "", { authToken, leagueId: league.id, scope: "team-logos" });
     } catch (error) {
       window.alert(error.message || "No se pudo cargar la imagen.");
       return;
@@ -5053,6 +5550,14 @@ function ManagementBoard({
                     </span>
                   </div>
                 </header>
+                <div className="operation-team-logo-strip">
+                  <TeamLogoUploader existingLogoUrl={team.logoUrl || ""} teamName={team.name} />
+                  <div className="operation-team-logo-copy">
+                    <span>Escudo del equipo</span>
+                    <strong>{team.name}</strong>
+                    <small>Se optimiza para web antes de guardarse.</small>
+                  </div>
+                </div>
                 <div className="operation-edit-grid">
                   <label>Nombre del equipo<input name="name" defaultValue={team.name} aria-label={`Equipo ${team.name}`} required /></label>
                   {showingAllCompetitions && (
@@ -5068,11 +5573,6 @@ function ManagementBoard({
                   <label>Auxiliar<input name="assistantCoach" defaultValue={team.assistantCoach || ""} aria-label={`Auxiliar ${team.name}`} placeholder="Auxiliar" /></label>
                   <label>Direccion / sede<input name="address" defaultValue={team.address || ""} aria-label={`Direccion ${team.name}`} placeholder="Direccion / sede" /></label>
                   <label className="operation-secondary-field">Color<input name="colors" defaultValue={team.colors} aria-label={`Color ${team.name}`} type="color" /></label>
-                  <label className="operation-secondary-field">Escudo<input name="logoFile" aria-label={`Escudo ${team.name}`} type="file" accept={IMAGE_UPLOAD_ACCEPT} /></label>
-                  <label className="checkbox-field compact-checkbox operation-secondary-field">
-                    <input name="removeLogo" type="checkbox" />
-                    Quitar escudo
-                  </label>
                   <label>Estatus
                     <select name="status" defaultValue={team.status || "active"} aria-label={`Estatus ${team.name}`}>
                       <option value="active">Activo</option>
@@ -5482,6 +5982,10 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       playerId: event.playerId,
       minute: event.minute || "",
       minuteLabel: event.minuteLabel || "",
+      subtype: event.subtype || event.cardDetail || event.metadata?.cardDetail || "",
+      cardDetail: event.cardDetail || event.subtype || event.metadata?.cardDetail || "",
+      countsForAccumulation: event.countsForAccumulation ?? event.metadata?.countsForAccumulation,
+      sourceYellowCardMinutes: event.sourceYellowCardMinutes || event.metadata?.sourceYellowCardMinutes || [],
       suspensionMatches: event.suspensionMatches || 1,
       suspensionIndefinite: Boolean(event.suspensionIndefinite),
       disciplinaryPending: Boolean(event.disciplinaryPending),
@@ -5544,6 +6048,11 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       lockedTeamId: "",
       playerId: "",
       minute: "",
+      minuteLabel: "",
+      subtype: "",
+      cardDetail: "",
+      countsForAccumulation: type === "yellow" ? true : undefined,
+      sourceYellowCardMinutes: [],
       suspensionMatches: type === "red" ? Number(league.rules?.defaultRedSuspensionMatches || 1) : 0,
       suspensionIndefinite: false,
       reason: "",
@@ -5588,6 +6097,44 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     setObservations((current) => [String(current || "").trim(), line].filter(Boolean).join("\n"));
   }
 
+  function normalizeEventDraftForSave(draft, currentEvents) {
+    if (!draft || draft.type !== "yellow" || !draft.playerId) return draft;
+    const draftIndex = currentEvents.findIndex((item) => item.id === draft.id);
+    const earlierEvents = draftIndex >= 0 ? currentEvents.slice(0, draftIndex) : currentEvents;
+    const previousYellows = earlierEvents.filter((item) => (
+      item.id !== draft.id &&
+      item.type === "yellow" &&
+      item.playerId === draft.playerId &&
+      item.teamId === draft.teamId
+    ));
+    if (previousYellows.length) {
+      return {
+        ...draft,
+        subtype: "double_yellow_second",
+        cardDetail: "double_yellow_second",
+        countsForAccumulation: false,
+        sourceYellowCardMinutes: previousYellows
+          .map((item) => item.minuteLabel || item.minute)
+          .filter((minute) => hasRecordedAdminMinute(minute)),
+        suspensionMatches: 1,
+        suspensionIndefinite: false,
+        disciplinaryPending: false,
+        reason: draft.reason || "Segunda amarilla"
+      };
+    }
+    return {
+      ...draft,
+      subtype: "",
+      cardDetail: "",
+      countsForAccumulation: true,
+      sourceYellowCardMinutes: [],
+      suspensionMatches: 0,
+      suspensionIndefinite: false,
+      disciplinaryPending: false,
+      reason: ""
+    };
+  }
+
   function saveEventDraft() {
     if (!eventDraft) return;
     if (eventDraft.type === "injury_note" || eventDraft.type === "other_note") {
@@ -5603,13 +6150,15 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       return;
     }
 
+    let savedDraft = eventDraft;
     setEvents((current) => {
+      savedDraft = normalizeEventDraftForSave(eventDraft, current);
       const exists = current.some((item) => item.id === eventDraft.id);
       return exists
-        ? current.map((item) => item.id === eventDraft.id ? eventDraft : item)
-        : [...current, eventDraft];
+        ? current.map((item) => item.id === eventDraft.id ? savedDraft : item)
+        : [...current, savedDraft];
     });
-    setEventTeamId(eventDraft.teamId || selectedEventTeamId);
+    setEventTeamId(savedDraft.teamId || selectedEventTeamId);
     setEventDraft(null);
   }
 
@@ -5630,6 +6179,11 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       lockedTeamId: "",
       playerId: "",
       minute: "",
+      minuteLabel: "",
+      subtype: "",
+      cardDetail: "",
+      countsForAccumulation: undefined,
+      sourceYellowCardMinutes: [],
       suspensionMatches: 0,
       suspensionIndefinite: false,
       reason: "",
@@ -5823,17 +6377,19 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     const playerNumber = getPlayerNumberForTeam(league, eventItem.playerId, playerTeamId);
     const eventSide = eventTeamId === selectedMatch.homeTeamId ? "home" : "away";
 
+    const doubleYellowClass = isAdminSecondYellowEvent(eventItem) ? "event-kind-double-yellow" : "";
+
     return (
-      <article className={`event-row admin-sheet-timeline-event event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
-        <b aria-hidden="true">{getMatchEventIcon(eventItem.type)}</b>
-        <time>{getAdminMinuteText(eventItem.minute)}</time>
+      <article className={`event-row admin-sheet-timeline-event event-side-${eventSide} event-kind-${eventItem.type} ${doubleYellowClass} ${isLatest ? "is-latest" : ""}`} key={eventItem.id}>
+        <b aria-hidden="true">{getMatchEventIcon(eventItem.type, eventItem)}</b>
+        <time>{getAdminEventMinuteText(eventItem)}</time>
         <div>
-          <strong>{getMatchEventLabel(eventItem.type)}</strong>
+          <strong>{getMatchEventLabel(eventItem.type, eventItem)}</strong>
           <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
           <small>{eventTeam?.name || "Equipo"}</small>
         </div>
-        <button type="button" onClick={() => openEventModal(eventItem.type, eventTeamId, eventItem)} aria-label={`Editar ${getMatchEventLabel(eventItem.type)}`}>Editar</button>
-        <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)} aria-label={`Quitar ${getMatchEventLabel(eventItem.type)}`}>Quitar</button>
+        <button type="button" onClick={() => openEventModal(eventItem.type, eventTeamId, eventItem)} aria-label={`Editar ${getMatchEventLabel(eventItem.type, eventItem)}`}>Editar</button>
+        <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)} aria-label={`Quitar ${getMatchEventLabel(eventItem.type, eventItem)}`}>Quitar</button>
       </article>
     );
   }
@@ -5846,14 +6402,16 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     const playerNumber = getPlayerNumberForTeam(league, eventItem.playerId, playerTeamId);
     const eventSide = eventTeamId === selectedMatch.homeTeamId ? "home" : "away";
 
+    const doubleYellowClass = isAdminSecondYellowEvent(eventItem) ? "event-kind-double-yellow" : "";
+
     return (
-      <article className={`admin-sheet-final-event event-kind-${eventItem.type} event-side-${eventSide}`} key={`${eventItem.id}-final-${index}`}>
-        <b aria-hidden="true">{getMatchEventIcon(eventItem.type)}</b>
+      <article className={`admin-sheet-final-event event-kind-${eventItem.type} ${doubleYellowClass} event-side-${eventSide}`} key={`${eventItem.id}-final-${index}`}>
+        <b aria-hidden="true">{getMatchEventIcon(eventItem.type, eventItem)}</b>
         <div>
-          <strong>{getMatchEventLabel(eventItem.type)}</strong>
+          <strong>{getMatchEventLabel(eventItem.type, eventItem)}</strong>
           <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
         </div>
-        <small>{getAdminMinuteText(eventItem.minute) ? `${getAdminMinuteText(eventItem.minute)} · ` : ""}{eventTeam?.name || "Equipo"}</small>
+        <small>{getAdminEventMinuteText(eventItem) ? `${getAdminEventMinuteText(eventItem)} · ` : ""}{eventTeam?.name || "Equipo"}</small>
       </article>
     );
   }
@@ -5867,13 +6425,13 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     const eventPlayers = getEventPlayersForDisplay(eventDraft, playerTeamId);
     const composerTitle = isNoteEvent
       ? eventDraft.type === "injury_note" ? "Registrar lesion" : "Registrar incidencia"
-      : getMatchEventLabel(eventDraft.type);
+      : getMatchEventLabel(eventDraft.type, eventDraft);
     const suggestedPlayers = eventPlayers;
 
     return (
       <section className="admin-sheet-event-composer" ref={eventComposerRef} aria-label={`Capturar ${composerTitle}`}>
         <header>
-          <span aria-hidden="true">{isNoteEvent ? eventDraft.type === "injury_note" ? "✚" : "⋯" : getMatchEventIcon(eventDraft.type)}</span>
+          <span aria-hidden="true">{isNoteEvent ? eventDraft.type === "injury_note" ? "✚" : "⋯" : getMatchEventIcon(eventDraft.type, eventDraft)}</span>
           <div>
             <small>{eventTeam?.name || "Equipo"} · {eventDraft.type === "own_goal" ? "Jugador rival" : "Jugador del equipo"}</small>
             <strong>{composerTitle}</strong>
@@ -5999,7 +6557,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     ? [selectedMatch.playoffRound || "Liguilla", selectedMatch.playoffLeg].filter(Boolean).join(" | ")
     : `Jornada ${selectedMatch.round || "-"}`;
   const yellowCardCount = cleanEvents.filter((item) => item.type === "yellow").length;
-  const redCardCount = cleanEvents.filter((item) => item.type === "red").length;
+  const redCardCount = cleanEvents.filter(isAdminRedLikeEvent).length;
   const ownGoalCount = cleanEvents.filter((item) => item.type === "own_goal").length;
   const injuryNoteCount = String(observations || "").split("\n").filter((line) => normalizeAdminSearchTerm(line).includes("lesion")).length;
   const eventTotalCount = cleanEvents.length;
@@ -6069,7 +6627,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
         const goalsLabel = isDefaultSheet
           ? `${homeGoalEvents}-${awayGoalEvents} reales, solo para jugadores`
           : String(goalEvents.length);
-        const confirmed = window.confirm(`Antes de guardar, verifica el acta:\n\nTipo: ${modeLabel}\nMarcador oficial: ${expectedHomeGoals}-${expectedAwayGoals}\nGoles capturados: ${goalsLabel}\nAmarillas: ${cleanEvents.filter((item) => item.type === "yellow").length}\nRojas: ${cleanEvents.filter((item) => item.type === "red").length}${editWarning}\n¿Guardar acta?`);
+        const confirmed = window.confirm(`Antes de guardar, verifica el acta:\n\nTipo: ${modeLabel}\nMarcador oficial: ${expectedHomeGoals}-${expectedAwayGoals}\nGoles capturados: ${goalsLabel}\nAmarillas: ${cleanEvents.filter((item) => item.type === "yellow").length}\nRojas: ${cleanEvents.filter(isAdminRedLikeEvent).length}${editWarning}\n¿Guardar acta?`);
         if (!confirmed) return;
 
         try {
@@ -6545,6 +7103,9 @@ function DisciplineControlPanel({
     competitionId: disciplineCompetitionId,
     teamId: disciplineTeamId
   })), [disciplineCompetitionId, disciplineQuery, disciplineTeamId, league, manualHistory]);
+  const suspendedCount = rows.filter((row) => row.status === "suspended").length;
+  const warningCount = rows.filter((row) => row.status === "warning").length;
+  const trackingCount = rows.filter((row) => row.status === "tracking").length;
 
   function submitAdjustment(event) {
     event.preventDefault();
@@ -6565,55 +7126,34 @@ function DisciplineControlPanel({
   }
 
   return (
-    <section className="panel">
+    <section className="panel admin-data-panel commission-panel discipline-control-panel">
       <SectionHeading eyebrow="Comision disciplinaria" title="Control de amarillas" />
-      <p className="helper-text">
-        Los goles se mantienen por categoria. Las amarillas pueden operar por categoria o compartidas en toda la liga segun Reglas.
-        Cuando se registra cumplimiento, la acumulacion disciplinaria se reinicia y deja de aparecer en este control; la ficha del jugador conserva sus tarjetas del torneo.
-      </p>
-      {notice && <p className="auth-ok">{notice}</p>}
-
-      <div className="discipline-admin-grid">
-        <form className="discipline-admin-form" onSubmit={submitAdjustment}>
-          <h3>Ajuste manual</h3>
-          <label>Jugador
-            <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador para ajustar..." />
-          </label>
-          <label>Torneo relacionado
-            <CompetitionSelect league={league} name="competitionId" defaultValue={getDefaultCompetitionId(league)} />
-          </label>
-          <label>Movimiento
-            <select name="direction" defaultValue="add">
-              <option value="add">Sumar amarilla</option>
-              <option value="subtract">Restar amarilla</option>
-            </select>
-          </label>
-          <label>Cantidad
-            <input name="value" type="number" min="1" max="10" defaultValue="1" />
-          </label>
-          <label>Fecha
-            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
-          </label>
-          <label className="wide-field">Motivo
-            <textarea name="reason" required placeholder="Ej. Correccion de cedula, acuerdo de comision." />
-          </label>
-          <button className="primary" type="submit" disabled={!players.length}>Guardar ajuste</button>
-        </form>
-
-        <form className="discipline-admin-form" onSubmit={submitReset}>
-          <h3>Cumplimiento / reset</h3>
-          <label>Jugador
-            <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador suspendido..." />
-          </label>
-          <label>Fecha
-            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
-          </label>
-          <label className="wide-field">Motivo
-            <textarea name="reason" required placeholder="Ej. Cumplio partido de suspension por acumulacion." />
-          </label>
-          <button className="primary" type="submit" disabled={!players.length}>Marcar cumplida</button>
-        </form>
+      <div className="admin-data-hero discipline-hero">
+        <span><AdminIcon type="discipline" /></span>
+        <div>
+          <strong>Disciplina</strong>
+          <small>Control de amarillas, acumulaciones y movimientos manuales por torneo.</small>
+        </div>
+        <b>{(league.rules?.disciplineScope || "competition") === "league" ? "Liga completa" : "Por categoria"}</b>
       </div>
+      <div className="discipline-summary-grid" aria-label="Resumen disciplinario">
+        <article className="is-danger">
+          <span>Suspendidos</span>
+          <strong>{suspendedCount}</strong>
+          <small>requieren cumplimiento</small>
+        </article>
+        <article className="is-warning">
+          <span>En riesgo</span>
+          <strong>{warningCount}</strong>
+          <small>a una amarilla</small>
+        </article>
+        <article>
+          <span>Seguimiento</span>
+          <strong>{trackingCount}</strong>
+          <small>con acumulacion</small>
+        </article>
+      </div>
+      {notice && <p className="auth-ok">{notice}</p>}
 
       <div className="discipline-admin-list">
         <div className="discipline-list-head">
@@ -6664,18 +7204,18 @@ function DisciplineControlPanel({
         </div>
         {filteredRows.map((row) => (
           <article className={`discipline-admin-card ${row.status}`} key={row.player.id}>
-            <div>
+            <span className="discipline-card-mark">{row.yellowCards}</span>
+            <div className="discipline-card-main">
               <strong>{row.player.name}</strong>
               <span>{row.team?.name || "Sin equipo"}{row.linkedPlayers?.length > 1 ? ` | ${row.linkedPlayers.length} registros vinculados` : ""}</span>
             </div>
-            <div>
+            <div className="discipline-card-count">
               <small>Amarillas</small>
-              <span>{row.yellowCards}/{row.yellowLimit}</span>
+              <strong>{row.yellowCards}/{row.yellowLimit}</strong>
+              <i style={{ width: `${Math.min(100, Math.max(0, (Number(row.yellowCards || 0) / Number(row.yellowLimit || 1)) * 100))}%` }} />
             </div>
-            <div>
-              <small>Estado</small>
-              <span>{row.message}</span>
-            </div>
+            <span className={`discipline-status-pill ${row.status}`}>{getDisciplineStatusLabel(row.status)}</span>
+            <p className="discipline-card-message">{row.message}</p>
             <DisciplineAdminTrace league={league} row={row} />
           </article>
         ))}
@@ -6683,7 +7223,57 @@ function DisciplineControlPanel({
         {Boolean(rows.length) && !filteredRows.length && <p className="empty">No hay jugadores que coincidan con los filtros.</p>}
       </div>
 
-      <div className="discipline-admin-list">
+      <div className="discipline-admin-grid">
+        <form className="discipline-admin-form" onSubmit={submitAdjustment}>
+          <div className="discipline-form-head">
+            <h3>Ajuste manual</h3>
+            <small>Suma o corrige amarillas sin capturar un acta.</small>
+          </div>
+          <label>Jugador
+            <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador para ajustar..." />
+          </label>
+          <label>Torneo relacionado
+            <CompetitionSelect league={league} name="competitionId" defaultValue={getDefaultCompetitionId(league)} />
+          </label>
+          <div className="discipline-form-row">
+            <label>Movimiento
+              <select name="direction" defaultValue="add">
+                <option value="add">Sumar amarilla</option>
+                <option value="subtract">Restar amarilla</option>
+              </select>
+            </label>
+            <label>Cantidad
+              <input name="value" type="number" min="1" max="10" defaultValue="1" />
+            </label>
+          </div>
+          <label>Fecha
+            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+          </label>
+          <label className="wide-field">Motivo
+            <textarea name="reason" required placeholder="Ej. Correccion de cedula, acuerdo de comision." />
+          </label>
+          <button className="primary" type="submit" disabled={!players.length}>Guardar ajuste</button>
+        </form>
+
+        <form className="discipline-admin-form" onSubmit={submitReset}>
+          <div className="discipline-form-head">
+            <h3>Cumplimiento</h3>
+            <small>Reinicia la acumulacion despues de cumplir sancion.</small>
+          </div>
+          <label>Jugador
+            <SearchablePlayerSelect league={league} name="playerId" players={players} placeholder="Buscar jugador suspendido..." />
+          </label>
+          <label>Fecha
+            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+          </label>
+          <label className="wide-field">Motivo
+            <textarea name="reason" required placeholder="Ej. Cumplio partido de suspension por acumulacion." />
+          </label>
+          <button className="primary" type="submit" disabled={!players.length}>Marcar cumplida</button>
+        </form>
+      </div>
+
+      <div className="discipline-admin-list manual-history">
         <div className="discipline-list-head">
           <div>
             <h3>Historial manual</h3>
@@ -6695,7 +7285,8 @@ function DisciplineControlPanel({
             const isReset = item.value === undefined;
             return (
               <article className="discipline-admin-card" key={item.id}>
-                <div>
+                <span className={`discipline-card-mark ${isReset ? "reset" : ""}`}>{isReset ? "OK" : Number(item.value || 0) > 0 ? `+${item.value}` : item.value}</span>
+                <div className="discipline-card-main">
                   <strong>{player?.name || "Jugador eliminado"}</strong>
                   <span>{isReset ? "Cumplimiento / reset" : `${Number(item.value || 0) > 0 ? "+" : ""}${item.value} amarilla(s)`}</span>
                 </div>
@@ -6723,6 +7314,12 @@ function DisciplineControlPanel({
   );
 }
 
+function getDisciplineStatusLabel(status) {
+  if (status === "suspended") return "Suspendido";
+  if (status === "warning") return "En riesgo";
+  return "Seguimiento";
+}
+
 function disciplineRowMatchesFilters(league, row, filters) {
   if (filters.status !== "all" && row.status !== filters.status) return false;
   const linkedPlayers = row.linkedPlayers?.length ? row.linkedPlayers : [row.player];
@@ -6738,8 +7335,8 @@ function getAdminDisciplineMatchLabel(league, match) {
 }
 
 function getDisciplineTraceMeta(source) {
-  if (source.minuteLabel) return `${source.minuteLabel}'`;
-  if (source.minute !== undefined && source.minute !== null && source.minute !== "") return `${source.minute}'`;
+  if (hasRecordedAdminMinute(source.minuteLabel)) return `${source.minuteLabel}'`;
+  if (hasRecordedAdminMinute(source.minute)) return `${source.minute}'`;
   return "";
 }
 
@@ -6899,17 +7496,35 @@ function getAdminMinuteText(value) {
   return hasRecordedAdminMinute(value) ? `${value}'` : "";
 }
 
-function getMatchEventLabel(type) {
+function getAdminEventMinuteText(event) {
+  return getAdminMinuteText(event?.minuteLabel || event?.minute);
+}
+
+function getAdminEventCardDetail(event) {
+  return event?.cardDetail || event?.subtype || event?.metadata?.cardDetail || "";
+}
+
+function isAdminSecondYellowEvent(event) {
+  return Boolean(event) && event.type === "yellow" && getAdminEventCardDetail(event) === "double_yellow_second";
+}
+
+function isAdminRedLikeEvent(event) {
+  return event?.type === "red" || isAdminSecondYellowEvent(event);
+}
+
+function getMatchEventLabel(type, event = null) {
   if (type === "goal") return "Gol";
   if (type === "own_goal") return "Autogol";
+  if (type === "yellow" && isAdminSecondYellowEvent(event)) return "Segunda amarilla + roja";
   if (type === "yellow") return "Amarilla";
   if (type === "red") return "Roja";
   return "Evento";
 }
 
-function getMatchEventIcon(type) {
+function getMatchEventIcon(type, event = null) {
   if (type === "goal") return "⚽";
-  if (type === "own_goal") return "↩";
+  if (type === "own_goal") return "⚽";
+  if (type === "yellow" && isAdminSecondYellowEvent(event)) return "🟨🟥";
   if (type === "yellow") return "🟨";
   if (type === "red") return "🟥";
   return "•";
@@ -6950,7 +7565,13 @@ function getPendingDisciplinaryReviews(league) {
           resolved: hasResolution
         };
       })
-  )).filter((item) => item.player && !item.resolved);
+  ))
+    .filter((item) => item.player && !item.resolved)
+    .sort((a, b) => (
+      String(b.match?.date || "").localeCompare(String(a.match?.date || "")) ||
+      Number(b.match?.round || 0) - Number(a.match?.round || 0) ||
+      String(b.id || "").localeCompare(String(a.id || ""))
+    ));
 }
 
 function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, onResolveMatchDiscipline }) {
@@ -6976,7 +7597,24 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
       : (league.sanctions || [])
   };
   const sanctions = activeLeague.sanctions || [];
-  const activeSanctions = sanctions.filter((sanction) => sanction.status !== "cleared" && sanction.status !== "revoked");
+  const suspensionNoticesBySanctionId = useMemo(() => {
+    const map = new Map();
+    for (const notice of calculateSuspensionNotices(activeLeague)) {
+      const sanctionId = notice.origin?.sanctionId;
+      if (sanctionId) map.set(sanctionId, notice);
+    }
+    return map;
+  }, [activeLeague]);
+  const activeSanctions = sanctions
+    .filter((sanction) => sanction.status !== "cleared" && sanction.status !== "revoked")
+    .filter((sanction) => {
+      if (sanction.indefinite) return true;
+      return suspensionNoticesBySanctionId.get(sanction.id)?.status === "active";
+    })
+    .sort((a, b) => (
+      String(b.date || "").localeCompare(String(a.date || "")) ||
+      String(b.id || "").localeCompare(String(a.id || ""))
+    ));
   const clearedSanctions = sanctions.filter((sanction) => sanction.status === "cleared");
   const pendingReviews = getPendingDisciplinaryReviews(activeLeague);
   const [sanctionNotice, setSanctionNotice] = useState("");
@@ -8376,15 +9014,71 @@ async function getSponsorPayload(form, fallbackImageUrl = "", uploadContext = {}
   return { ...payload, imageUrl };
 }
 
+function TeamLogoUploader({ existingLogoUrl = "", teamName = "" }) {
+  const [logoDataUrl, setLogoDataUrl] = useState("");
+  const [removed, setRemoved] = useState(false);
+  const [error, setError] = useState("");
+  const visibleLogoUrl = removed ? "" : logoDataUrl || existingLogoUrl;
+  const initials = getInitials(teamName || "EQ");
+
+  useEffect(() => {
+    setLogoDataUrl("");
+    setRemoved(false);
+    setError("");
+  }, [existingLogoUrl, teamName]);
+
+  async function handleLogoFile(event) {
+    const file = event.currentTarget.files?.[0];
+    setError("");
+    if (!file) return;
+
+    try {
+      setLogoDataUrl(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE }));
+      setRemoved(false);
+    } catch (uploadError) {
+      event.currentTarget.value = "";
+      setLogoDataUrl("");
+      setError(uploadError.message || "No se pudo preparar el escudo.");
+    }
+  }
+
+  function removeLogo() {
+    setRemoved(true);
+    setLogoDataUrl("");
+    setError("");
+  }
+
+  return (
+    <div className="team-logo-uploader">
+      <input type="hidden" name="logoDataUrl" value={logoDataUrl} />
+      <input type="hidden" name="removeLogo" value={removed ? "on" : ""} />
+      <div className="team-logo-preview" aria-label="Vista previa de escudo de equipo">
+        {visibleLogoUrl ? <img alt="" src={visibleLogoUrl} /> : <span>{initials}</span>}
+      </div>
+      <div className="team-logo-actions">
+        <label className="team-logo-file">
+          {visibleLogoUrl ? "Cambiar escudo" : "Agregar escudo"}
+          <input name="logoFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} onChange={handleLogoFile} />
+        </label>
+        {visibleLogoUrl && <button className="secondary" type="button" onClick={removeLogo}>Quitar</button>}
+        {error && <small className="auth-error">{error}</small>}
+      </div>
+    </div>
+  );
+}
+
 async function getTeamPayload(form, fallbackLogoUrl = "", uploadContext = {}) {
   const payload = getFormPayload(form);
   const file = form.elements.logoFile?.files?.[0];
   const shouldRemoveLogo = payload.removeLogo === "on";
+  const optimizedLogoDataUrl = String(payload.logoDataUrl || "");
   const logoUrl = shouldRemoveLogo
     ? ""
-    : file && file.size
-      ? await resolveImageUpload(file, uploadContext)
-      : fallbackLogoUrl;
+    : optimizedLogoDataUrl
+      ? await resolveImageDataUrlUpload(optimizedLogoDataUrl, uploadContext)
+      : file && file.size
+        ? await resolveImageUpload(file, uploadContext)
+        : fallbackLogoUrl;
 
   return { ...payload, logoUrl };
 }
@@ -9308,9 +10002,18 @@ function ModelNotes() {
   );
 }
 
-function CompetitionSelect({ league, name, defaultValue, value, onChange }) {
+function CompetitionSelect({ league, name, defaultValue, value, onChange, placeholder, required = true, disabled = false, className }) {
+  const valueProps = value === undefined ? { defaultValue } : { value };
   return (
-    <select name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} onChange={onChange} required>
+    <select
+      className={className}
+      name={name}
+      onChange={onChange}
+      required={required}
+      disabled={disabled}
+      {...valueProps}
+    >
+      {placeholder && <option value="">{placeholder}</option>}
       {(league.competitions || []).map((competition) => (
         <option key={competition.id} value={competition.id}>
           {competition.name} | {competition.season}
@@ -9320,10 +10023,24 @@ function CompetitionSelect({ league, name, defaultValue, value, onChange }) {
   );
 }
 
-function TeamSelect({ league, name, defaultValue, value, onChange }) {
+function TeamSelect({ league, name, defaultValue, value, onChange, placeholder, required = true, disabled = false, disabledTeamIds, className }) {
+  const disabledIds = disabledTeamIds || new Set();
+  const valueProps = value === undefined ? { defaultValue } : { value };
   return (
-    <select name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} onChange={onChange} required>
-      {league.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+    <select
+      className={className}
+      name={name}
+      onChange={onChange}
+      required={required}
+      disabled={disabled}
+      {...valueProps}
+    >
+      {placeholder && <option value="">{placeholder}</option>}
+      {league.teams.map((team) => (
+        <option key={team.id} value={team.id} disabled={disabledIds.has(team.id) && team.id !== value}>
+          {team.name}
+        </option>
+      ))}
     </select>
   );
 }
@@ -9337,13 +10054,21 @@ function getSortedVenues(league, { includeInactive = true } = {}) {
     ));
 }
 
-function VenueSelect({ league, name = "venue", defaultValue = "", ariaLabel, required = false }) {
+function VenueSelect({ league, name = "venue", defaultValue = "", value, onChange, ariaLabel, required = false, placeholder = "Cancha por definir", className }) {
   const activeVenues = getSortedVenues(league, { includeInactive: false });
   const hasDefaultVenue = defaultValue && activeVenues.some((venue) => venue.name === defaultValue);
+  const valueProps = value === undefined ? { defaultValue: defaultValue || "" } : { value };
 
   return (
-    <select name={name} defaultValue={defaultValue || ""} aria-label={ariaLabel} required={required}>
-      <option value="">Cancha por definir</option>
+    <select
+      className={className}
+      name={name}
+      onChange={onChange}
+      aria-label={ariaLabel}
+      required={required}
+      {...valueProps}
+    >
+      <option value="">{placeholder}</option>
       {activeVenues.map((venue) => (
         <option key={venue.id} value={venue.name}>{venue.name}</option>
       ))}

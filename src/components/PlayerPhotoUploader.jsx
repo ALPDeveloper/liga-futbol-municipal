@@ -16,7 +16,9 @@ export function PlayerPhotoUploader({
   addLabel = "Agregar foto del jugador",
   changeLabel = "Cambiar foto",
   removeLabel = "Quitar foto",
-  authorizedLabel = "Foto autorizada"
+  authorizedLabel = "Foto autorizada",
+  authorizeFirstLabel = "Autoriza foto primero",
+  authorizationHint = "Para subir foto, primero marca la autorizacion del jugador."
 }) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [photoDataUrl, setPhotoDataUrl] = useState("");
@@ -146,7 +148,7 @@ export function PlayerPhotoUploader({
         </div>
         <div className="player-photo-actions">
           <label className={`player-photo-file ${!authorized ? "disabled" : ""}`}>
-            {!authorized ? "Autoriza foto primero" : visiblePhotoUrl ? changeLabel : addLabel}
+            {!authorized ? authorizeFirstLabel : visiblePhotoUrl ? changeLabel : addLabel}
             <input disabled={!authorized} type="file" accept={PLAYER_PHOTO_ACCEPT} onChange={handleFileChange} />
           </label>
           {visiblePhotoUrl && (
@@ -163,7 +165,7 @@ export function PlayerPhotoUploader({
             />
             {authorizedLabel}
           </label>
-          {!authorized && <small className="player-photo-permission-hint">Para subir foto, primero marca la autorizacion del jugador.</small>}
+          {!authorized && <small className="player-photo-permission-hint">{authorizationHint}</small>}
         </div>
       </div>
 

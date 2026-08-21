@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS competitions (
 
 CREATE TABLE IF NOT EXISTS league_identities (
   league_id TEXT PRIMARY KEY REFERENCES leagues(id) ON DELETE CASCADE,
+  logo_url TEXT,
   nickname TEXT,
   activities TEXT,
   public_intro TEXT,
@@ -535,6 +536,25 @@ CREATE TABLE IF NOT EXISTS team_roster_permissions (
   enabled_until TEXT,
   notes TEXT,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS access_requests (
+  id TEXT PRIMARY KEY,
+  league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+  requested_role TEXT NOT NULL,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  review_note TEXT,
+  reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  created_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_access_id TEXT REFERENCES user_accesses(id) ON DELETE SET NULL,
+  created_assignment_id TEXT REFERENCES team_user_assignments(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS memberships (

@@ -156,6 +156,15 @@ export async function suspendRefereeMatchSession(token, matchId, payload) {
   return parseResponse(response, "No se pudo suspender el partido");
 }
 
+export async function cancelRefereeMatchSession(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/cancel-live`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo cancelar el partido en vivo");
+}
+
 export async function finishRefereeMatchSession(token, matchId, payload) {
   const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/finish-match`, {
     method: "POST",

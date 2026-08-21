@@ -4,6 +4,7 @@ import {
   fetchRefereePortal,
   fetchRefereeLiveState,
   fetchRefereeMatchReport,
+  cancelRefereeMatchSession,
   finishRefereeMatchSession,
   finalizeRefereeMatchReport,
   resumeRefereeMatchSession,
@@ -32,6 +33,7 @@ import {
   suspendLiveTimer
 } from "../lib/liveMatchClock.js";
 import {
+  clearLiveMatchOperations,
   clearLiveMatchState,
   enqueueLiveOperation,
   getLiveMatchState,
@@ -185,11 +187,11 @@ function isMatchInCapture(match) {
   const workflowStatus = match?.workflowStatus || "";
   const serverTimerStatus = match?.session?.clockState?.timerStatus || "";
   const postMatchStatuses = ["match_finished", "pending_captain_review", "both_signed", "finalized_pending_sync", "finalized", "published"];
-  if (postMatchStatuses.includes(sessionStatus) || postMatchStatuses.includes(workflowStatus)) return false;
+  if (sessionStatus === "cancelled" || postMatchStatuses.includes(sessionStatus) || postMatchStatuses.includes(workflowStatus)) return false;
   return (
     ["in_progress", "temporarily_saved"].includes(sessionStatus) ||
     ["in_progress", "temporarily_saved"].includes(workflowStatus) ||
-    Boolean(match?.session && !["match_finished", "finalized", "published"].includes(sessionStatus)) ||
+    Boolean(match?.session && !["cancelled", "match_finished", "finalized", "published"].includes(sessionStatus)) ||
     Boolean(serverTimerStatus && ![LIVE_TIMER_STATUSES.NOT_STARTED, LIVE_TIMER_STATUSES.FINISHED].includes(serverTimerStatus)) ||
     hasLocalRefereeCapture(match)
   );
@@ -200,7 +202,7 @@ function getOperationalRefereeMatch(matches = []) {
   const activeMatch = sorted.find((match) => isMatchInCapture(match));
   if (activeMatch) return activeMatch;
   const now = Date.now();
-  return sorted.find((match) => getMatchStartTime(match) >= now) || null;
+  return sorted.find((match) => getMatchStartTime(match) >= now) || sorted.find((match) => match?.canCapture) || sorted[0] || null;
 }
 
 function PortalNavIcon({ type }) {
@@ -1087,7 +1089,7 @@ function RefereeReadOnlyActa({ match, reportState, loading, error, onBack }) {
                 {events.map((eventItem, index) => {
                   const eventTeam = eventItem.teamName || (eventItem.teamId === match?.homeTeamId ? match?.homeTeamName : eventItem.teamId === match?.awayTeamId ? match?.awayTeamName : "Equipo");
                   return (
-                    <article className={`event-kind-${eventItem.type || "event"}`} key={eventItem.id || `${eventItem.type}-${index}`}>
+                    <article className={`event-kind-${eventItem.type || "event"} ${getEventToneClass(eventItem)}`} key={eventItem.id || `${eventItem.type}-${index}`}>
                       <b aria-hidden="true">{getEventIcon(eventItem.type, eventItem)}</b>
                       <div>
                         <strong>{eventItem.playerName || eventItem.player || "Jugador no especificado"}</strong>
@@ -1237,6 +1239,17 @@ function clearRefereeActiveCapture(userId) {
   window.localStorage.removeItem(getRefereeActiveCaptureKey(userId));
 }
 
+function createResetLiveTimer() {
+  return createLiveTimerState({
+    currentPeriod: LIVE_PERIODS.PRE_MATCH,
+    timerStatus: LIVE_TIMER_STATUSES.NOT_STARTED,
+    accumulatedSeconds: 0,
+    periodStartedAt: null,
+    clientSessionId: getLiveClientSessionId(),
+    version: 1
+  });
+}
+
 function RefereeLoadingShell() {
   return (
     <main className="page referee-mobile-app portal-loading-page">
@@ -1255,10 +1268,27 @@ function RefereeLoadingShell() {
   );
 }
 
+function getEventCardDetail(eventItem) {
+  return eventItem?.cardDetail || eventItem?.subtype || eventItem?.metadata?.cardDetail || "";
+}
+
+function isSecondYellowEvent(eventItem) {
+  return Boolean(eventItem) && eventItem.type === "yellow" && getEventCardDetail(eventItem) === "double_yellow_second";
+}
+
+function isDoubleYellowRedEvent(eventItem) {
+  return Boolean(eventItem) && eventItem.type === "red" && getEventCardDetail(eventItem) === "double_yellow";
+}
+
+function getEventToneClass(eventItem) {
+  if (isSecondYellowEvent(eventItem) || isDoubleYellowRedEvent(eventItem)) return "event-kind-double-yellow";
+  return "";
+}
+
 function getEventLabel(type, eventItem = null) {
-  if (eventItem?.cardDetail === "double_yellow") return "Roja por 2a amarilla";
-  if (eventItem?.cardDetail === "double_yellow_second") return "2a amarilla";
-  if (eventItem?.cardDetail === "double_yellow_first") return "Amarilla";
+  if (isDoubleYellowRedEvent(eventItem)) return "Roja por 2a amarilla";
+  if (isSecondYellowEvent(eventItem)) return "Segunda amarilla + roja";
+  if (getEventCardDetail(eventItem) === "double_yellow_first") return "Amarilla";
   if (type === "goal") return "Gol";
   if (type === "own_goal") return "Autogol";
   if (type === "yellow") return "Amarilla";
@@ -1267,8 +1297,9 @@ function getEventLabel(type, eventItem = null) {
 }
 
 function getEventIcon(type, eventItem = null) {
+  if (isSecondYellowEvent(eventItem) || isDoubleYellowRedEvent(eventItem)) return "🟨🟥";
   if (type === "goal") return "⚽";
-  if (type === "own_goal") return "↩";
+  if (type === "own_goal") return "⚽";
   if (type === "yellow") return "🟨";
   if (type === "red") return "🟥";
   return "•";
@@ -1276,12 +1307,13 @@ function getEventIcon(type, eventItem = null) {
 
 function normalizeDoubleYellowDraftEvents(eventList = []) {
   const baseEvents = eventList
-    .filter((eventItem) => !(eventItem.type === "red" && eventItem.cardDetail === "double_yellow" && eventItem.autoGenerated))
+    .filter((eventItem) => !(eventItem.type === "red" && getEventCardDetail(eventItem) === "double_yellow" && eventItem.autoGenerated))
     .map((eventItem) => {
       if (eventItem.type !== "yellow") return eventItem;
-      if (!["double_yellow_first", "double_yellow_second"].includes(eventItem.cardDetail)) return eventItem;
+      if (!["double_yellow_first", "double_yellow_second"].includes(getEventCardDetail(eventItem))) return eventItem;
       return {
         ...eventItem,
+        subtype: "",
         cardDetail: "",
         countsForAccumulation: true,
         excludedFromAccumulation: false
@@ -1289,14 +1321,10 @@ function normalizeDoubleYellowDraftEvents(eventList = []) {
     });
   const nextEvents = [];
   const firstYellowByPlayer = new Map();
-  const sentOffPlayers = new Set();
 
   for (const eventItem of baseEvents) {
     if (eventItem.type !== "yellow" || !eventItem.playerId) {
       nextEvents.push(eventItem);
-      if (eventItem.type === "red" && eventItem.playerId && eventItem.cardDetail === "double_yellow") {
-        sentOffPlayers.add(eventItem.playerId);
-      }
       continue;
     }
 
@@ -1312,35 +1340,23 @@ function normalizeDoubleYellowDraftEvents(eventList = []) {
     const secondMinute = eventItem.minuteLabel || eventItem.minute || "";
     nextEvents[firstYellow.index] = {
       ...firstYellow.eventItem,
+      subtype: "double_yellow_first",
       cardDetail: "double_yellow_first",
       countsForAccumulation: false,
       excludedFromAccumulation: true
     };
     nextEvents.push({
       ...eventItem,
+      subtype: "double_yellow_second",
       cardDetail: "double_yellow_second",
       countsForAccumulation: false,
-      excludedFromAccumulation: true
+      excludedFromAccumulation: true,
+      suspensionMatches: 1,
+      suspensionIndefinite: false,
+      disciplinaryPending: false,
+      reason: eventItem.reason || "Segunda amarilla",
+      sourceYellowCardMinutes: [firstMinute, secondMinute].filter(Boolean)
     });
-
-    if (!sentOffPlayers.has(playerKey)) {
-      nextEvents.push({
-        ...eventItem,
-        id: `event-double-yellow-${playerKey}-${firstYellow.eventItem.id || firstYellow.index}-${eventItem.id || nextEvents.length}`,
-        type: "red",
-        lockedType: "red",
-        cardDetail: "double_yellow",
-        autoGenerated: true,
-        countsForAccumulation: false,
-        excludedFromAccumulation: true,
-        suspensionMatches: 0,
-        suspensionIndefinite: false,
-        disciplinaryPending: true,
-        reason: DOUBLE_YELLOW_REASON,
-        sourceYellowCardMinutes: [firstMinute, secondMinute].filter(Boolean)
-      });
-      sentOffPlayers.add(playerKey);
-    }
   }
 
   return nextEvents;
@@ -1351,10 +1367,10 @@ function getRecentLiveEvents(eventList = []) {
     .map((eventItem, index) => ({ eventItem, index }))
     .slice(-3)
     .sort((left, right) => {
-      const leftSecondYellow = left.eventItem.type === "yellow" && left.eventItem.cardDetail === "double_yellow_second";
-      const rightSecondYellow = right.eventItem.type === "yellow" && right.eventItem.cardDetail === "double_yellow_second";
-      const leftDoubleRed = left.eventItem.type === "red" && left.eventItem.cardDetail === "double_yellow";
-      const rightDoubleRed = right.eventItem.type === "red" && right.eventItem.cardDetail === "double_yellow";
+      const leftSecondYellow = isSecondYellowEvent(left.eventItem);
+      const rightSecondYellow = isSecondYellowEvent(right.eventItem);
+      const leftDoubleRed = isDoubleYellowRedEvent(left.eventItem);
+      const rightDoubleRed = isDoubleYellowRedEvent(right.eventItem);
       const sameDoubleYellowSequence = (
         left.eventItem.playerId &&
         left.eventItem.playerId === right.eventItem.playerId &&
@@ -1422,6 +1438,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
   const serverSession = match.session || null;
   const serverClock = serverSession?.clockState || {};
   const serverMetadata = serverSession?.metadata || {};
+  const initialEvents = normalizeDoubleYellowDraftEvents(draft?.events || serverMetadata.events || savedEvents);
   const initialTimerState = createTimerStateFromSources({ draft, serverClock });
   const [homeGoals, setHomeGoals] = useState(draft?.homeGoals ?? serverMetadata.homeGoals ?? match.homeGoals ?? 0);
   const [awayGoals, setAwayGoals] = useState(draft?.awayGoals ?? serverMetadata.awayGoals ?? match.awayGoals ?? 0);
@@ -1435,7 +1452,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
   const [defaultWinner, setDefaultWinner] = useState(draft?.defaultWinner || "home");
   const [defaultScore, setDefaultScore] = useState(draft?.defaultScore || "3");
   const [observations, setObservations] = useState(draft?.observations ?? serverMetadata.observations ?? match.observations ?? "");
-  const [events, setEvents] = useState(draft?.events || serverMetadata.events || savedEvents);
+  const [events, setEvents] = useState(initialEvents);
   const [homeCaptainPin, setHomeCaptainPin] = useState(draft?.homeCaptainPin || "");
   const [awayCaptainPin, setAwayCaptainPin] = useState(draft?.awayCaptainPin || "");
   const [sessionId, setSessionId] = useState(draft?.sessionId || serverSession?.id || "");
@@ -1493,7 +1510,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         setPenaltyHomeGoals(reportPayload.penaltyHomeGoals ?? "");
         setPenaltyAwayGoals(reportPayload.penaltyAwayGoals ?? "");
         setObservations(reportPayload.observations || "");
-        setEvents(Array.isArray(reportPayload.events) ? reportPayload.events : []);
+        setEvents(normalizeDoubleYellowDraftEvents(Array.isArray(reportPayload.events) ? reportPayload.events : []));
         if (reportPayload.liveTimer) {
           const nextTimer = createLiveTimerState(reportPayload.liveTimer);
           setLiveTimer(nextTimer);
@@ -1591,7 +1608,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         setDefaultWinner(recovered.defaultWinner || "home");
         setDefaultScore(recovered.defaultScore || "3");
         setObservations(recovered.observations || "");
-        setEvents(Array.isArray(recovered.events) ? recovered.events : []);
+        setEvents(normalizeDoubleYellowDraftEvents(Array.isArray(recovered.events) ? recovered.events : []));
         setSessionId(recovered.sessionId || sessionId);
         if (recovered.liveTimer) {
           const nextTimer = createLiveTimerState(recovered.liveTimer);
@@ -2000,6 +2017,159 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
     return nextTimer;
   }
 
+  function resetLiveCaptureState() {
+    const nextTimer = createResetLiveTimer();
+    setHomeGoals(0);
+    setAwayGoals(0);
+    setExtraTimeEnabled(false);
+    setPenaltiesEnabled(false);
+    setExtraTimeHomeGoals("");
+    setExtraTimeAwayGoals("");
+    setPenaltyHomeGoals("");
+    setPenaltyAwayGoals("");
+    setObservations("");
+    setEvents([]);
+    setHomeCaptainPin("");
+    setAwayCaptainPin("");
+    setEventComposer(null);
+    setEventComposerQuery("");
+    setEventComposerFilter("all");
+    setPlayerSearches({});
+    setLiveTimer(nextTimer);
+    setLiveStarted(false);
+    setLiveRunning(false);
+    setLivePeriod(1);
+    setLiveElapsedSeconds(0);
+    setLiveAlerted(false);
+    setPendingOperationCount(0);
+    setSyncStatus("Sincronizado con LIGATEC");
+    setLiveStorageStatus("Sin respaldo en vivo");
+    releaseWakeLock();
+    return nextTimer;
+  }
+
+  function hasCaptureProgress() {
+    return liveStarted
+      || events.length > 0
+      || Number(homeGoals || 0) !== Number(match.homeGoals ?? 0)
+      || Number(awayGoals || 0) !== Number(match.awayGoals ?? 0)
+      || extraTimeEnabled
+      || penaltiesEnabled
+      || String(extraTimeHomeGoals || "").trim()
+      || String(extraTimeAwayGoals || "").trim()
+      || String(penaltyHomeGoals || "").trim()
+      || String(penaltyAwayGoals || "").trim()
+      || String(observations || "").trim()
+      || String(homeCaptainPin || "").trim()
+      || String(awayCaptainPin || "").trim()
+      || sheetMode !== "played";
+  }
+
+  async function cancelLiveCapture() {
+    const hasCapturedData = hasCaptureProgress();
+    const warning = hasCapturedData
+      ? "¿Cancelar el modo en vivo?\n\nSe borrara el cronometro, marcador, eventos y borrador en vivo de este partido. El acta volvera a quedar sin iniciar para que puedas capturarla de nuevo, por ejemplo en modo manual.\n\nEsta accion no publica nada y no se puede deshacer desde esta pantalla."
+      : "¿Cancelar el modo en vivo?\n\nEl partido volvera a quedar sin iniciar para que puedas elegir otro modo de captura.";
+    if (!window.confirm(warning)) return;
+
+    setSaving(true);
+    setMessage("Cancelando modo en vivo...");
+    try {
+      const nextTimer = createResetLiveTimer();
+      const response = await cancelRefereeMatchSession(authToken, match.id, {
+        sessionId,
+        captureMode: "manual",
+        period: "",
+        clockState: {
+          liveStarted: false,
+          liveRunning: false,
+          livePeriod: 1,
+          liveElapsedSeconds: 0,
+          liveTimer: nextTimer,
+          currentPeriod: nextTimer.currentPeriod,
+          timerStatus: nextTimer.timerStatus,
+          clientSessionId: nextTimer.clientSessionId
+        },
+        metadata: {
+          homeGoals: 0,
+          awayGoals: 0,
+          events: [],
+          observations: "",
+          cancelledAt: new Date().toISOString()
+        }
+      });
+      resetLiveCaptureState();
+      clearRefereeDraft(draftKey);
+      await clearLiveMatchOperations(match.id);
+      await clearLiveMatchState(match.id);
+      onSaved(response.payload || null, {
+        suppressNotice: true
+      });
+    } catch (cancelError) {
+      setMessage(cancelError.message || "No se pudo cancelar el modo en vivo.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelManualCapture() {
+    const warning = hasCaptureProgress()
+      ? "¿Cancelar la captura manual?\n\nSe borrara el marcador, eventos, observaciones y cualquier borrador temporal de este partido. El acta quedara limpia para capturarla de nuevo.\n\nEsta accion no publica nada y no se puede deshacer desde esta pantalla."
+      : "¿Cancelar la captura manual?\n\nEl acta quedara limpia y volveras a la lista de partidos.";
+    if (!window.confirm(warning)) return;
+
+    setSaving(true);
+    setMessage("Cancelando captura manual...");
+    try {
+      const nextTimer = createResetLiveTimer();
+      const response = await cancelRefereeMatchSession(authToken, match.id, {
+        sessionId,
+        captureMode: "manual",
+        period: "",
+        clockState: {
+          liveStarted: false,
+          liveRunning: false,
+          livePeriod: 1,
+          liveElapsedSeconds: 0,
+          liveTimer: nextTimer,
+          currentPeriod: nextTimer.currentPeriod,
+          timerStatus: nextTimer.timerStatus,
+          clientSessionId: nextTimer.clientSessionId
+        },
+        metadata: {
+          homeGoals: 0,
+          awayGoals: 0,
+          events: [],
+          observations: "",
+          cancelledAt: new Date().toISOString(),
+          cancelledMode: "manual"
+        }
+      });
+      resetLiveCaptureState();
+      clearRefereeDraft(draftKey);
+      await clearLiveMatchOperations(match.id);
+      await clearLiveMatchState(match.id);
+      onSaved(response.payload || null, {
+        suppressNotice: true
+      });
+    } catch (cancelError) {
+      setMessage(cancelError.message || "No se pudo cancelar la captura manual.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleBackFromCapture() {
+    if (saving) return;
+    if (!isLiveCapture && hasCaptureProgress()) {
+      await saveDraft({
+        message: "Captura manual guardada temporalmente. Puedes continuarla desde partidos pendientes."
+      });
+      return;
+    }
+    onCancel();
+  }
+
   function buildSessionPayload(nextStatus = {}) {
     const captureMode = nextStatus.captureMode || getCaptureMode();
     return {
@@ -2313,6 +2483,10 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
     setPlayerSearches((current) => ({ ...current, [eventId]: value }));
   }
 
+  function clearPlayerSearch(eventId) {
+    setPlayerSearches((current) => ({ ...current, [eventId]: "" }));
+  }
+
   function selectEventPlayer(eventId, player) {
     updateEvent(eventId, "playerId", player.id);
     setPlayerSearches((current) => ({
@@ -2622,10 +2796,10 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
           countsForAccumulation: item.type === "yellow" ? item.countsForAccumulation !== false && !item.excludedFromAccumulation : undefined,
           excludedFromAccumulation: item.type === "yellow" ? item.countsForAccumulation === false || Boolean(item.excludedFromAccumulation) : undefined,
           sourceYellowCardMinutes: Array.isArray(item.sourceYellowCardMinutes) ? item.sourceYellowCardMinutes : undefined,
-          suspensionMatches: 0,
-          suspensionIndefinite: false,
-          disciplinaryPending: item.type === "red",
-          reason: item.type === "red" ? item.reason : ""
+          suspensionMatches: item.type === "yellow" && isSecondYellowEvent(item) ? 1 : item.type === "red" ? Number(item.suspensionMatches || 0) : 0,
+          suspensionIndefinite: item.type === "red" ? Boolean(item.suspensionIndefinite) : false,
+          disciplinaryPending: item.type === "red" ? Boolean(item.disciplinaryPending ?? true) : false,
+          reason: item.type === "red" || isSecondYellowEvent(item) ? item.reason || "Segunda amarilla" : ""
         }))
       });
       clearRefereeDraft(draftKey);
@@ -2644,6 +2818,8 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
       ? eventComposer.teamId === match.homeTeamId ? match.awayTeamName : match.homeTeamName
       : eventTeamName;
     const players = getEventComposerPlayers();
+    const query = normalizeSearch(eventComposerQuery);
+    const suggestedPlayers = query ? players.slice(0, 6) : [];
     const filters = [
       ["all", "Todos"],
       ["captains", "Capitanes"],
@@ -2665,12 +2841,31 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         </div>
         <label className="referee-event-composer-search">
           Buscar jugador de {playerTeamName}
-          <input
-            value={eventComposerQuery}
-            onChange={(event) => setEventComposerQuery(event.target.value)}
-            placeholder="Numero, nombre o apellido"
-          />
+          <div className="referee-search-input-wrap">
+            <input
+              value={eventComposerQuery}
+              onChange={(event) => setEventComposerQuery(event.target.value)}
+              placeholder="Numero, nombre o apellido"
+            />
+            {eventComposerQuery && (
+              <button type="button" className="referee-search-clear" onClick={() => setEventComposerQuery("")} aria-label="Limpiar busqueda">
+                x
+              </button>
+            )}
+          </div>
         </label>
+        {suggestedPlayers.length > 0 && (
+          <div className="referee-player-suggestions composer" aria-label="Coincidencias de jugador">
+            {suggestedPlayers.map((player) => (
+              <button key={player.id} type="button" onClick={() => confirmEventComposer(player)}>
+                <b>{player.number || "-"}</b>
+                <span>{player.name}</span>
+                {player.isCaptain && <small>Capitan</small>}
+                {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="referee-event-composer-filters" role="tablist" aria-label="Filtros de jugadores">
           {filters.map(([value, label]) => (
             <button className={eventComposerFilter === value ? "active" : ""} key={value} type="button" onClick={() => setEventComposerFilter(value)}>
@@ -2708,7 +2903,8 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
     });
     const visiblePlayers = filteredPlayers.length ? filteredPlayers : players;
     const suggestedPlayers = playerQuery ? filteredPlayers.slice(0, 5) : [];
-    const isDoubleYellowRed = eventItem.type === "red" && eventItem.cardDetail === "double_yellow";
+    const toneClass = getEventToneClass(eventItem);
+    const isDoubleYellowRed = isDoubleYellowRedEvent(eventItem);
     const selectedRedReason = RED_CARD_REASON_OPTIONS.includes(eventItem.reason)
       ? eventItem.reason
       : eventItem.redReasonMode === "other" || eventItem.reason
@@ -2716,7 +2912,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
       : "";
     const showCustomRedReason = eventItem.type === "red" && !isDoubleYellowRed && selectedRedReason === "__other__";
     return (
-      <article className={`referee-event-row event-side-${eventSide} event-kind-${eventItem.type} ${isLatest ? "is-latest" : ""} ${eventItem.type === "red" && !eventItem.reason ? "needs-reason" : ""}`} key={eventItem.id}>
+      <article className={`referee-event-row event-side-${eventSide} event-kind-${eventItem.type} ${toneClass} ${isLatest ? "is-latest" : ""} ${eventItem.type === "red" && !eventItem.reason ? "needs-reason" : ""}`} key={eventItem.id}>
         <div className="referee-event-row-head">
           <div>
             <strong>#{index + 1} <span className="event-icon" aria-hidden="true">{getEventIcon(eventItem.type, eventItem)}</span>{getEventLabel(eventItem.type, eventItem)}</strong>
@@ -2735,12 +2931,19 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
           <small>Fijo segun el boton elegido</small>
         </div>
         <label className="referee-player-search">Buscar jugador
-          <input
-            value={playerSearch}
-            onChange={(event) => updatePlayerSearch(eventItem.id, event.target.value)}
-            placeholder={`Numero, nombre o apellido de ${playerTeam}`}
-            aria-label="Buscar jugador del evento"
-          />
+          <div className="referee-search-input-wrap">
+            <input
+              value={playerSearch}
+              onChange={(event) => updatePlayerSearch(eventItem.id, event.target.value)}
+              placeholder={`Numero, nombre o apellido de ${playerTeam}`}
+              aria-label="Buscar jugador del evento"
+            />
+            {playerSearch && (
+              <button type="button" className="referee-search-clear" onClick={() => clearPlayerSearch(eventItem.id)} aria-label="Limpiar busqueda">
+                x
+              </button>
+            )}
+          </div>
           {suggestedPlayers.length > 0 && (
             <div className="referee-player-suggestions" aria-label="Opciones de jugador">
               {suggestedPlayers.map((player) => (
@@ -2894,7 +3097,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
           {reviewEvents.length ? (
             <div className="referee-review-event-list">
               {reviewEvents.map((eventItem) => (
-                <article className={`event-kind-${eventItem.type}`} key={eventItem.id}>
+                <article className={`event-kind-${eventItem.type} ${getEventToneClass(eventItem)}`} key={eventItem.id}>
                   <b aria-hidden="true">{getEventIcon(eventItem.type, eventItem)}</b>
                   <div>
                     <strong>{getEventLabel(eventItem.type, eventItem)} · {eventItem.minuteLabel || eventItem.minute || "-"}'</strong>
@@ -3024,17 +3227,46 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
   const extraTimeGoalSummary = getExtraTimeGoalSummary(events);
   const liveCanCloseCurrentPeriod = liveTimer.timerStatus !== LIVE_TIMER_STATUSES.FINISHED && (liveRunning || liveTimer.timerStatus === LIVE_TIMER_STATUSES.PAUSED);
 
+  function renderRecentEventsSummary({ className = "" } = {}) {
+    return (
+      <section className={`referee-recent-events ${className}`.trim()}>
+        <div>
+          <strong>Eventos recientes</strong>
+          <span>{events.length ? "Ver todos abajo" : "Sin eventos"}</span>
+        </div>
+        {recentEvents.map((eventItem) => {
+          const rawMinute = eventItem.minuteLabel || eventItem.minute || (isLiveCapture ? getLiveEventMinuteLabel() : "-");
+          const minuteText = String(rawMinute || "-");
+          const minuteSuffix = minuteText === "-" || minuteText.includes("'") ? "" : "'";
+          return (
+            <article key={eventItem.id}>
+              <b className={`referee-recent-event-icon event-kind-${eventItem.type} ${getEventToneClass(eventItem)}`}>{getEventIcon(eventItem.type, eventItem)}</b>
+              <em>{minuteText}{minuteSuffix}</em>
+              <span>{getEventLabel(eventItem.type, eventItem)}</span>
+              <strong>
+                <small>{eventItem.teamId === match.homeTeamId ? getRecentEventTeamAbbreviation(match.homeTeamName) : getRecentEventTeamAbbreviation(match.awayTeamName)}</small>
+                <span className="referee-recent-player-name">{getEventPlayerName(eventItem)}</span>
+              </strong>
+            </article>
+          );
+        })}
+      </section>
+    );
+  }
+
   if (isPostMatchReview) return renderPostMatchReview();
 
   return (
     <form className={`referee-sheet-form ${isLiveCapture ? "referee-live-capture-mode" : ""} ${batterySaver ? "referee-low-power" : ""}`} onSubmit={submitSheet}>
       <div className="referee-acta-title">
-        <button type="button" onClick={onCancel} disabled={saving}>Volver a partidos</button>
-        <div>
-          <div className="referee-acta-brand">
+        <div className="referee-acta-topbar">
+          <div className="referee-acta-brand" aria-label="LIGATEC">
             <img alt="LIGATEC" src={ligatecLogo} />
-            <span>Panel del arbitro</span>
           </div>
+          <button type="button" onClick={handleBackFromCapture} disabled={saving}>Volver a partidos</button>
+        </div>
+        <div className="referee-acta-heading">
+          <span>Panel del arbitro</span>
           <strong>{match.homeTeamName} vs {match.awayTeamName}</strong>
           <small>{captureMode === "live" ? "Acta digital en vivo" : "Captura manual"} | {match.competitionName || "Categoria"} | {formatDate(match.date)} | {match.time || "Hora por definir"} | {match.venue || "Cancha por definir"}</small>
         </div>
@@ -3047,13 +3279,21 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         <span>4. Publica acta</span>
       </div>
 
-      {isLiveCapture && eventComposer && renderEventComposer()}
+      {eventComposer && renderEventComposer()}
 
       {isLiveCapture && !eventComposer && (
         <section className="referee-live-arena" aria-label="Modo partido en vivo">
           <img className="referee-live-logo" alt="" src={ligatecLogo} aria-hidden="true" />
           <div className="referee-live-arena-top">
-            <button type="button" onClick={onCancel} aria-label="Volver">‹</button>
+            <button
+              className={liveStarted ? "referee-live-cancel" : ""}
+              type="button"
+              onClick={liveStarted ? cancelLiveCapture : onCancel}
+              aria-label={liveStarted ? "Cancelar modo en vivo" : "Volver"}
+              disabled={saving}
+            >
+              {liveStarted ? "Cancelar en vivo" : "‹"}
+            </button>
             <div>
               <span>{match.competitionName || "Partido"} · {getMatchDayLabel(match)}</span>
               <strong>{liveStarted ? getLivePeriodName() : "Antes del inicio"}</strong>
@@ -3130,47 +3370,48 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
             <EventQuickButton className="event-red" icon={getEventIcon("red")} title="Incidente" subtitle="Roja" onClick={() => openEventComposer("red", selectedEventTeam)} />
           </div>
 
-          <section className="referee-recent-events">
-            <div>
-              <strong>Eventos recientes</strong>
-              <span>{events.length ? "Ver todos abajo" : "Sin eventos"}</span>
-            </div>
-            {recentEvents.map((eventItem) => (
-              <article key={eventItem.id}>
-                <b className={`referee-recent-event-icon event-kind-${eventItem.type}`}>{getEventIcon(eventItem.type, eventItem)}</b>
-                <em>{eventItem.minuteLabel || eventItem.minute || getLiveEventMinuteLabel()}'</em>
-                <span>{getEventLabel(eventItem.type, eventItem)}</span>
-                <strong>
-                  <small>{eventItem.teamId === match.homeTeamId ? getRecentEventTeamAbbreviation(match.homeTeamName) : getRecentEventTeamAbbreviation(match.awayTeamName)}</small>
-                  <span className="referee-recent-player-name">{getEventPlayerName(eventItem)}</span>
-                </strong>
-              </article>
-            ))}
-          </section>
+          {renderRecentEventsSummary()}
         </section>
       )}
 
-      {!isLiveCapture && (
-      <div className="referee-sheet-head">
-        <div className="referee-score-team home">
-          <b className="referee-team-mark">{getTeamInitials(match.homeTeamName)}</b>
-          <span>Local</span>
-          <strong>{match.homeTeamName}</strong>
-        </div>
-        <div className="referee-score-box">
-          <input aria-label="Goles local" min="0" type="number" value={homeGoals} onChange={(event) => setHomeGoals(event.target.value)} />
-          <span>-</span>
-          <input aria-label="Goles visitante" min="0" type="number" value={awayGoals} onChange={(event) => setAwayGoals(event.target.value)} />
-        </div>
-        <div className="referee-score-team away">
-          <b className="referee-team-mark">{getTeamInitials(match.awayTeamName)}</b>
-          <span>Visitante</span>
-          <strong>{match.awayTeamName}</strong>
-        </div>
-      </div>
+      {!isLiveCapture && !eventComposer && (
+        <section className="referee-manual-score-section" aria-label="Colocar marcador y equipo para eventos">
+          <div className="referee-manual-score-title">
+            <span>Colocar marcador</span>
+            <strong>Selecciona un equipo para capturar eventos</strong>
+          </div>
+          <div className="referee-sheet-head referee-manual-scoreboard">
+            <button
+              className={`referee-score-team home ${selectedEventTeam === match.homeTeamId ? "active" : ""}`}
+              type="button"
+              onClick={() => setSelectedEventTeam(match.homeTeamId)}
+              aria-pressed={selectedEventTeam === match.homeTeamId}
+            >
+              <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
+              <span>Local</span>
+              <strong>{match.homeTeamName}</strong>
+            </button>
+            <div className="referee-score-box">
+              <small>Marcador</small>
+              <input aria-label="Goles local" min="0" type="number" value={homeGoals} onChange={(event) => setHomeGoals(event.target.value)} />
+              <span>-</span>
+              <input aria-label="Goles visitante" min="0" type="number" value={awayGoals} onChange={(event) => setAwayGoals(event.target.value)} />
+            </div>
+            <button
+              className={`referee-score-team away ${selectedEventTeam === match.awayTeamId ? "active" : ""}`}
+              type="button"
+              onClick={() => setSelectedEventTeam(match.awayTeamId)}
+              aria-pressed={selectedEventTeam === match.awayTeamId}
+            >
+              <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
+              <span>Visitante</span>
+              <strong>{match.awayTeamName}</strong>
+            </button>
+          </div>
+        </section>
       )}
 
-      {!isLiveCapture && (
+      {!isLiveCapture && !eventComposer && (
       <div className="referee-sheet-controls">
         <label>Tipo de resultado
           <select value={sheetMode} onChange={(event) => applyDefault(event.target.value)}>
@@ -3190,7 +3431,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
       </div>
       )}
 
-      {sheetMode === "played" && captureMode === "live" && !isLiveCapture && (
+      {sheetMode === "played" && captureMode === "live" && !isLiveCapture && !eventComposer && (
         <section className={`referee-live-panel ${liveStarted ? "is-active" : ""}`} aria-label="Modo partido en vivo">
           <div className="referee-live-mode-card">
             <div>
@@ -3261,31 +3502,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         </section>
       )}
 
-      {sheetMode === "played" && !isLiveCapture && (
-        <div className="referee-team-selector" aria-label="Equipo para nuevo evento">
-          <span>Equipo</span>
-          <button
-            className={selectedEventTeam === match.homeTeamId ? "active" : ""}
-            type="button"
-            onClick={() => setSelectedEventTeam(match.homeTeamId)}
-          >
-            <RefereeTeamMark logoUrl={match.homeTeamLogoUrl} name={match.homeTeamName} />
-            <strong>{getTeamInitials(match.homeTeamName)}</strong>
-            <small>Local</small>
-          </button>
-          <button
-            className={selectedEventTeam === match.awayTeamId ? "active" : ""}
-            type="button"
-            onClick={() => setSelectedEventTeam(match.awayTeamId)}
-          >
-            <RefereeTeamMark logoUrl={match.awayTeamLogoUrl} name={match.awayTeamName} tone="away" />
-            <strong>{getTeamInitials(match.awayTeamName)}</strong>
-            <small>Visitante</small>
-          </button>
-        </div>
-      )}
-
-      {sheetMode === "played" && (
+      {sheetMode === "played" && !eventComposer && (
         <details className="referee-advanced-panel">
           <summary>
             <strong>Opciones de liguilla</strong>
@@ -3331,16 +3548,18 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         </details>
       )}
 
-      {!isLiveCapture && (
+      {!isLiveCapture && !eventComposer && (
       <div className="referee-event-buttons" aria-label="Eventos rapidos del partido">
-        <EventQuickButton className="event-goal" icon={getEventIcon("goal")} title="Gol" subtitle={selectedEventTeam === match.homeTeamId ? "Local" : "Visitante"} onClick={() => addEvent("goal", selectedEventTeam)} />
-        <EventQuickButton className="event-yellow" icon={getEventIcon("yellow")} title="Tarjeta" subtitle="Amarilla" onClick={() => addEvent("yellow", selectedEventTeam)} />
-        <EventQuickButton className="event-own-goal" icon={getEventIcon("own_goal")} title="Autogol" subtitle={selectedEventTeam === match.homeTeamId ? "Local" : "Visitante"} onClick={() => addEvent("own_goal", selectedEventTeam)} />
-        <EventQuickButton className="event-red" icon={getEventIcon("red")} title="Incidente" subtitle="Roja" onClick={() => addEvent("red", selectedEventTeam)} />
+        <EventQuickButton className="event-goal" icon={getEventIcon("goal")} title="Gol" subtitle={selectedEventTeam === match.homeTeamId ? "Local" : "Visitante"} onClick={() => openEventComposer("goal", selectedEventTeam)} />
+        <EventQuickButton className="event-yellow" icon={getEventIcon("yellow")} title="Tarjeta" subtitle="Amarilla" onClick={() => openEventComposer("yellow", selectedEventTeam)} />
+        <EventQuickButton className="event-own-goal" icon={getEventIcon("own_goal")} title="Autogol" subtitle={selectedEventTeam === match.homeTeamId ? "Local" : "Visitante"} onClick={() => openEventComposer("own_goal", selectedEventTeam)} />
+        <EventQuickButton className="event-red" icon={getEventIcon("red")} title="Incidente" subtitle="Roja" onClick={() => openEventComposer("red", selectedEventTeam)} />
       </div>
       )}
 
-      <div className="referee-event-list">
+      {!isLiveCapture && !eventComposer && events.length > 0 && renderRecentEventsSummary({ className: "referee-manual-recent-events" })}
+
+      {!eventComposer && <div className="referee-event-list">
         {latestEvent && (
           <div className="referee-latest-event">
             <span>Ultimo evento registrado</span>
@@ -3359,9 +3578,9 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
           </details>
         )}
         {!events.length && <p className="empty">Agrega goles, tarjetas o autogoles con los botones superiores.</p>}
-      </div>
+      </div>}
 
-      {(loadingReport || reportState?.report) && (
+      {!eventComposer && (loadingReport || reportState?.report) && (
         <section className="referee-pin-panel">
           <div className="referee-pin-panel-head">
             <span>Acta preliminar</span>
@@ -3418,10 +3637,10 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         </section>
       )}
 
-      <label>Observaciones
+      {!eventComposer && <label>Observaciones
         <textarea value={observations} onChange={(event) => setObservations(event.target.value)} placeholder="Notas del partido, incidentes o acuerdos." />
-      </label>
-      {!reportState?.report && getCaptureMode() === "live" && sheetMode === "played" && (match.homePinRequired || match.awayPinRequired) && (
+      </label>}
+      {!eventComposer && !reportState?.report && getCaptureMode() === "live" && sheetMode === "played" && (match.homePinRequired || match.awayPinRequired) && (
         <div className="referee-pin-panel">
           <div className="referee-pin-panel-head">
             <span>Firma digital del acta</span>
@@ -3455,11 +3674,18 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         </div>
       )}
       {message && <p className={message.startsWith("No se") || message.startsWith("Revisa") || message.startsWith("Toda") || message.startsWith("Captura") || message.startsWith("Se requiere") || message.startsWith("PIN") ? "auth-error" : "auth-ok"}>{message}</p>}
-      <div className="inline-actions">
-        <button type="button" onClick={saveDraft} disabled={saving}>Guardar temporalmente</button>
+      {!eventComposer && <div className="inline-actions">
+        <button type="button" onClick={() => saveDraft()} disabled={saving}>Guardar temporalmente</button>
         <button className="primary" type="submit" disabled={saving}>{saving ? "Finalizando acta..." : "Finalizar y publicar acta"}</button>
-        <button type="button" onClick={onCancel} disabled={saving}>Cancelar</button>
-      </div>
+        <button
+          className={!isLiveCapture ? "manual-cancel-action" : ""}
+          type="button"
+          onClick={isLiveCapture && liveStarted ? cancelLiveCapture : !isLiveCapture ? cancelManualCapture : onCancel}
+          disabled={saving}
+        >
+          {isLiveCapture && liveStarted ? "Cancelar en vivo" : !isLiveCapture ? "Cancelar manual" : "Cancelar"}
+        </button>
+      </div>}
     </form>
   );
 }
@@ -3798,6 +4024,10 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
               setCaptureMatchId("");
               clearRefereeActiveCapture(currentUser?.id);
               setActiveView(options.returnHome ? "home" : "matches");
+              if (options.suppressNotice) {
+                setPortalNotice("");
+                return;
+              }
               setPortalNotice(options.message || "Acta publicada. El partido se movio a historial y ya aparece en la parte publica.");
             }}
           />
@@ -4009,6 +4239,11 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
               onChange={(event) => setHistoryQuery(event.target.value)}
               placeholder="Buscar por equipo, torneo o fecha..."
             />
+            {historyQuery && (
+              <button type="button" className="referee-search-clear" onClick={() => setHistoryQuery("")} aria-label="Limpiar busqueda">
+                x
+              </button>
+            )}
           </label>
           <button className={historyCalendarOpen || historyDateFilter ? "active" : ""} type="button" onClick={() => setHistoryCalendarOpen((current) => !current)} aria-label="Filtrar por fecha">
             <RefereeTinyIcon />

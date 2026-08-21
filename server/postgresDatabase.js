@@ -102,6 +102,7 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS assistant_coach TEXT");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS address TEXT");
   await pool.query("ALTER TABLE IF EXISTS teams ADD COLUMN IF NOT EXISTS logo_url TEXT");
+  await pool.query("ALTER TABLE IF EXISTS league_identities ADD COLUMN IF NOT EXISTS logo_url TEXT");
   await pool.query("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS phone TEXT");
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS competition_id TEXT REFERENCES competitions(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE IF EXISTS players ADD COLUMN IF NOT EXISTS photo_url TEXT");
@@ -248,6 +249,26 @@ async function runPostgresMigrations(pool) {
       enabled_until TIMESTAMPTZ,
       notes TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS access_requests (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+      requested_role TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      review_note TEXT,
+      reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TIMESTAMPTZ,
+      created_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_access_id TEXT REFERENCES user_accesses(id) ON DELETE SET NULL,
+      created_assignment_id TEXT REFERENCES team_user_assignments(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
   await pool.query(`
@@ -510,6 +531,8 @@ async function runPostgresMigrations(pool) {
   await pool.query("CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users(lower(email))");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_user_accesses_user ON user_accesses(user_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_user_accesses_league_role ON user_accesses(league_id, role)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_access_requests_league_status ON access_requests(league_id, status)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_access_requests_email ON access_requests(lower(email))");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_admin_activation_tokens_hash ON admin_activation_tokens(token_hash)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_team_delegate_activation_tokens_hash ON team_delegate_activation_tokens(token_hash)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_referee_activation_tokens_hash ON referee_activation_tokens(token_hash)");
@@ -927,6 +950,7 @@ export async function getPostgresStore() {
       adBanner: leagueRow.ad_banner,
       membershipNotes: leagueRow.membership_notes,
       identity: {
+        logoUrl: identity.logo_url || "",
         nickname: identity.nickname,
         activities: identity.activities,
         publicIntro: identity.public_intro,
@@ -1128,10 +1152,11 @@ export async function importPostgresStore(store) {
         ]), { dateColumns: ["starts_at", "ends_at"] });
 
       await query(client, `
-        INSERT INTO league_identities (league_id, nickname, activities, public_intro, primary_color, accent_color, secondary_color)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO league_identities (league_id, logo_url, nickname, activities, public_intro, primary_color, accent_color, secondary_color)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [
         league.id,
+        league.identity.logoUrl || "",
         league.identity.nickname,
         league.identity.activities,
         league.identity.publicIntro,

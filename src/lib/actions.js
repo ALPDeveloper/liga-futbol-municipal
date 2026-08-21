@@ -6,6 +6,42 @@ function isActiveScheduleMatch(match) {
   return ACTIVE_SCHEDULE_MATCH_STATUSES.includes(match?.status || "scheduled");
 }
 
+function getMatchScopeLabel(match) {
+  if ((match.stage || "regular") === "playoff") {
+    return match.playoffRound ? `la fase ${match.playoffRound}` : "esta fase de liguilla";
+  }
+  return `la jornada ${match.round || "-"}`;
+}
+
+function assertMatchTeamsAreAvailable(league, match, currentMatchId = "") {
+  const competitionId = match.competitionId || getDefaultCompetitionId(league);
+  const teamIds = new Set((league.teams || [])
+    .filter((team) => (team.competitionId || competitionId) === competitionId)
+    .map((team) => team.id));
+  if (!teamIds.has(match.homeTeamId) || !teamIds.has(match.awayTeamId) || match.homeTeamId === match.awayTeamId) {
+    throw new Error("Selecciona equipos validos y diferentes dentro de la misma categoria.");
+  }
+
+  const stage = match.stage || "regular";
+  const conflicts = (league.matches || []).filter((item) => {
+    if (currentMatchId && item.id === currentMatchId) return false;
+    if ((item.competitionId || getDefaultCompetitionId(league)) !== competitionId) return false;
+    if ((item.stage || "regular") !== stage) return false;
+    if (stage === "playoff") {
+      return upperText(item.playoffRound || "") === upperText(match.playoffRound || "") &&
+        upperText(item.playoffLeg || "") === upperText(match.playoffLeg || "");
+    }
+    return Number(item.round || 0) === Number(match.round || 0);
+  });
+  const repeatedTeamId = [match.homeTeamId, match.awayTeamId].find((teamId) => (
+    conflicts.some((item) => item.homeTeamId === teamId || item.awayTeamId === teamId)
+  ));
+  if (repeatedTeamId) {
+    const team = getTeam(league, repeatedTeamId);
+    throw new Error(`${team?.name || "Ese equipo"} ya tiene partido en ${getMatchScopeLabel(match)}.`);
+  }
+}
+
 function updateLeague(store, leagueId, updater) {
   return {
     ...store,
@@ -783,37 +819,44 @@ export function deletePlayerInjury(store, leagueId, injuryId) {
 
 export function addMatch(store, leagueId, payload) {
   const stage = payload.stage || "regular";
-  return updateLeague(store, leagueId, (league) => ({
-    ...league,
-    matches: [
-      ...league.matches,
-      {
-        id: makeId("match"),
-        competitionId: payload.competitionId || getDefaultCompetitionId(league),
-        stage,
-        playoffRound: upperText(payload.playoffRound || ""),
-        playoffLeg: upperText(payload.playoffLeg || ""),
-        aggregateHome: payload.aggregateHome === "" || payload.aggregateHome === undefined ? null : Number(payload.aggregateHome),
-        aggregateAway: payload.aggregateAway === "" || payload.aggregateAway === undefined ? null : Number(payload.aggregateAway),
-        round: stage === "playoff" ? Number(payload.round || 0) : Number(payload.round),
-        date: payload.date,
-        time: payload.time || "",
-        venue: upperText(payload.venue || ""),
-        scheduleNote: upperText(payload.scheduleNote || ""),
-        originalDate: "",
-        originalTime: "",
-        originalRound: "",
-        scheduleUpdatedAt: "",
-        homeTeamId: payload.homeTeamId,
-        awayTeamId: payload.awayTeamId,
-        status: payload.status || "scheduled",
-        homeGoals: null,
-        awayGoals: null,
-        observations: "",
-        events: []
-      }
-    ]
-  }));
+  return updateLeague(store, leagueId, (league) => {
+    const match = {
+      id: makeId("match"),
+      competitionId: payload.competitionId || getDefaultCompetitionId(league),
+      stage,
+      playoffRound: upperText(payload.playoffRound || ""),
+      playoffLeg: upperText(payload.playoffLeg || ""),
+      aggregateHome: payload.aggregateHome === "" || payload.aggregateHome === undefined ? null : Number(payload.aggregateHome),
+      aggregateAway: payload.aggregateAway === "" || payload.aggregateAway === undefined ? null : Number(payload.aggregateAway),
+      round: stage === "playoff" ? Number(payload.round || 0) : Number(payload.round),
+      date: payload.date,
+      time: payload.time || "",
+      venue: upperText(payload.venue || ""),
+      scheduleNote: upperText(payload.scheduleNote || ""),
+      originalDate: "",
+      originalTime: "",
+      originalRound: "",
+      scheduleUpdatedAt: "",
+      homeTeamId: payload.homeTeamId,
+      awayTeamId: payload.awayTeamId,
+      status: payload.status || "scheduled",
+      homeGoals: null,
+      awayGoals: null,
+      observations: "",
+      events: []
+    };
+    if (stage !== "playoff" && (!Number.isInteger(match.round) || match.round < 1)) {
+      throw new Error("Captura una jornada valida para este partido.");
+    }
+    assertMatchTeamsAreAvailable(league, match);
+    return {
+      ...league,
+      matches: [
+        ...league.matches,
+        match
+      ]
+    };
+  });
 }
 
 function addDays(dateValue, days) {

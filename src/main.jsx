@@ -10,6 +10,7 @@ import { loadStore, saveStore } from "./lib/storage.js";
 import { clearAuth, isAuthRemembered, loadAuth, saveAuth } from "./lib/authStorage.js";
 import { fetchSessionFromApi, fetchStoreFromApi, loginWithApi, persistStoreToApi } from "./lib/api.js";
 import { IntroAnimation } from "./components/IntroAnimation.jsx";
+import { PublicAccessRequestSheet } from "./components/PublicAccessRequestSheet.jsx";
 import "./styles.css";
 
 const LazyAdminRoute = React.lazy(() => import("./components/AdminRoute.jsx").then((module) => ({ default: module.AdminRoute })));
@@ -284,7 +285,10 @@ function InlineFallback({ label = "Cargando" }) {
 
 function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePath, store, onSelectAccess }) {
   const accessOptions = buildAccessOptions(currentUser, store);
-  const activeLeague = getCurrentLeague(store);
+  const returnLeagueId = getPublicLeagueIdFromPath(publicLeaguePath);
+  const requestLeague = returnLeagueId ? store.leagues.find((league) => league.id === returnLeagueId) : null;
+  const activeLeague = requestLeague || getCurrentLeague(store);
+  const [isAccessRequestOpen, setAccessRequestOpen] = useState(false);
 
   return (
     <main className="page access-page auth-experience-page">
@@ -326,6 +330,16 @@ function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePa
           <LazyAuthPanel currentUser={currentUser} onLogin={onLogin} onLogout={onLogout} />
         </Suspense>
 
+        {!currentUser && requestLeague && (
+          <section className="login-access-request-entry" aria-label="Solicitar acceso">
+            <div>
+              <strong>Necesitas cuenta de delegado o arbitro?</strong>
+              <span>Solicita acceso para {requestLeague.name}; el administrador debe aprobarlo antes de usar el panel.</span>
+            </div>
+            <button type="button" onClick={() => setAccessRequestOpen(true)}>Solicitar acceso</button>
+          </section>
+        )}
+
         {currentUser && accessOptions.length > 0 && (
           <div className="access-current-session">
             <span>Sesion activa</span>
@@ -338,6 +352,12 @@ function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePa
           </div>
         )}
       </section>
+      {isAccessRequestOpen && requestLeague && (
+        <PublicAccessRequestSheet
+          league={requestLeague}
+          onClose={() => setAccessRequestOpen(false)}
+        />
+      )}
       <footer className="access-footer">
         <span className="access-footer-watermark" aria-hidden="true">
           <span className="access-footer-ball">⚽</span>
@@ -1848,7 +1868,16 @@ function App() {
         </Suspense>
       ) : (
         <Suspense fallback={<RouteFallback label="Cargando liga" />}>
-          <LazyPublicView heroImage={heroImage} legalPath={legalLeaguePath} league={league} onEntryModeChange={setPublicEntryMode} onNavigate={navigateTo} />
+          <LazyPublicView
+            heroImage={heroImage}
+            legalPath={legalLeaguePath}
+            league={league}
+            onEntryModeChange={setPublicEntryMode}
+            onNavigate={(path) => {
+              if (path === "/acceso") navigateToAccess();
+              else navigateTo(path);
+            }}
+          />
         </Suspense>
       )}
     </div>

@@ -212,6 +212,11 @@ function runMigrations() {
     db.prepare("ALTER TABLE teams ADD COLUMN logo_url TEXT").run();
   }
 
+  const identityColumns = db.prepare("PRAGMA table_info(league_identities)").all().map((column) => column.name);
+  if (identityColumns.length && !identityColumns.includes("logo_url")) {
+    db.prepare("ALTER TABLE league_identities ADD COLUMN logo_url TEXT").run();
+  }
+
   const playerColumns = db.prepare("PRAGMA table_info(players)").all().map((column) => column.name);
   if (playerColumns.length && !playerColumns.includes("competition_id")) {
     db.prepare("ALTER TABLE players ADD COLUMN competition_id TEXT").run();
@@ -468,7 +473,29 @@ function runMigrations() {
       notes TEXT,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS access_requests (
+      id TEXT PRIMARY KEY,
+      league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+      requested_role TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      review_note TEXT,
+      reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TEXT,
+      created_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_access_id TEXT REFERENCES user_accesses(id) ON DELETE SET NULL,
+      created_assignment_id TEXT REFERENCES team_user_assignments(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL
+    );
   `);
+
+  db.prepare("CREATE INDEX IF NOT EXISTS idx_access_requests_league_status ON access_requests(league_id, status)").run();
+  db.prepare("CREATE INDEX IF NOT EXISTS idx_access_requests_email ON access_requests(email)").run();
 
   const matchRosterColumns = db.prepare("PRAGMA table_info(match_rosters)").all().map((column) => column.name);
   if (matchRosterColumns.length && !matchRosterColumns.includes("captain_pin")) {
@@ -1000,6 +1027,7 @@ export function getStore() {
       adBanner: leagueRow.ad_banner,
       membershipNotes: leagueRow.membership_notes,
       identity: {
+        logoUrl: identity.logo_url || "",
         nickname: identity.nickname,
         activities: identity.activities,
         publicIntro: identity.public_intro,
@@ -1151,10 +1179,11 @@ export function importStore(store) {
       }
 
       db.prepare(`
-        INSERT INTO league_identities (league_id, nickname, activities, public_intro, primary_color, accent_color, secondary_color)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO league_identities (league_id, logo_url, nickname, activities, public_intro, primary_color, accent_color, secondary_color)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         league.id,
+        league.identity.logoUrl || "",
         league.identity.nickname,
         league.identity.activities,
         league.identity.publicIntro,

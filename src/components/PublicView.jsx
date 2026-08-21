@@ -155,17 +155,17 @@ function clearPublicHash() {
   }
 }
 
+function scrollPublicViewportToTop() {
+  if (typeof window === "undefined") return;
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}
+
 function forcePublicScrollTop() {
   if (typeof window === "undefined") return;
-  const scrollTop = () => {
-    clearPublicHash();
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-  };
-  scrollTop();
-  window.requestAnimationFrame(scrollTop);
-  window.setTimeout(scrollTop, 90);
+  clearPublicHash();
+  scrollPublicViewportToTop();
 }
 
 export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate, onEntryModeChange }) {
@@ -188,7 +188,9 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     preloadLeagueImages(league);
   }, [league]);
 
-  const [selectedCompetitionId, setSelectedCompetitionId] = useState(() => loadLastCompetitionId(league) || getDefaultCompetitionId(league));
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState(() => (
+    loadLastCompetitionId(league) || getPublicCompetitions(league)[0]?.id || getDefaultCompetitionId(league)
+  ));
   const [isCompetitionSheetOpen, setCompetitionSheetOpen] = useState(false);
   const [showCompetitionGate, setShowCompetitionGate] = useState(() => (
     hasTournamentSelector(league) && !hasExplicitUrlCompetition(league)
@@ -309,6 +311,15 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     null
   ), [activeLeague.players, scorers, selectedPlayerId]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !("scrollRestoration" in window.history)) return undefined;
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    return () => {
+      window.history.scrollRestoration = previousRestoration;
+    };
+  }, []);
+
   function shareLeague() {
     shareWhatsAppItem({
       text: `${league.name} | ${activeCompetition?.name || league.season}`,
@@ -338,22 +349,6 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     } catch {
       // La vista publica funciona por estado; el hash solo ayuda a compartir la seccion.
     }
-    window.requestAnimationFrame(() => {
-      if (nextView === "calendario" || nextView === "partido" || nextView === "tabla" || nextView === "equipos" || nextView === "fotos") {
-        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-        return;
-      }
-      document.getElementById("torneo-app")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    window.setTimeout(() => {
-      if (nextView === "calendario" || nextView === "partido" || nextView === "tabla" || nextView === "equipos" || nextView === "fotos") {
-        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-      }
-    });
   }
 
   function selectPublicPlayer(playerId, teamId = "") {
@@ -497,17 +492,11 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     return () => window.removeEventListener("hashchange", syncViewFromHash);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof window === "undefined") return undefined;
     if (activePublicView !== "calendario" && activePublicView !== "partido" && activePublicView !== "tabla" && activePublicView !== "fotos") return undefined;
-    const forceTop = () => {
-      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-    };
-    forceTop();
-    const timers = [40, 140, 280].map((delay) => window.setTimeout(forceTop, delay));
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    scrollPublicViewportToTop();
+    return undefined;
   }, [activePublicView, selectedPublicMatchId]);
 
   useEffect(() => {
@@ -1614,14 +1603,19 @@ function PublicMatchesScreen({
 }
 
 function PublicRoundScroller({ rounds, selectedRound, onSelectRound }) {
+  const scrollerRef = useRef(null);
   const selectedButtonRef = useRef(null);
 
-  useEffect(() => {
-    selectedButtonRef.current?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, [selectedRound]);
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    const selectedButton = selectedButtonRef.current;
+    if (!scroller || !selectedButton) return;
+    const nextLeft = selectedButton.offsetLeft - ((scroller.clientWidth - selectedButton.offsetWidth) / 2);
+    scroller.scrollTo({ left: Math.max(0, nextLeft), behavior: "auto" });
+  }, [rounds, selectedRound]);
 
   return (
-    <div className="public-round-scroller" aria-label="Seleccionar jornada">
+    <div className="public-round-scroller" aria-label="Seleccionar jornada" ref={scrollerRef}>
       {rounds.map((round) => (
         <button
           className={Number(round) === Number(selectedRound) ? "active" : ""}
@@ -2016,7 +2010,7 @@ function CompetitionSheet({ activeCompetitionId, competitions, league, onClose, 
                   <strong>{competition.name}</strong>
                   <small>{competition.season || league.season} | {competitionTypeLabel(competition.type)}</small>
                 </span>
-                <em>{isActive ? "Actual" : `${overview.teamCount} equipos`}</em>
+                <em>{isActive ? "Seleccionado" : `${overview.teamCount} equipos`}</em>
               </button>
             );
           })}
@@ -2150,8 +2144,20 @@ function getPublicSearchResults(league, stats, query, selectedCompetitionId) {
   if (term.length < 2) return [];
   const statsByPlayer = new Map((stats || []).map((row) => [row.player.id, row]));
   const competitionName = (competitionId) => getCompetition(league, competitionId)?.name || "Torneo";
+  const publicCompetitionIds = new Set(getPublicCompetitions(league).map((competition) => competition.id));
+  const isPublicCompetition = (competitionId) => !publicCompetitionIds.size || !competitionId || publicCompetitionIds.has(competitionId);
+  const isActiveTeam = (team) => Boolean(team) && (team.status || "active") !== "withdrawn" && isPublicCompetition(team.competitionId);
+  const isActivePlayer = (player) => {
+    const team = getTeam(league, player.teamId);
+    return (player.status || "active") === "active" && isActiveTeam(team) && isPublicCompetition(player.competitionId || team?.competitionId);
+  };
+  const activePlayersByTeam = new Map();
+  for (const player of league.players || []) {
+    if (!isActivePlayer(player)) continue;
+    activePlayersByTeam.set(player.teamId, (activePlayersByTeam.get(player.teamId) || 0) + 1);
+  }
   const teamResults = league.teams
-    .filter((team) => matchesSearchQuery([team.name, team.shortName], term))
+    .filter((team) => isActiveTeam(team) && matchesSearchQuery([team.name, team.shortName], term))
     .map((team) => ({
       id: team.id,
       type: "team",
@@ -2159,12 +2165,13 @@ function getPublicSearchResults(league, stats, query, selectedCompetitionId) {
       name: team.name,
       competitionId: team.competitionId || selectedCompetitionId,
       isCurrentCompetition: (team.competitionId || selectedCompetitionId) === selectedCompetitionId,
-      detail: `${competitionName(team.competitionId || selectedCompetitionId)} | ${league.players.filter((player) => player.teamId === team.id).length} jugador(es)`
+      detail: `${competitionName(team.competitionId || selectedCompetitionId)} | ${activePlayersByTeam.get(team.id) || 0} jugador(es)`,
+      rank: getPublicSearchRank([team.name, team.shortName], term)
     }));
   const playerResults = league.players
     .filter((player) => {
       const team = getTeam(league, player.teamId);
-      return matchesSearchQuery([player.name, player.number, team?.name, team?.shortName], term);
+      return isActivePlayer(player) && matchesSearchQuery([player.name, player.number, team?.name, team?.shortName], term);
     })
     .map((player) => {
       const row = statsByPlayer.get(player.id);
@@ -2177,11 +2184,13 @@ function getPublicSearchResults(league, stats, query, selectedCompetitionId) {
         name: player.name,
         competitionId,
         isCurrentCompetition: competitionId === selectedCompetitionId,
-        detail: `${team?.name || "Sin equipo"} | ${competitionName(competitionId)} | ${row?.goals || 0} gol(es)`
+        detail: `${team?.name || "Sin equipo"} | ${competitionName(competitionId)} | ${row?.goals || 0} gol(es)`,
+        rank: getPublicSearchRank([player.name, player.number, team?.name, team?.shortName], term)
       };
     });
   const matchResults = league.matches
     .filter((match) => {
+      if (!isPublicCompetition(match.competitionId)) return false;
       const home = getTeam(league, match.homeTeamId)?.name || "";
       const away = getTeam(league, match.awayTeamId)?.name || "";
       return matchesSearchQuery([home, away, match.venue, match.date, match.time, `jornada ${match.round || ""}`, `j${match.round || ""}`], term);
@@ -2194,15 +2203,47 @@ function getPublicSearchResults(league, stats, query, selectedCompetitionId) {
       competitionId: match.competitionId || selectedCompetitionId,
       isCurrentCompetition: (match.competitionId || selectedCompetitionId) === selectedCompetitionId,
       round: match.round,
-      detail: `${competitionName(match.competitionId || selectedCompetitionId)} | ${match.round ? `Jornada ${match.round}` : "Partido"} | ${match.date ? formatDate(match.date) : "Fecha por definir"}`
+      detail: `${competitionName(match.competitionId || selectedCompetitionId)} | ${match.round ? `Jornada ${match.round}` : "Partido"} | ${match.date ? formatDate(match.date) : "Fecha por definir"}`,
+      rank: getPublicSearchRank([
+        getTeam(league, match.homeTeamId)?.name,
+        getTeam(league, match.awayTeamId)?.name,
+        match.venue,
+        match.date,
+        match.time,
+        `jornada ${match.round || ""}`,
+        `j${match.round || ""}`
+      ], term) + 0.4
     }));
 
   return [...teamResults, ...playerResults, ...matchResults]
     .sort((a, b) => (
-      Number((b.competitionId || "") === selectedCompetitionId) - Number((a.competitionId || "") === selectedCompetitionId) ||
+      a.rank - b.rank ||
+      getPublicSearchTypePriority(a.type) - getPublicSearchTypePriority(b.type) ||
       a.name.localeCompare(b.name)
     ))
-    .slice(0, 8);
+    .slice(0, 12);
+}
+
+function getPublicSearchTypePriority(type) {
+  if (type === "team") return 0;
+  if (type === "player") return 1;
+  return 2;
+}
+
+function getPublicSearchRank(values, query) {
+  const term = normalizeSearchTerm(query);
+  const normalizedValues = (Array.isArray(values) ? values : [values])
+    .map((value) => normalizeSearchTerm(value))
+    .filter(Boolean);
+  const searchable = normalizedValues.join(" ");
+  if (!term || !matchesSearchQuery(normalizedValues, term)) return Number.POSITIVE_INFINITY;
+  if (normalizedValues.some((value) => value === term)) return 0;
+  if (normalizedValues.some((value) => value.startsWith(term))) return 1;
+  const words = searchable.split(/\s+/).filter(Boolean);
+  const tokens = term.split(/\s+/).filter(Boolean);
+  if (tokens.length && tokens.every((token) => words.some((word) => word.startsWith(token)))) return 2;
+  if (searchable.includes(term)) return 3;
+  return 4;
 }
 
 function getRoundMatchSearchResults(league, matches, query) {
@@ -3170,24 +3211,30 @@ function drawActaEventRow(context, { align = "left", event, league, width, x, y 
   drawRoundedRect(context, x, y, width, 58, 10, "rgba(255, 255, 255, 0.07)");
   drawRoundedStroke(context, x, y, width, 58, 10, "rgba(236, 255, 246, 0.14)", 1);
   const iconX = align === "right" ? x + 18 : x + 16;
-  drawActaEventIcon(context, event.type, iconX, y + 16);
+  drawActaEventIcon(context, event, iconX, y + 16);
   const textX = x + 58;
-  context.fillStyle = "#ffffff";
+  context.fillStyle = event.type === "own_goal" ? "#ff7777" : "#ffffff";
   context.font = "950 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   drawCanvasFittedText(context, String(player?.name || "Jugador").toLocaleUpperCase("es-MX"), textX, y + 24, width - 76, 18, 12, 950);
-  context.fillStyle = event.type === "yellow" ? "#facc15" : event.type === "red" ? "#ff6666" : "#75f05f";
+  context.fillStyle = event.type === "yellow" ? "#facc15" : event.type === "red" || event.type === "own_goal" ? "#ff6666" : "#75f05f";
   context.font = "850 16px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   drawCanvasFittedText(context, getPublicEventDetail(event), textX, y + 48, width - 76, 16, 11, 850);
 }
 
-function drawActaEventIcon(context, type, x, y) {
+function drawActaEventIcon(context, event, x, y) {
+  const type = event?.type || event;
+  if (type === "yellow" && isPublicSecondYellowEvent(event)) {
+    drawRoundedRect(context, x, y, 15, 24, 4, "#facc15");
+    drawRoundedRect(context, x + 11, y + 2, 15, 24, 4, "#ef4444");
+    return;
+  }
   if (type === "yellow" || type === "red") {
     drawRoundedRect(context, x, y, 20, 26, 4, type === "yellow" ? "#facc15" : "#ef4444");
     return;
   }
-  context.fillStyle = "#ffffff";
+  context.fillStyle = type === "own_goal" ? "#ff6666" : "#ffffff";
   context.font = "900 24px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  context.fillText(type === "own_goal" ? "↩" : "⚽", x, y + 23);
+  context.fillText("⚽", x, y + 23);
 }
 
 function drawActaNotesPanel(context, match, y, width) {
@@ -3998,7 +4045,7 @@ function PublicHomeDashboard({
           </div>
           <div className="home-highlight-strip">
             <HomeHighlightCard title="Lider" value={leader?.team?.name || "Por definir"} detail={leader ? `${leader.points} pts` : "Sin tabla"} team={leader?.team} />
-            <HomeHighlightCard title="Goleador" value={topScorer?.player?.name || "Por definir"} detail={topScorer?.goals ? `${topScorer.goals} goles` : "Sin goles"} team={topScorer?.team} />
+            <HomeHighlightCard title="Goleador" value={topScorer?.player?.name || "Por definir"} detail={topScorer?.goals ? `${topScorer.goals} goles` : "Sin goles"} team={topScorer?.team} player={topScorer?.player} />
             <HomeHighlightCard title="Ofensiva" value={bestOffense?.team?.name || "Por definir"} detail={bestOffense ? `${bestOffense.goalsFor} goles` : "Sin datos"} team={bestOffense?.team} />
             <HomeHighlightCard title="Defensa" value={bestDefense?.team?.name || "Por definir"} detail={bestDefense ? `${bestDefense.goalsAgainst} GC` : "Sin datos"} team={bestDefense?.team} />
           </div>
@@ -4029,18 +4076,19 @@ function PublicHomeDashboard({
           </div>
         </section>
 
-        <section className="home-next-panel">
-          <div className="home-section-head">
-            <h2>Proximos partidos</h2>
-            <button type="button" onClick={() => onSelectView("calendario")}>Ver calendario</button>
-          </div>
-          <div className="home-next-list">
-            {nextMatches.slice(0, 3).map((match) => (
-              <MiniMatchRow key={match.id} league={league} match={match} onOpenMatches={() => onSelectView("calendario")} />
-            ))}
-            {!nextMatches.length && <p className="empty empty-polished">Aun no hay partidos programados.</p>}
-          </div>
-        </section>
+        {nextMatches.length > 0 && (
+          <section className="home-next-panel">
+            <div className="home-section-head">
+              <h2>Proximos partidos</h2>
+              <button type="button" onClick={() => onSelectView("calendario")}>Ver calendario</button>
+            </div>
+            <div className="home-next-list">
+              {nextMatches.slice(0, 3).map((match) => (
+                <MiniMatchRow key={match.id} league={league} match={match} onOpenMatches={() => onSelectView("calendario")} />
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="home-standings-preview">
           <div className="home-section-head">
@@ -4503,12 +4551,17 @@ function HomeFeaturedMatch({ competitionName, currentRound, heroImage, league, l
   );
 }
 
-function HomeHighlightCard({ title, value, detail, team }) {
+function HomeHighlightCard({ title, value, detail, team, player }) {
   const tone = normalizeSearchTerm(title).replace(/[^a-z0-9]+/g, "-") || "default";
+  const showPlayerPhoto = tone === "goleador" && player?.photoAuthorized === true && player?.photoUrl;
   return (
     <article className={`home-highlight-card is-${tone}`}>
       <span>{title}</span>
-      <TeamMark team={team} className="home-highlight-crest" />
+      {showPlayerPhoto ? (
+        <PlayerAvatar player={player} className="home-highlight-crest home-highlight-player" />
+      ) : (
+        <TeamMark team={team} className="home-highlight-crest" />
+      )}
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
@@ -5568,7 +5621,7 @@ function TournamentSelector({
                   <strong>{competition.name}</strong>
                   <small>{competitionTypeLabel(competition.type)} | {getSeasonValue(competition, league)}</small>
                 </span>
-                <em>{competition.id === selectedCompetitionId ? "Actual" : "Elegir"}</em>
+                <em>{competition.id === selectedCompetitionId ? "Seleccionado" : "Elegir"}</em>
               </button>
             ))}
             {!filteredSheetCompetitions.length && <p className="empty">No encontramos torneos con esa busqueda.</p>}
@@ -5609,7 +5662,7 @@ function SeasonSelect({ isCurrent, label, onOpen }) {
       >
         <span className="season-select-icon" aria-hidden="true" />
         <strong>{label}</strong>
-        {isCurrent && <em>Actual</em>}
+        {isCurrent && <em>Seleccionado</em>}
         <b aria-hidden="true">⌄</b>
       </button>
       <small className="season-select-help">Selecciona la temporada que deseas consultar</small>
@@ -6609,8 +6662,8 @@ function CompactTeamEvents({ events, league, side }) {
       {events.map((event, index) => {
         const player = getPlayer(league, event.playerId);
         return (
-          <article className={`match-compact-event ${event.type}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
-            <span className="match-compact-event-icon" aria-hidden="true">{getPublicEventIcon(event.type)}</span>
+          <article className={`match-compact-event ${event.type} ${isPublicSecondYellowEvent(event) ? "double-yellow" : ""}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
+            <span className="match-compact-event-icon" aria-hidden="true">{getPublicEventIcon(event.type, event)}</span>
             <div>
               <strong>{player?.name || `Jugador ${index + 1}`}</strong>
               <small>
@@ -6742,10 +6795,10 @@ function MatchTimelineEvent({ league, match, event, index }) {
   const side = event.teamId === match.awayTeamId ? "away" : "home";
 
   return (
-    <article className={`match-timeline-event ${side} ${event.type}`}>
+    <article className={`match-timeline-event ${side} ${event.type} ${isPublicSecondYellowEvent(event) ? "double-yellow" : ""}`}>
       <span className="match-timeline-minute">{hasEventMinute(event) ? `${getEventMinuteLabel(event)}'` : ""}</span>
       <div className="match-timeline-card">
-        <span className="match-timeline-icon" aria-hidden="true">{getPublicEventIcon(event.type)}</span>
+        <span className="match-timeline-icon" aria-hidden="true">{getPublicEventIcon(event.type, event)}</span>
         <div>
           <strong>{player?.name || `Jugador ${index + 1}`}</strong>
           <small>{getPublicEventDetail(event)}</small>
@@ -6762,9 +6815,9 @@ function MatchTeamEvents({ title, events, league, showMinutes = true }) {
       {events.map((event, index) => {
         const player = getPlayer(league, event.playerId);
         return (
-          <article className={`match-event-row ${event.type} ${showMinutes ? "" : "without-minute"}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
+          <article className={`match-event-row ${event.type} ${isPublicSecondYellowEvent(event) ? "double-yellow" : ""} ${showMinutes ? "" : "without-minute"}`} key={`${event.type}-${event.playerId}-${event.minute}-${index}`}>
             {showMinutes && <span className="match-event-minute">{hasEventMinute(event) ? `${getEventMinuteLabel(event)}'` : ""}</span>}
-            <span className="match-event-badge">{getPublicEventIcon(event.type)}</span>
+            <span className="match-event-badge">{getPublicEventIcon(event.type, event)}</span>
             <div>
               <strong>{player?.name || "Jugador"}</strong>
               <small>{getPublicEventDetail(event)}</small>
@@ -6777,9 +6830,18 @@ function MatchTeamEvents({ title, events, league, showMinutes = true }) {
   );
 }
 
-function getPublicEventIcon(type) {
+function getPublicEventCardDetail(event) {
+  return event?.cardDetail || event?.subtype || event?.metadata?.cardDetail || "";
+}
+
+function isPublicSecondYellowEvent(event) {
+  return Boolean(event) && event.type === "yellow" && getPublicEventCardDetail(event) === "double_yellow_second";
+}
+
+function getPublicEventIcon(type, event = null) {
   if (type === "goal") return "⚽";
-  if (type === "own_goal") return "↩";
+  if (type === "own_goal") return "⚽";
+  if (type === "yellow" && isPublicSecondYellowEvent(event)) return "🟨🟥";
   if (type === "yellow") return "🟨";
   if (type === "red") return "🟥";
   return "•";
@@ -6788,6 +6850,7 @@ function getPublicEventIcon(type) {
 function getPublicEventDetail(event) {
   if (event.type === "goal") return "Gol";
   if (event.type === "own_goal") return "Autogol";
+  if (event.type === "yellow" && isPublicSecondYellowEvent(event)) return "Segunda amarilla + roja";
   if (event.type === "yellow") return "Amarilla";
   if (event.type === "red") return event.reason || "Roja";
   return "Evento";
