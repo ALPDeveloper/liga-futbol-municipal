@@ -30107,13 +30107,15 @@ button.arbitration-metric-card {
 }
 
 .team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-phone-frame {
-  height: calc(100vh - 18px);
-  grid-template-rows: auto minmax(0, 1fr);
+  height: auto;
+  min-height: calc(100vh - 18px);
+  grid-template-rows: auto auto;
+  overflow: visible;
 }
 
 .team-portal-page.delegate-view-roster .delegate-view-stack {
   min-height: 0;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: none;
 }
 
 .delegate-feature-match {
@@ -64772,6 +64774,42 @@ html.operation-data-active .admin-console-page::after {
   border-radius: 18px;
 }
 
+.team-portal-page.delegate-view-roster .delegate-roster-crest {
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(145, 255, 88, 0.3);
+  border-radius: 18px;
+  color: #07170f;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.3), transparent 38%),
+    linear-gradient(135deg, #91ff58, #20e7c5);
+  box-shadow: 0 12px 24px rgba(32, 231, 197, 0.14);
+}
+
+.team-portal-page.delegate-view-roster .delegate-roster-crest img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.team-portal-page.delegate-view-roster .delegate-roster-crest b {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  font-size: 1rem;
+  font-weight: 1000;
+  line-height: 1;
+  text-align: center;
+}
+
 .team-portal-page.delegate-view-roster .delegate-roster-metrics {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -64878,10 +64916,38 @@ html.operation-data-active .admin-console-page::after {
 }
 
 .team-portal-page.delegate-view-roster .delegate-roster-list.team-portal-player-list article > .team-portal-avatar {
+  position: relative;
   grid-column: 1 !important;
   grid-row: 1 / span 2;
   width: 42px;
   height: 42px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 13px;
+  isolation: isolate;
+}
+
+.team-portal-page.delegate-view-roster .delegate-roster-list.team-portal-player-list article > .team-portal-avatar img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.team-portal-page.delegate-view-roster .delegate-roster-list.team-portal-player-list article > .team-portal-avatar span {
+  position: relative;
+  z-index: 0;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  text-align: center;
 }
 
 .team-portal-page.delegate-view-roster .delegate-player-number {

@@ -187,6 +187,11 @@ function scrollDelegatePortalToTop() {
   });
 }
 
+function showDelegateAlert(message) {
+  if (!message || typeof window === "undefined") return;
+  window.alert(message);
+}
+
 function getDelegateNextAction(match, status) {
   if (!match) {
     return {
@@ -615,6 +620,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   async function submitPlayer(event) {
     event.preventDefault();
     if (!context?.canManageRoster) {
+      showDelegateAlert("El registro de plantilla esta cerrado para tu equipo.");
       setNotice("");
       setError("El registro de plantilla esta cerrado para tu equipo.");
       setActiveView("roster");
@@ -638,12 +644,15 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
       applyPortalPayload(response);
       writeTeamPortalCache(currentUser?.id, response);
       setNotice("Jugador registrado correctamente.");
+      showDelegateAlert("Jugador registrado correctamente.");
       form.reset();
       setPhotoResetKey((value) => value + 1);
       setActiveView("roster");
     } catch (saveError) {
+      const message = saveError.message || "No se pudo registrar el jugador.";
       setNotice("");
-      setError(saveError.message || "No se pudo registrar el jugador.");
+      setError(message);
+      showDelegateAlert(message);
     }
   }
 
@@ -671,10 +680,14 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
       writeTeamPortalCache(currentUser?.id, response);
       setEditingPlayerId("");
       setActiveView("roster");
-      setNotice(player.isAffiliate ? "Numero de afiliado actualizado correctamente." : "Jugador actualizado correctamente.");
+      const message = player.isAffiliate ? "Numero de afiliado actualizado correctamente." : "Jugador actualizado correctamente.";
+      setNotice(message);
+      showDelegateAlert(message);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo actualizar el jugador.";
       setNotice("");
-      setError(saveError.message || "No se pudo actualizar el jugador.");
+      setError(message);
+      showDelegateAlert(message);
     } finally {
       setBusyPlayerId("");
     }
@@ -694,9 +707,12 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
       writeTeamPortalCache(currentUser?.id, response);
       setTeamLogoResetKey((value) => value + 1);
       setNotice("Escudo actualizado correctamente.");
+      showDelegateAlert("Escudo actualizado correctamente.");
     } catch (saveError) {
+      const message = saveError.message || "No se pudo actualizar el escudo.";
       setNotice("");
-      setError(saveError.message || "No se pudo actualizar el escudo.");
+      setError(message);
+      showDelegateAlert(message);
     }
   }
 
@@ -712,10 +728,12 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     if (busyMatchId) return;
     const draft = rosterDrafts[match.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" };
     if (!draft.playerIds.length) {
+      showDelegateAlert("Selecciona al menos un jugador participante.");
       setError("Selecciona al menos un jugador participante.");
       return;
     }
     if (!draft.captainPlayerId || !draft.playerIds.includes(draft.captainPlayerId)) {
+      showDelegateAlert("Selecciona un capitan dentro de los participantes.");
       setError("Selecciona un capitan dentro de los participantes.");
       return;
     }
@@ -735,9 +753,12 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
       applyPortalPayload(response);
       writeTeamPortalCache(currentUser?.id, response);
       setNotice("Participantes enviados y bloqueados correctamente.");
+      showDelegateAlert("Participantes enviados y bloqueados correctamente.");
     } catch (saveError) {
+      const message = saveError.message || "No se pudo enviar participantes.";
       setNotice("");
-      setError(saveError.message || "No se pudo enviar participantes.");
+      setError(message);
+      showDelegateAlert(message);
     } finally {
       setBusyMatchId("");
     }
@@ -756,10 +777,14 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
         applyPortalPayload(response.payload);
         writeTeamPortalCache(currentUser?.id, response.payload);
       }
-      setNotice(response.readyToFinalize ? "Acta firmada. Ambos equipos ya completaron firmas." : "Acta firmada correctamente.");
+      const message = response.readyToFinalize ? "Acta firmada. Ambos equipos ya completaron firmas." : "Acta firmada correctamente.";
+      setNotice(message);
+      showDelegateAlert(message);
     } catch (signError) {
+      const message = signError.message || "No se pudo firmar el acta.";
       setNotice("");
-      setError(signError.message || "No se pudo firmar el acta.");
+      setError(message);
+      showDelegateAlert(message);
     } finally {
       setSigningMatchId("");
     }
@@ -953,9 +978,6 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
               </button>
             )}
           </div>}
-
-          {notice && <p className="auth-ok">{notice}</p>}
-          {error && <p className="auth-error">{error}</p>}
 
           {activeView === "home" && (
             <div className="delegate-view-stack delegate-home-screen">
@@ -1459,6 +1481,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                   type="button"
                   onClick={() => {
                     if (!canManageRoster) {
+                      showDelegateAlert("El registro de plantilla esta cerrado para tu equipo.");
                       setNotice("");
                       setError("El registro de plantilla esta cerrado para tu equipo.");
                       return;
