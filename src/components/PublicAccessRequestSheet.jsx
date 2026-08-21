@@ -114,7 +114,8 @@ export function PublicAccessRequestSheet({ league, onClose }) {
 
   async function submitRequest(event) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     if (role === "team_delegate" && !selectedTeamId) {
       setError("Selecciona el equipo al que quieres solicitar acceso.");
       return;
@@ -134,7 +135,7 @@ export function PublicAccessRequestSheet({ league, onClose }) {
         confirmPassword: payload.confirmPassword
       });
       setNotice(response.message || "Solicitud enviada. Espera la aprobacion del administrador.");
-      event.currentTarget.reset();
+      form.reset();
       setTeamSearch("");
     } catch (requestError) {
       setError(requestError.message || "No se pudo enviar la solicitud.");
