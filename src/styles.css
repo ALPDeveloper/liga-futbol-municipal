@@ -31401,6 +31401,48 @@ button.arbitration-metric-card {
   font-weight: 1000;
 }
 
+.delegate-acta-mini-events > span[class*="event-kind-"].without-minute {
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.delegate-acta-mini-events > span[class*="event-kind-"] small {
+  display: grid;
+  gap: 2px;
+}
+
+.delegate-acta-mini-events > span[class*="event-kind-"] small span,
+.delegate-acta-mini-events > span[class*="event-kind-"] small i {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.delegate-acta-notes-card {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(145, 255, 88, 0.18);
+  border-radius: 12px;
+  background: rgba(145, 255, 88, 0.08);
+}
+
+.delegate-acta-notes-card span {
+  color: #91ff58;
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.delegate-acta-notes-card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.76rem;
+  font-weight: 820;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .delegate-acta-mini-events small,
 .delegate-sign-note {
   min-width: 0;
@@ -64990,7 +65032,7 @@ html.operation-data-active .admin-console-page::after {
 }
 
 .team-portal-page.delegate-view-roster .delegate-roster-search-row {
-  grid-template-columns: minmax(0, 1fr) 94px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -65000,7 +65042,7 @@ html.operation-data-active .admin-console-page::after {
   border-color: rgba(132, 166, 190, 0.16);
   border-radius: 12px;
   color: #eef7ff;
-  font-size: 0.72rem;
+  font-size: 16px;
   text-transform: none;
 }
 
@@ -65080,6 +65122,18 @@ html.operation-data-active .admin-console-page::after {
   overflow: hidden;
   border-radius: 13px;
   isolation: isolate;
+}
+
+.team-portal-page.delegate-view-roster .delegate-roster-crest.has-image,
+.team-portal-page .portal-team-badge.has-image,
+.team-portal-page.delegate-view-roster .delegate-roster-list.team-portal-player-list article > .team-portal-avatar.has-image {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.team-portal-page.delegate-view-roster .delegate-roster-list.team-portal-player-list article > .team-portal-avatar.has-image > span {
+  display: none;
 }
 
 .team-portal-page.delegate-view-roster .delegate-roster-list.team-portal-player-list article > .team-portal-avatar img {
@@ -68284,6 +68338,240 @@ html.operation-data-active .admin-console-page::after {
   .admin-console-page .delegate-access-actions,
   .admin-console-page .delegate-danger-actions,
   .admin-console-page .delegate-bulk-permissions .inline-actions {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Production improvements: clean real media and compact operational screens. */
+.team-mark.has-image,
+.player-avatar.has-image,
+.portal-team-badge.has-image,
+.admin-match-team-badge.has-image,
+.referee-admin-team-badge.has-image,
+.operation-data-team-mark.has-image,
+.operation-data-player-avatar.has-image {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.team-mark.has-image > span,
+.player-avatar.has-image > span,
+.portal-team-badge.has-image b,
+.admin-match-team-badge.has-image b,
+.referee-admin-team-badge.has-image b,
+.operation-data-team-mark.has-image b,
+.operation-data-player-avatar.has-image b {
+  display: none !important;
+}
+
+.team-mark.has-image img,
+.portal-team-badge.has-image img,
+.admin-match-team-badge.has-image img,
+.referee-admin-team-badge.has-image img,
+.operation-data-team-mark.has-image img {
+  object-fit: contain !important;
+}
+
+.player-avatar.has-image img,
+.operation-data-player-avatar.has-image img {
+  object-fit: cover !important;
+}
+
+.public-league-page.public-view-inicio .home-gallery-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-auto-rows: clamp(94px, 24vw, 138px) !important;
+}
+
+.public-league-page.public-view-inicio .home-gallery-grid figure,
+.public-league-page.public-view-inicio .home-gallery-grid figure:first-child {
+  grid-row: auto !important;
+  border: 0 !important;
+  background: rgba(3, 12, 22, 0.42) !important;
+}
+
+.public-league-page.public-view-inicio .home-gallery-grid figure::after,
+.public-league-page.public-view-inicio .home-gallery-grid figcaption {
+  display: none !important;
+}
+
+.public-league-page.public-view-inicio .home-gallery-grid img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+.admin-console-page .admin-search-input-wrap input,
+.admin-console-page .searchable-select input,
+.admin-console-page .discipline-filters input,
+.team-portal-page.delegate-view-roster .delegate-search-field input {
+  font-size: 16px !important;
+}
+
+.tournament-continuity-guide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.85fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(94, 234, 212, 0.24);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(14, 165, 233, 0.08)),
+    rgba(3, 12, 22, 0.56);
+}
+
+.tournament-continuity-guide div,
+.tournament-continuity-guide ul {
+  min-width: 0;
+}
+
+.tournament-continuity-guide span {
+  display: block;
+  color: rgba(148, 255, 222, 0.82);
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.tournament-continuity-guide strong {
+  display: block;
+  margin-top: 3px;
+  color: #f7fbff;
+  font-size: 1rem;
+}
+
+.tournament-continuity-guide small,
+.tournament-continuity-guide li {
+  color: rgba(226, 238, 252, 0.72);
+  font-size: 0.82rem;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.tournament-continuity-guide ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.discipline-control-panel .discipline-admin-card {
+  grid-template-columns: 42px minmax(0, 1.25fr) minmax(96px, 0.42fr) auto !important;
+  gap: 8px 10px !important;
+  align-items: center !important;
+  padding: 10px 11px !important;
+  border-radius: 12px !important;
+}
+
+.discipline-control-panel .discipline-card-mark {
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 11px !important;
+  font-size: 1rem !important;
+}
+
+.discipline-control-panel .discipline-card-main strong {
+  font-size: 0.9rem !important;
+  line-height: 1.12 !important;
+}
+
+.discipline-control-panel .discipline-card-main span,
+.discipline-control-panel .discipline-card-message,
+.discipline-control-panel .discipline-admin-card small,
+.discipline-control-panel .discipline-admin-card span {
+  font-size: 0.73rem !important;
+}
+
+.discipline-control-panel .discipline-card-count {
+  justify-items: start !important;
+  text-align: left !important;
+}
+
+.discipline-control-panel .discipline-card-count i {
+  max-width: 72px !important;
+}
+
+.discipline-control-panel .discipline-status-pill {
+  padding: 5px 8px !important;
+  font-size: 0.62rem !important;
+}
+
+.discipline-control-panel .discipline-card-message {
+  grid-column: 2 / -1 !important;
+  margin: -2px 0 0 !important;
+}
+
+.discipline-control-panel .discipline-admin-trace {
+  grid-column: 2 / -1 !important;
+  gap: 5px !important;
+  padding-top: 6px !important;
+}
+
+.discipline-control-panel .discipline-admin-trace > div {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) !important;
+  gap: 6px !important;
+}
+
+.discipline-control-panel .discipline-admin-trace span {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 3px 6px !important;
+  align-items: center !important;
+  padding: 6px 8px !important;
+  border-radius: 10px !important;
+}
+
+.discipline-control-panel .discipline-admin-trace em {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.discipline-control-panel .manual-history .discipline-admin-card {
+  grid-template-columns: 42px minmax(0, 1fr) minmax(112px, 0.55fr) minmax(92px, 0.38fr) minmax(0, 1fr) auto !important;
+}
+
+.discipline-history-meta,
+.discipline-history-reason {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.discipline-history-meta span,
+.discipline-history-reason span {
+  color: rgba(244, 250, 255, 0.86) !important;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .tournament-continuity-guide,
+  .discipline-control-panel .discipline-admin-card,
+  .discipline-control-panel .manual-history .discipline-admin-card {
+    grid-template-columns: 42px minmax(0, 1fr) !important;
+  }
+
+  .tournament-continuity-guide {
+    grid-template-columns: 1fr !important;
+  }
+
+  .discipline-control-panel .discipline-card-count,
+  .discipline-control-panel .discipline-status-pill,
+  .discipline-control-panel .discipline-card-message,
+  .discipline-control-panel .discipline-admin-trace,
+  .discipline-history-meta,
+  .discipline-history-reason,
+  .discipline-control-panel .manual-history .discipline-admin-card > button {
+    grid-column: 2 / -1 !important;
+  }
+
+  .discipline-control-panel .discipline-status-pill {
+    justify-self: start !important;
+  }
+
+  .discipline-control-panel .discipline-admin-trace > div {
     grid-template-columns: 1fr !important;
   }
 }

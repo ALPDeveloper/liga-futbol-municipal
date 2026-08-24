@@ -3893,7 +3893,7 @@ function PublicHomeDashboard({
   const bestDefense = [...standings].sort((a, b) => a.goalsAgainst - b.goalsAgainst || a.team.name.localeCompare(b.team.name))[0];
   const heroMedia = getPublicHomeMedia(media, "hero")[0];
   const momentMedia = getPublicHomeMedia(media, "moment")[0] || getPublicHomeMedia(media, "gallery")[0];
-  const galleryMedia = getPublicHomeMedia(media, "gallery").slice(0, 6);
+  const galleryMedia = getPublicHomeMedia(media, "gallery").slice(0, 3);
   const featuredMatch = selectedFeaturedMatch || nextMatches[0] || latestResults[0] || league.matches[0];
   const featuredHome = featuredMatch ? getTeam(league, featuredMatch.homeTeamId) : null;
   const featuredAway = featuredMatch ? getTeam(league, featuredMatch.awayTeamId) : null;
@@ -4066,11 +4066,7 @@ function PublicHomeDashboard({
           <div className="home-gallery-grid">
             {(galleryMedia.length ? galleryMedia : [{ id: "fallback", imageUrl: stadiumHero || heroMedia?.imageUrl || heroImage, title: competitionName || league.name, caption: "La galeria del torneo aparecera aqui cuando subas fotos desde el panel admin." }]).map((item) => (
               <figure key={item.id}>
-                <LoadableImage src={item.imageUrl} alt="" />
-                <figcaption>
-                  <strong>{item.title || "Momento de la liga"}</strong>
-                  {item.caption && <small>{item.caption}</small>}
-                </figcaption>
+                <LoadableImage src={item.imageUrl} alt={item.title || "Foto de la liga"} loading="lazy" />
               </figure>
             ))}
           </div>
@@ -5351,13 +5347,13 @@ function TeamMark({ team, className = "" }) {
   const canShowLogo = Boolean(team?.logoUrl);
 
   return (
-    <span aria-hidden="true" className={`team-mark ${canShowLogo ? "has-image" : ""} ${className}`} style={style} title={label}>
+    <span aria-hidden="true" className={`team-mark ${canShowLogo ? "has-image" : ""} ${className}`} style={canShowLogo ? undefined : style} title={label}>
       <span>{getTeamInitials(label)}</span>
       {canShowLogo && (
         <LoadableImage
           alt=""
           src={team.logoUrl}
-          loading="eager"
+          loading="lazy"
         />
       )}
     </span>
@@ -5368,11 +5364,11 @@ function PlayerAvatar({ player, className = "" }) {
   const canShowPhoto = Boolean(player?.photoAuthorized === true && player?.photoUrl);
 
   return (
-    <span className={`player-avatar ${className}`} title={player?.name || "Jugador"}>
+    <span className={`player-avatar ${canShowPhoto ? "has-image" : ""} ${className}`} title={player?.name || "Jugador"}>
       {canShowPhoto && (
         <LoadableImage
           alt=""
-          loading="eager"
+          loading="lazy"
           src={player.photoUrl}
         />
       )}

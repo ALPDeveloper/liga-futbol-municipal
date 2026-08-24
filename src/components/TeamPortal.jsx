@@ -125,34 +125,88 @@ function getReportEvents(match) {
     : Array.isArray(match?.events)
     ? match.events
     : [];
-  return events.slice().reverse();
+  return sortDelegateReportEvents(events);
 }
 
 function getReportEventIcon(event) {
   const type = event?.type;
+  if (type === "goal" || type === "own_goal") return "⚽";
+  if ((type === "yellow" || type === "yellow_card") && isDelegateSecondYellowEvent(event)) return "🟨🟥";
   if (type === "yellow" || type === "yellow_card") return "🟨";
   if (type === "red" || type === "red_card") return "🟥";
-  if (type === "substitution") return "🔄";
-  if (type === "incident") return "⚠";
-  return "⚽";
+  if (type === "substitution") return "↔";
+  if (type === "injury_note") return "✚";
+  if (type === "incident" || type === "other_note") return "⚠";
+  return "•";
 }
 
 function getReportEventLabel(event) {
   const cardDetail = event.cardDetail || event.subtype || event.metadata?.cardDetail || "";
   if (cardDetail === "double_yellow") return "Roja por 2a amarilla";
   if (cardDetail === "double_yellow_second") return "2a amarilla";
+  if (event.type === "goal") return "Gol";
   if (event.type === "own_goal") return "Autogol";
   if (event.type === "yellow" || event.type === "yellow_card") return "Amarilla";
   if (event.type === "red" || event.type === "red_card") return "Roja";
   if (event.type === "substitution") return "Cambio";
+  if (event.type === "injury_note") return "Lesion";
   if (event.type === "incident") return "Incidente";
-  return "Gol";
+  if (event.type === "other_note") return "Nota";
+  return event.reason || "Evento";
+}
+
+function getReportEventDetail(event) {
+  const details = [
+    event?.reason,
+    event?.notes,
+    event?.description,
+    event?.detail,
+    event?.supportDetail
+  ].filter(Boolean);
+  return details[0] || "";
+}
+
+function parseDelegateReportMinute(event) {
+  const value = event?.minute ?? "";
+  if (value === "" || value === null || value === undefined) return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric;
+}
+
+function hasDelegateReportMinute(event) {
+  return parseDelegateReportMinute(event) !== null || Boolean(String(event?.minuteLabel || "").trim());
 }
 
 function getReportEventMinute(event) {
-  const value = event?.minuteLabel || event?.minute;
-  if (value === null || value === undefined || value === "") return "S/M";
-  return `${value}'`;
+  if (!hasDelegateReportMinute(event)) return "";
+  return `${event?.minuteLabel || event?.minute}'`;
+}
+
+function sortDelegateReportEvents(events) {
+  const indexedEvents = events.map((event, index) => ({ event, index }));
+  const hasMinutes = indexedEvents.some(({ event }) => hasDelegateReportMinute(event));
+
+  if (!hasMinutes) return indexedEvents.map(({ event }) => event);
+
+  return indexedEvents
+    .sort((left, right) => {
+      const leftMinute = parseDelegateReportMinute(left.event);
+      const rightMinute = parseDelegateReportMinute(right.event);
+      const leftHasMinute = hasDelegateReportMinute(left.event);
+      const rightHasMinute = hasDelegateReportMinute(right.event);
+      if (leftMinute !== null && rightMinute !== null) return leftMinute - rightMinute || left.index - right.index;
+      if (leftHasMinute && rightHasMinute) return left.index - right.index;
+      if (leftHasMinute) return -1;
+      if (rightHasMinute) return 1;
+      return left.index - right.index;
+    })
+    .map(({ event }) => event);
+}
+
+function isDelegateSecondYellowEvent(event) {
+  const cardDetail = event?.cardDetail || event?.subtype || event?.metadata?.cardDetail || "";
+  return cardDetail === "double_yellow_second";
 }
 
 function getDelegateReportEventTeamName(match, event, context) {
@@ -165,6 +219,14 @@ function getDelegateReportEventTeamName(match, event, context) {
 function getDelegateReportEventPlayerName(event) {
   const number = event?.playerNumber ? `#${event.playerNumber} ` : "";
   return `${number}${event?.playerName || event?.player || event?.playerId || "Jugador no identificado"}`;
+}
+
+function getDelegateReportEventSecondaryName(event) {
+  const name = event?.secondaryPlayerName || event?.secondaryPlayer || event?.assistPlayerName || "";
+  if (!name) return "";
+  if (event?.type === "substitution") return `Sale: ${name}`;
+  if (event?.assistPlayerName) return `Asistencia: ${name}`;
+  return name;
 }
 
 function normalizeJerseyNumberInput(value) {
@@ -296,8 +358,8 @@ function getScheduleChangeText(match) {
 
 function TeamBadge({ logoUrl, name, tone = "home" }) {
   return (
-    <span className={`portal-team-badge ${tone}`}>
-      {logoUrl ? <img alt="" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
+    <span className={`portal-team-badge ${tone} ${logoUrl ? "has-image" : ""}`}>
+      {logoUrl ? <img alt="" loading="lazy" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
     </span>
   );
 }
@@ -468,10 +530,15 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
       : players.map((player) => ({ ...player, isAffiliate: false, originTeamName: context?.teamName || "" }))
   ), [context?.teamName, eligiblePlayers, players]);
   const filteredPlayers = useMemo(() => {
-    const query = normalizeSearch(playerQuery);
+    const tokens = getSearchTokens(playerQuery);
     return rosterPlayers.filter((player) => {
-      const matchesQuery = !query || normalizeSearch(`${player.name} ${player.number || ""} ${player.originTeamName || ""} ${player.isAffiliate ? "afiliado" : "propio"}`).includes(query);
-      return matchesQuery;
+      return searchTokensMatch([
+        player.name,
+        player.number,
+        player.originTeamName,
+        player.isAffiliate ? "afiliado" : "propio",
+        getPlayerPositionOptionValue(player.position)
+      ], tokens);
     });
   }, [playerQuery, rosterPlayers]);
   const visibleRosterPlayers = useMemo(() => {
@@ -495,10 +562,10 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
       .filter((group) => group.players.length > 0)
   ), [visibleRosterPlayers]);
   const rosterSearchSuggestions = useMemo(() => {
-    const query = normalizeSearch(playerQuery);
-    if (!query) return [];
+    const tokens = getSearchTokens(playerQuery);
+    if (!tokens.length) return [];
     return visibleRosterPlayers
-      .filter((player) => normalizeSearch(`${player.name} ${player.number || ""} ${player.originTeamName || ""}`).includes(query))
+      .filter((player) => searchTokensMatch([player.name, player.number, player.originTeamName, getPlayerPositionOptionValue(player.position)], tokens))
       .slice(0, 5);
   }, [playerQuery, visibleRosterPlayers]);
   const portalMatches = useMemo(() => {
@@ -1248,19 +1315,32 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                       <span>{activeReportEvents.length}</span>
                     </div>
                     <div className="delegate-acta-mini-events full">
-                      {activeReportEvents.map((eventItem, index) => (
-                        <span className={`delegate-acta-event-row event-kind-${eventItem.type || "event"}`} key={`${eventItem.id || eventItem.minute || index}-${index}`}>
-                          <b>{getReportEventIcon(eventItem)}</b>
-                          <strong>{getReportEventMinute(eventItem)}</strong>
-                          <small>
-                            <em>{getReportEventLabel(eventItem)}</em>
-                            <span>{getDelegateReportEventPlayerName(eventItem)}</span>
-                            <i>{getDelegateReportEventTeamName(activeMatch, eventItem, context)}</i>
-                          </small>
-                        </span>
-                      ))}
+                      {activeReportEvents.map((eventItem, index) => {
+                        const minute = getReportEventMinute(eventItem);
+                        const detail = getReportEventDetail(eventItem);
+                        const secondaryName = getDelegateReportEventSecondaryName(eventItem);
+                        return (
+                          <span className={`delegate-acta-event-row event-kind-${eventItem.type || "event"} ${minute ? "" : "without-minute"}`} key={`${eventItem.id || eventItem.localUuid || eventItem.minute || eventItem.type || "event"}-${index}`}>
+                            <b>{getReportEventIcon(eventItem)}</b>
+                            {minute && <strong>{minute}</strong>}
+                            <small>
+                              <em>{getReportEventLabel(eventItem)}</em>
+                              <span>{getDelegateReportEventPlayerName(eventItem)}</span>
+                              {secondaryName && <span>{secondaryName}</span>}
+                              {detail && <span>{detail}</span>}
+                              <i>{getDelegateReportEventTeamName(activeMatch, eventItem, context)}</i>
+                            </small>
+                          </span>
+                        );
+                      })}
                       {!activeReportEvents.length && <small>No hay eventos registrados en el acta preliminar.</small>}
                     </div>
+                    {activeReportObservations && (
+                      <div className="delegate-acta-notes-card">
+                        <span>Observaciones</span>
+                        <p>{activeReportObservations}</p>
+                      </div>
+                    )}
                   </article>
 
                   {!activeActaReadOnly && (
@@ -1469,8 +1549,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
           {activeView === "roster" && (
             <div className="delegate-view-stack delegate-roster-screen">
               <section className="delegate-roster-hero">
-                <span className="delegate-roster-crest">
-                  {context.teamLogoUrl ? <img alt="" src={context.teamLogoUrl} /> : <b>{getTeamInitials(context.teamName)}</b>}
+                <span className={`delegate-roster-crest ${context.teamLogoUrl ? "has-image" : ""}`}>
+                  {context.teamLogoUrl ? <img alt="" loading="lazy" src={context.teamLogoUrl} /> : <b>{getTeamInitials(context.teamName)}</b>}
                 </span>
                 <div>
                   <span>Plantilla del equipo</span>
@@ -1507,6 +1587,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                   <label className="delegate-search-field">
                     <span aria-hidden="true"><RosterIcon type="search" /></span>
                     <input
+                      type="search"
+                      inputMode="search"
                       value={playerQuery}
                       onChange={(event) => setPlayerQuery(event.target.value)}
                       placeholder="Buscar nombre, numero o equipo origen"
@@ -1547,7 +1629,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                       const playerStatus = getDelegatePlayerStatus(player);
                       return (
                         <article className={isEditing ? "editing" : ""} key={player.id}>
-                          <span className="player-avatar team-portal-avatar">
+                          <span className={`player-avatar team-portal-avatar ${player.photoAuthorized && player.photoUrl ? "has-image" : ""}`}>
                             {player.photoAuthorized && player.photoUrl ? <img alt="" loading="lazy" src={player.photoUrl} /> : null}
                             <span>{getPlayerPhotoInitials(player.name)}</span>
                           </span>
@@ -1826,7 +1908,21 @@ function normalizeSearch(value) {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9ñÑ\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLocaleUpperCase("es-MX");
+}
+
+function getSearchTokens(value) {
+  return normalizeSearch(value).split(" ").filter(Boolean);
+}
+
+function searchTokensMatch(values, tokens) {
+  if (!tokens.length) return true;
+  const haystack = (Array.isArray(values) ? values : [values])
+    .map((value) => normalizeSearch(value))
+    .filter(Boolean)
+    .join(" ");
+  return tokens.every((token) => haystack.includes(token));
 }

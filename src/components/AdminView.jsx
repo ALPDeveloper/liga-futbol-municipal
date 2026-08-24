@@ -801,9 +801,16 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
   const [tournamentNotice, setTournamentNotice] = useState("");
   const currentCompetition = getCompetition(league, getDefaultCompetitionId(league));
 
-  function updateCompetitionWithNotice(competitionId, payload) {
-    onUpdateCompetition(competitionId, payload);
-    setTournamentNotice("Torneo actualizado correctamente.");
+  async function updateCompetitionWithNotice(competitionId, payload) {
+    try {
+      await onUpdateCompetition(competitionId, payload);
+      setTournamentNotice("Torneo actualizado correctamente.");
+      showAdminAlert("Torneo actualizado correctamente.");
+    } catch (error) {
+      const message = error.message || "No se pudo actualizar el torneo.";
+      setTournamentNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   return (
@@ -823,12 +830,31 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
         <span><strong>Oculto:</strong> existe y opera en admin, pero no aparece al publico.</span>
         <span><strong>Historico:</strong> conserva tabla, calendario, goleo y actas sin saturar la operacion diaria.</span>
       </div>
-      <form className="tournament-form" onSubmit={(event) => {
+      <div className="tournament-continuity-guide">
+        <div>
+          <span>Preparacion de nuevo torneo</span>
+          <strong>Continuidad sin romper historial</strong>
+          <small>El siguiente paso operativo sera crear un asistente para copiar equipos y jugadores desde un torneo anterior, permitir quitar equipos, renombrarlos solo para el torneo nuevo y conservar sanciones pendientes del jugador.</small>
+        </div>
+        <ul>
+          <li>Archiva el torneo terminado para mantener actas, tabla, goleo y disciplina historica.</li>
+          <li>Crea el torneo nuevo y registra cambios de equipos/jugadores dentro de esa categoria.</li>
+          <li>Usa identidad deportiva para vincular a la misma persona entre torneos cuando tenga castigos pendientes.</li>
+        </ul>
+      </div>
+      <form className="tournament-form" onSubmit={async (event) => {
         event.preventDefault();
         if (!window.confirm("¿Confirmas crear este torneo/categoria?")) return;
-        onAddCompetition(getTournamentFormPayload(event.currentTarget));
-        setTournamentNotice("Torneo creado correctamente.");
-        event.currentTarget.reset();
+        try {
+          await onAddCompetition(getTournamentFormPayload(event.currentTarget));
+          setTournamentNotice("Torneo creado correctamente.");
+          showAdminAlert("Torneo creado correctamente.");
+          event.currentTarget.reset();
+        } catch (error) {
+          const message = error.message || "No se pudo crear el torneo.";
+          setTournamentNotice(message);
+          showAdminAlert(message, "error");
+        }
       }}>
         <h3>Nuevo torneo o categoria</h3>
         <label>Nombre
@@ -885,13 +911,16 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
         : file && file.size
           ? await resolveImageUpload(file, { authToken, leagueId: league.id, scope: "league-logos" })
           : logoPreview;
-      onSaveIdentity({ ...payload, logoUrl });
+      await onSaveIdentity({ ...payload, logoUrl });
       setLogoPreview(logoUrl);
       setIdentityNotice("Identidad publica guardada correctamente.");
+      showAdminAlert("Identidad publica guardada correctamente.");
       if (form.elements.logoFile) form.elements.logoFile.value = "";
       if (form.elements.removeLogo) form.elements.removeLogo.checked = false;
     } catch (error) {
-      setIdentityNotice(error.message || "No se pudo guardar la identidad publica.");
+      const message = error.message || "No se pudo guardar la identidad publica.";
+      setIdentityNotice(message);
+      showAdminAlert(message, "error");
     } finally {
       setSavingIdentity(false);
     }
@@ -2859,7 +2888,7 @@ function RefereeMatchOpsCard({ feedback, focused = false, league, match, onOpen,
 function RefereeTeamBadge({ side = "home", team }) {
   const initials = getTeamAbbreviation(team);
   return (
-    <span className={`referee-admin-team-badge ${side}`}>
+    <span className={`referee-admin-team-badge ${side} ${team?.logoUrl ? "has-image" : ""}`}>
       {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{initials}</b>}
     </span>
   );
@@ -4469,11 +4498,18 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
       </div>
       <form
         className="rules-form config-form"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
           if (!window.confirm("¿Guardar estas reglas deportivas para la liga?")) return;
-          onSaveRules(getFormPayload(event.currentTarget));
-          setRulesNotice("Reglas guardadas correctamente.");
+          try {
+            await onSaveRules(getFormPayload(event.currentTarget));
+            setRulesNotice("Reglas guardadas correctamente.");
+            showAdminAlert("Reglas guardadas correctamente.");
+          } catch (error) {
+            const message = error.message || "No se pudieron guardar las reglas.";
+            setRulesNotice(message);
+            showAdminAlert(message, "error");
+          }
         }}
       >
         <div className="config-form-section">
@@ -4675,7 +4711,7 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
 function AdminMatchTeamBadge({ team, side = "home" }) {
   const initials = getInitials(team?.name || (side === "home" ? "L" : "V"));
   return (
-    <span className={`admin-match-team-badge ${side}`}>
+    <span className={`admin-match-team-badge ${side} ${team?.logoUrl ? "has-image" : ""}`}>
       {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{initials}</b>}
     </span>
   );
@@ -5405,7 +5441,7 @@ function ManagementBoard({
 
   function renderDataTeamMark(team, side = "home") {
     return (
-      <span className={`operation-data-team-mark ${side}`}>
+      <span className={`operation-data-team-mark ${side} ${team?.logoUrl ? "has-image" : ""}`}>
         {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{getInitials(team?.name || "EQ")}</b>}
       </span>
     );
@@ -5413,7 +5449,7 @@ function ManagementBoard({
 
   function renderPlayerAvatar(player) {
     return (
-      <span className="operation-data-player-avatar">
+      <span className={`operation-data-player-avatar ${player?.photoUrl ? "has-image" : ""}`}>
         {player?.photoUrl ? <img alt="" src={player.photoUrl} /> : <b>{getInitials(player?.name || "J")}</b>}
       </span>
     );
@@ -7154,22 +7190,38 @@ function DisciplineControlPanel({
   const warningCount = rows.filter((row) => row.status === "warning").length;
   const trackingCount = rows.filter((row) => row.status === "tracking").length;
 
-  function submitAdjustment(event) {
+  async function submitAdjustment(event) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (!window.confirm("¿Guardar este ajuste manual de amarillas?")) return;
-    onAddDisciplineAdjustment(payload);
-    setNotice("Ajuste disciplinario guardado.");
-    event.currentTarget.reset();
+    try {
+      await onAddDisciplineAdjustment(payload);
+      const message = "Ajuste disciplinario guardado.";
+      setNotice(message);
+      showAdminAlert(message);
+      event.currentTarget.reset();
+    } catch (error) {
+      const message = error.message || "No se pudo guardar el ajuste disciplinario.";
+      setNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
-  function submitReset(event) {
+  async function submitReset(event) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (!window.confirm("¿Marcar sancion cumplida y resetear acumulacion disciplinaria?")) return;
-    onAddDisciplineReset(payload);
-    setNotice("Cumplimiento registrado. La acumulacion disciplinaria se reinicia desde esa fecha.");
-    event.currentTarget.reset();
+    try {
+      await onAddDisciplineReset(payload);
+      const message = "Cumplimiento registrado. La acumulacion disciplinaria se reinicia desde esa fecha.";
+      setNotice(message);
+      showAdminAlert(message);
+      event.currentTarget.reset();
+    } catch (error) {
+      const message = error.message || "No se pudo registrar el cumplimiento disciplinario.";
+      setNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   return (
@@ -7215,7 +7267,7 @@ function DisciplineControlPanel({
                   type="search"
                   value={disciplineQuery}
                   onChange={(event) => setDisciplineQuery(event.target.value)}
-                  placeholder="Nombre, numero o equipo"
+                  placeholder="Jugador, numero, equipo, torneo o motivo"
                 />
                 {disciplineQuery && <button type="button" onClick={() => setDisciplineQuery("")} aria-label="Limpiar busqueda">×</button>}
               </div>
@@ -7254,7 +7306,7 @@ function DisciplineControlPanel({
             <span className="discipline-card-mark">{row.yellowCards}</span>
             <div className="discipline-card-main">
               <strong>{row.player.name}</strong>
-              <span>{row.team?.name || "Sin equipo"}{row.linkedPlayers?.length > 1 ? ` | ${row.linkedPlayers.length} registros vinculados` : ""}</span>
+              <span>{row.team?.name || "Sin equipo"} | {row.competition?.name || "Torneo"}{row.linkedPlayers?.length > 1 ? ` | ${row.linkedPlayers.length} registros vinculados` : ""}</span>
             </div>
             <div className="discipline-card-count">
               <small>Amarillas</small>
@@ -7329,27 +7381,41 @@ function DisciplineControlPanel({
         </div>
         {filteredManualHistory.map((item) => {
             const player = getPlayer(league, item.playerId);
+            const team = player ? getTeam(league, player.teamId) : null;
+            const competition = getCompetition(league, item.competitionId || player?.competitionId || team?.competitionId || getDefaultCompetitionId(league));
             const isReset = item.value === undefined;
             return (
               <article className="discipline-admin-card" key={item.id}>
                 <span className={`discipline-card-mark ${isReset ? "reset" : ""}`}>{isReset ? "OK" : Number(item.value || 0) > 0 ? `+${item.value}` : item.value}</span>
                 <div className="discipline-card-main">
                   <strong>{player?.name || "Jugador eliminado"}</strong>
+                  <span>{team?.name || "Sin equipo"} | {competition?.name || "Torneo"}</span>
+                </div>
+                <div className="discipline-history-meta">
+                  <small>Movimiento</small>
                   <span>{isReset ? "Cumplimiento / reset" : `${Number(item.value || 0) > 0 ? "+" : ""}${item.value} amarilla(s)`}</span>
                 </div>
-                <div>
+                <div className="discipline-history-meta">
                   <small>Fecha</small>
                   <span>{item.date ? formatDate(item.date) : "Sin fecha"}</span>
                 </div>
-                <div>
+                <div className="discipline-history-reason">
                   <small>Motivo</small>
                   <span>{item.reason || item.notes || "Sin motivo"}</span>
                 </div>
-                <button className="danger" type="button" onClick={() => {
+                <button className="danger" type="button" onClick={async () => {
                   if (!window.confirm("¿Eliminar este movimiento manual?")) return;
-                  if (isReset) onDeleteDisciplineReset(item.id);
-                  else onDeleteDisciplineAdjustment(item.id);
-                  setNotice("Movimiento eliminado.");
+                  try {
+                    if (isReset) await onDeleteDisciplineReset(item.id);
+                    else await onDeleteDisciplineAdjustment(item.id);
+                    const message = "Movimiento eliminado.";
+                    setNotice(message);
+                    showAdminAlert(message);
+                  } catch (error) {
+                    const message = error.message || "No se pudo eliminar el movimiento.";
+                    setNotice(message);
+                    showAdminAlert(message, "error");
+                  }
                 }}>Quitar</button>
               </article>
             );
@@ -7427,7 +7493,18 @@ function DisciplineAdminTrace({ league, row }) {
 
 function disciplineMovementMatchesFilters(league, item, filters) {
   const player = getPlayer(league, item.playerId);
-  return player ? disciplinePlayerMatchesFilters(league, player, filters) : adminSearchMatches("Jugador eliminado", filters.query);
+  const team = player ? getTeam(league, player.teamId) : null;
+  const competition = getCompetition(league, item.competitionId || player?.competitionId || team?.competitionId || getDefaultCompetitionId(league));
+  if (filters.competitionId && item.competitionId && item.competitionId !== filters.competitionId) return false;
+  if (filters.teamId && player?.teamId !== filters.teamId) return false;
+  return adminSearchMatches([
+    player ? getPlayerAdminSearchValues(league, player) : "Jugador eliminado",
+    item.reason,
+    item.notes,
+    item.value,
+    team?.name,
+    competition?.name
+  ], filters.query);
 }
 
 function disciplinePlayerMatchesFilters(league, player, filters) {
@@ -7471,6 +7548,7 @@ function SearchablePlayerSelect({ league, name, players, placeholder }) {
       <div className="admin-search-input-wrap">
         <input
           type="search"
+          inputMode="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={placeholder || "Buscar jugador..."}
@@ -7489,6 +7567,7 @@ function SearchablePlayerSelect({ league, name, players, placeholder }) {
           );
         })}
       </select>
+      {query && filteredPlayers.length > 0 && <small>{filteredPlayers.length} coincidencia(s)</small>}
       {!filteredPlayers.length && <small>No hay jugadores con esa busqueda.</small>}
     </div>
   );
@@ -7684,13 +7763,21 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
     });
   }, [activeLeague, clearedSanctions, sanctionQuery]);
 
-  function submitSanction(event) {
+  async function submitSanction(event) {
     event.preventDefault();
     if (!window.confirm("¿Confirmas agregar esta sancion extraordinaria?")) return;
-    onAddPlayerSanction(getFormPayload(event.currentTarget));
-    setSanctionNotice("Sancion agregada correctamente.");
-    event.currentTarget.reset();
-    setSanctionIndefinite(false);
+    try {
+      await onAddPlayerSanction(getFormPayload(event.currentTarget));
+      const message = "Sancion agregada correctamente.";
+      setSanctionNotice(message);
+      showAdminAlert(message);
+      event.currentTarget.reset();
+      setSanctionIndefinite(false);
+    } catch (error) {
+      const message = error.message || "No se pudo agregar la sancion.";
+      setSanctionNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   async function submitPendingSanction(event, item) {
@@ -7702,22 +7789,30 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
       return;
     }
     if (!window.confirm(`¿Confirmas dictamen disciplinario para ${item.player?.name || "este jugador"}?`)) return;
-    const resolved = await onResolveMatchDiscipline({
-      competitionId: item.match.competitionId || getDefaultCompetitionId(league),
-      matchId: item.match.id,
-      eventIndex: item.eventIndex,
-      playerId: item.player.id,
-      resolutionType,
-      type: "Expulsion",
-      date: item.match.date || new Date().toISOString().slice(0, 10),
-      matches: resolutionType === "matches" ? form.elements.matches.value : 0,
-      reason: item.event.reason || "Tarjeta roja",
-      notes: form.elements.notes.value || ""
-    });
-    if (!resolved) return;
-    setSanctionNotice(resolutionType === "release"
-      ? "Jugador liberado por comision disciplinaria."
-      : "Dictamen disciplinario agregado correctamente.");
+    try {
+      const resolved = await onResolveMatchDiscipline({
+        competitionId: item.match.competitionId || getDefaultCompetitionId(league),
+        matchId: item.match.id,
+        eventIndex: item.eventIndex,
+        playerId: item.player.id,
+        resolutionType,
+        type: "Expulsion",
+        date: item.match.date || new Date().toISOString().slice(0, 10),
+        matches: resolutionType === "matches" ? form.elements.matches.value : 0,
+        reason: item.event.reason || "Tarjeta roja",
+        notes: form.elements.notes.value || ""
+      });
+      if (!resolved) return;
+      const message = resolutionType === "release"
+        ? "Jugador liberado por comision disciplinaria."
+        : "Dictamen disciplinario agregado correctamente.";
+      setSanctionNotice(message);
+      showAdminAlert(message);
+    } catch (error) {
+      const message = error.message || "No se pudo guardar el dictamen disciplinario.";
+      setSanctionNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   return (
@@ -7854,10 +7949,18 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
               <button
                 className="danger"
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (!window.confirm(`¿Seguro que quieres quitar la sancion de ${player?.name || "este jugador"}?`)) return;
-                  onDeletePlayerSanction(sanction.id);
-                  setSanctionNotice("Sancion eliminada correctamente.");
+                  try {
+                    await onDeletePlayerSanction(sanction.id);
+                    const message = "Sancion eliminada correctamente.";
+                    setSanctionNotice(message);
+                    showAdminAlert(message);
+                  } catch (error) {
+                    const message = error.message || "No se pudo eliminar la sancion.";
+                    setSanctionNotice(message);
+                    showAdminAlert(message, "error");
+                  }
                 }}
               >
                 Quitar
@@ -7918,7 +8021,7 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
     });
   }, [activeLeague, injuries, injuryQuery, injuryStatusFilter]);
 
-  function submitNewInjury(event) {
+  async function submitNewInjury(event) {
     event.preventDefault();
     if (!activeLeague.players.length) {
       window.alert("Primero registra jugadores para poder agregar lesiones.");
@@ -7926,16 +8029,32 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
     }
 
     if (!window.confirm("¿Confirmas registrar esta lesion?")) return;
-    onAddPlayerInjury(getFormPayload(event.currentTarget));
-    setInjuryNotice("Lesion registrada. Si esta activa, se mostrara en la vista publica.");
-    event.currentTarget.reset();
+    try {
+      await onAddPlayerInjury(getFormPayload(event.currentTarget));
+      const message = "Lesion registrada. Si esta activa, se mostrara en la vista publica.";
+      setInjuryNotice(message);
+      showAdminAlert(message);
+      event.currentTarget.reset();
+    } catch (error) {
+      const message = error.message || "No se pudo registrar la lesion.";
+      setInjuryNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
-  function updateInjury(event, injuryId) {
+  async function updateInjury(event, injuryId) {
     event.preventDefault();
     if (!window.confirm("¿Guardar cambios de esta lesion?")) return;
-    onUpdatePlayerInjury(injuryId, getFormPayload(event.currentTarget));
-    setInjuryNotice("Lesion actualizada correctamente.");
+    try {
+      await onUpdatePlayerInjury(injuryId, getFormPayload(event.currentTarget));
+      const message = "Lesion actualizada correctamente.";
+      setInjuryNotice(message);
+      showAdminAlert(message);
+    } catch (error) {
+      const message = error.message || "No se pudo actualizar la lesion.";
+      setInjuryNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   return (
@@ -8055,10 +8174,18 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
                   <button
                     className="danger"
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (!window.confirm(`¿Seguro que quieres eliminar la lesion de ${player?.name || "este jugador"}?`)) return;
-                      onDeletePlayerInjury(injury.id);
-                      setInjuryNotice("Lesion eliminada correctamente.");
+                      try {
+                        await onDeletePlayerInjury(injury.id);
+                        const message = "Lesion eliminada correctamente.";
+                        setInjuryNotice(message);
+                        showAdminAlert(message);
+                      } catch (error) {
+                        const message = error.message || "No se pudo eliminar la lesion.";
+                        setInjuryNotice(message);
+                        showAdminAlert(message, "error");
+                      }
                     }}
                   >
                     Eliminar
