@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import alpLogo from "../../assets/alp-logo.png";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 import { activateDelegate, fetchDelegateActivation } from "../lib/delegateActivationApi.js";
+import { PasswordField } from "./PasswordField.jsx";
 
 export function DelegateActivationView({ token, onActivated, onNavigate }) {
   const [activation, setActivation] = useState(null);
@@ -10,6 +11,7 @@ export function DelegateActivationView({ token, onActivated, onNavigate }) {
   const [notice, setNotice] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPasswords, setShowPasswords] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,28 +81,28 @@ export function DelegateActivationView({ token, onActivated, onNavigate }) {
               <strong>{activation.leagueName}</strong>
             </div>
             <form className="activation-form" onSubmit={submitActivation}>
-              <label>Contraseña
-                <input
-                  autoComplete="new-password"
-                  minLength="10"
-                  required
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Minimo 10 caracteres"
-                />
-              </label>
-              <label>Confirmar contraseña
-                <input
-                  autoComplete="new-password"
-                  minLength="10"
-                  required
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  placeholder="Repite tu contraseña"
-                />
-              </label>
+              <PasswordField
+                autoComplete="new-password"
+                label="Contraseña"
+                minLength={10}
+                name="password"
+                placeholder="Minimo 10 caracteres"
+                value={password}
+                visible={showPasswords}
+                onChange={(event) => setPassword(event.target.value)}
+                onToggleVisibility={() => setShowPasswords((value) => !value)}
+              />
+              <PasswordField
+                autoComplete="new-password"
+                label="Confirmar contraseña"
+                minLength={10}
+                name="confirmPassword"
+                placeholder="Repite tu contraseña"
+                value={confirmPassword}
+                visible={showPasswords}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                onToggleVisibility={() => setShowPasswords((value) => !value)}
+              />
               <button className="primary" type="submit">Activar cuenta</button>
             </form>
             <p className="helper-text">Usa mayusculas, minusculas y numeros. Esta cuenta solo administrara la plantilla de tu equipo.</p>

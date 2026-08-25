@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getCompetition, getDefaultCompetitionId } from "../lib/domain.js";
 import { submitAccessRequest } from "../lib/accessRequestApi.js";
 import { getFormPayload } from "./forms.js";
+import { PasswordField } from "./PasswordField.jsx";
 
 function normalizeSearchTerm(value) {
   return String(value || "")
@@ -46,6 +47,7 @@ export function PublicAccessRequestSheet({ league, onClose }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [showPasswords, setShowPasswords] = useState(false);
   const teams = useMemo(
     () => [...(league?.teams || [])]
       .filter((team) => !["deleted", "withdrawn"].includes(team.status))
@@ -229,8 +231,22 @@ export function PublicAccessRequestSheet({ league, onClose }) {
             <label>Nombre completo<input name="name" required placeholder="Nombre y apellidos" /></label>
             <label>Telefono<input name="phone" required inputMode="tel" placeholder="Telefono de contacto" /></label>
             <label>Correo electronico<input name="email" required type="email" placeholder="correo@ejemplo.com" /></label>
-            <label>Contraseña<input name="password" required type="password" autoComplete="current-password" placeholder="Nueva o actual si ya tienes cuenta" /></label>
-            <label>Confirmar contraseña<input name="confirmPassword" required type="password" autoComplete="current-password" placeholder="Repite la contraseña" /></label>
+            <PasswordField
+              autoComplete="current-password"
+              label="Contraseña"
+              name="password"
+              placeholder="Nueva o actual si ya tienes cuenta"
+              visible={showPasswords}
+              onToggleVisibility={() => setShowPasswords((value) => !value)}
+            />
+            <PasswordField
+              autoComplete="current-password"
+              label="Confirmar contraseña"
+              name="confirmPassword"
+              placeholder="Repite la contraseña"
+              visible={showPasswords}
+              onToggleVisibility={() => setShowPasswords((value) => !value)}
+            />
           </div>
 
           {notice && <p className="auth-ok">{notice}</p>}

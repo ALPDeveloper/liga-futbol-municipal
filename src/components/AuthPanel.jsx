@@ -125,7 +125,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
           <span>Nueva contraseña</span>
           <span className="auth-input-shell">
             <AuthIcon name="lock" />
-            <input className="auth-password-input" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type={showNewPassword ? "text" : "password"} placeholder="Minimo 10 caracteres" aria-label="Nueva contraseña" />
+            <input className="auth-password-input password-entry-input" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type={showNewPassword ? "text" : "password"} placeholder="Minimo 10 caracteres" aria-label="Nueva contraseña" autoCapitalize="none" autoCorrect="off" spellCheck="false" />
             <button className="auth-visibility-button" type="button" onClick={() => setShowNewPassword((value) => !value)} aria-label={showNewPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
               <AuthIcon name="eye" />
             </button>
@@ -166,7 +166,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
         <span>Contraseña</span>
         <span className="auth-input-shell">
           <AuthIcon name="lock" />
-          <input className="auth-password-input" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? "text" : "password"} placeholder="Ingresa tu contraseña" aria-label="Contraseña" autoComplete="current-password" />
+          <input className="auth-password-input password-entry-input" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? "text" : "password"} placeholder="Ingresa tu contraseña" aria-label="Contraseña" autoCapitalize="none" autoComplete="current-password" autoCorrect="off" spellCheck="false" />
           <button className="auth-visibility-button" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
             <AuthIcon name="eye" />
           </button>

@@ -2860,11 +2860,59 @@ textarea {
 input[type="email"],
 input[type="url"],
 input[type="password"],
+input.password-entry-input,
 input[name*="Email"],
 input[name*="email"],
 input[name*="Password"],
 input[name*="password"] {
-  text-transform: none;
+  text-transform: none !important;
+}
+
+.password-entry-field {
+  min-width: 0;
+}
+
+.password-entry-shell {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.password-entry-shell input.password-entry-input {
+  width: 100%;
+  padding-right: 52px;
+  text-transform: none !important;
+}
+
+.password-entry-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 38px;
+  min-height: 38px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.82);
+  transform: translateY(-50%);
+}
+
+.password-entry-toggle svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.password-entry-toggle:focus-visible {
+  outline: 2px solid rgba(168, 255, 66, 0.78);
+  outline-offset: 2px;
 }
 
 .segmented {
@@ -28497,6 +28545,14 @@ button.arbitration-metric-card {
   border-color: rgba(255, 255, 255, 0.2);
   color: #fff;
   background: rgba(255, 255, 255, 0.055);
+}
+
+.auth-experience-page .activation-form .password-entry-shell {
+  margin-top: 8px;
+}
+
+.auth-experience-page .activation-form .password-entry-shell input {
+  margin-top: 0;
 }
 
 .access-footer {

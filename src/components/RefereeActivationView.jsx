@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import alpLogo from "../../assets/alp-logo.png";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 import { activateReferee, fetchRefereeActivation } from "../lib/refereeActivationApi.js";
+import { PasswordField } from "./PasswordField.jsx";
 
 export function RefereeActivationView({ token, onActivated, onNavigate }) {
   const [activation, setActivation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [showPasswords, setShowPasswords] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,12 +80,22 @@ export function RefereeActivationView({ token, onActivated, onNavigate }) {
               <strong>{activation?.municipality}</strong>
             </div>
             <form className="form-grid activation-form" onSubmit={handleSubmit}>
-              <label>Contraseña
-                <input name="password" type="password" required minLength={10} autoComplete="new-password" />
-              </label>
-              <label>Confirmar contraseña
-                <input name="confirmPassword" type="password" required minLength={10} autoComplete="new-password" />
-              </label>
+              <PasswordField
+                autoComplete="new-password"
+                label="Contraseña"
+                minLength={10}
+                name="password"
+                visible={showPasswords}
+                onToggleVisibility={() => setShowPasswords((value) => !value)}
+              />
+              <PasswordField
+                autoComplete="new-password"
+                label="Confirmar contraseña"
+                minLength={10}
+                name="confirmPassword"
+                visible={showPasswords}
+                onToggleVisibility={() => setShowPasswords((value) => !value)}
+              />
               <p className="helper-text">Usa mayusculas, minusculas y numeros. Esta cuenta solo vera partidos asignados como arbitro central.</p>
               {error && <p className="sheet-alert">{error}</p>}
               {message && <p className="auth-ok">{message}</p>}
