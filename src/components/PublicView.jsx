@@ -4488,8 +4488,8 @@ function HomeFeaturedMatch({ competitionName, currentRound, heroImage, league, l
   const displayVenue = match.venue || "Cancha por definir";
   return (
     <article className="home-featured-match" style={{ "--home-photo": `url(${heroImage})` }}>
-      <header className="home-featured-identity">
-        <span className="home-league-mark" aria-hidden="true">
+      <header className={`home-featured-identity${leagueLogoUrl ? " has-league-logo" : ""}`}>
+        <span className={`home-league-mark${leagueLogoUrl ? " has-logo" : ""}`} aria-hidden="true">
           {leagueLogoUrl ? <img alt="" src={leagueLogoUrl} loading="lazy" /> : getTeamInitials(league.name)}
         </span>
         <div>
