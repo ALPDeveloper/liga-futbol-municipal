@@ -120,12 +120,10 @@ function getTeamScore(match) {
 }
 
 function getReportEvents(match) {
-  const events = Array.isArray(match?.reportPayload?.events) && match.reportPayload.events.length
-    ? match.reportPayload.events
-    : Array.isArray(match?.events)
-    ? match.events
-    : [];
-  return sortDelegateReportEvents(events);
+  const reportEvents = Array.isArray(match?.reportPayload?.events) ? match.reportPayload.events : [];
+  const officialEvents = Array.isArray(match?.events) ? match.events : [];
+  const mergedEvents = mergeDelegateReportEventSources(officialEvents, reportEvents);
+  return sortDelegateReportEvents(mergedEvents);
 }
 
 function getReportEventIcon(event) {
@@ -140,19 +138,25 @@ function getReportEventIcon(event) {
   return "•";
 }
 
+function getDelegateReportEventTypeClass(event) {
+  if (event?.type === "yellow_card") return "yellow";
+  if (event?.type === "red_card") return "red";
+  return event?.type || "event";
+}
+
 function getReportEventLabel(event) {
-  const cardDetail = event.cardDetail || event.subtype || event.metadata?.cardDetail || "";
+  const cardDetail = event?.cardDetail || event?.subtype || event?.metadata?.cardDetail || "";
   if (cardDetail === "double_yellow") return "Roja por 2a amarilla";
   if (cardDetail === "double_yellow_second") return "2a amarilla";
-  if (event.type === "goal") return "Gol";
-  if (event.type === "own_goal") return "Autogol";
-  if (event.type === "yellow" || event.type === "yellow_card") return "Amarilla";
-  if (event.type === "red" || event.type === "red_card") return "Roja";
-  if (event.type === "substitution") return "Cambio";
-  if (event.type === "injury_note") return "Lesion";
-  if (event.type === "incident") return "Incidente";
-  if (event.type === "other_note") return "Nota";
-  return event.reason || "Evento";
+  if (event?.type === "goal") return "Gol";
+  if (event?.type === "own_goal") return "Autogol";
+  if (event?.type === "yellow" || event?.type === "yellow_card") return "Amarilla";
+  if (event?.type === "red" || event?.type === "red_card") return "Roja";
+  if (event?.type === "substitution") return "Cambio";
+  if (event?.type === "injury_note") return "Lesion";
+  if (event?.type === "incident") return "Incidente";
+  if (event?.type === "other_note") return "Nota";
+  return event?.reason || "Evento";
 }
 
 function getReportEventDetail(event) {
@@ -181,6 +185,54 @@ function hasDelegateReportMinute(event) {
 function getReportEventMinute(event) {
   if (!hasDelegateReportMinute(event)) return "";
   return `${event?.minuteLabel || event?.minute}'`;
+}
+
+function getDelegateReportEventKey(event, index) {
+  if (event?.id) return `id:${event.id}`;
+  if (event?.localUuid) return `uuid:${event.localUuid}`;
+  return [
+    "event",
+    event?.type || "",
+    event?.teamId || "",
+    event?.playerId || "",
+    event?.secondaryPlayerId || "",
+    event?.assistPlayerId || "",
+    event?.minute ?? "",
+    event?.minuteLabel || "",
+    index
+  ].join(":");
+}
+
+function mergeDelegateReportEventDetails(baseEvent = {}, detailEvent = {}) {
+  const baseMetadata = baseEvent?.metadata && typeof baseEvent.metadata === "object" ? baseEvent.metadata : {};
+  const detailMetadata = detailEvent?.metadata && typeof detailEvent.metadata === "object" ? detailEvent.metadata : {};
+  return {
+    ...detailEvent,
+    ...baseEvent,
+    metadata: {
+      ...detailMetadata,
+      ...baseMetadata
+    },
+    cardDetail: baseEvent.cardDetail || baseEvent.subtype || baseMetadata.cardDetail || detailEvent.cardDetail || detailEvent.subtype || detailMetadata.cardDetail || "",
+    playerName: baseEvent.playerName || detailEvent.playerName || detailEvent.player || "",
+    playerNumber: baseEvent.playerNumber || detailEvent.playerNumber || "",
+    teamName: baseEvent.teamName || detailEvent.teamName || "",
+    secondaryPlayerName: baseEvent.secondaryPlayerName || detailEvent.secondaryPlayerName || detailEvent.secondaryPlayer || "",
+    assistPlayerName: baseEvent.assistPlayerName || detailEvent.assistPlayerName || ""
+  };
+}
+
+function mergeDelegateReportEventSources(officialEvents, reportEvents) {
+  if (!officialEvents.length) return reportEvents;
+  if (!reportEvents.length) return officialEvents;
+
+  const reportByKey = new Map(reportEvents.map((event, index) => [getDelegateReportEventKey(event, index), event]));
+  const merged = officialEvents.map((event, index) => (
+    mergeDelegateReportEventDetails(event, reportByKey.get(getDelegateReportEventKey(event, index)))
+  ));
+  const seen = new Set(officialEvents.map((event, index) => getDelegateReportEventKey(event, index)));
+  const missingReportEvents = reportEvents.filter((event, index) => !seen.has(getDelegateReportEventKey(event, index)));
+  return [...merged, ...missingReportEvents];
 }
 
 function sortDelegateReportEvents(events) {
@@ -227,6 +279,71 @@ function getDelegateReportEventSecondaryName(event) {
   if (event?.type === "substitution") return `Sale: ${name}`;
   if (event?.assistPlayerName) return `Asistencia: ${name}`;
   return name;
+}
+
+function DelegateActaEventSummary({ context, events, match }) {
+  const homeEvents = events.filter((event) => event.teamId === match.homeTeamId);
+  const awayEvents = events.filter((event) => event.teamId === match.awayTeamId);
+  const generalEvents = events.filter((event) => event.teamId !== match.homeTeamId && event.teamId !== match.awayTeamId);
+
+  if (!events.length) {
+    return (
+      <div className="match-events-empty">
+        <strong>Detalle del partido</strong>
+        <span>Aun no hay eventos registrados en el acta.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="match-event-detail compact-sided-events delegate-acta-public-events">
+      <div className="match-event-compact-head">
+        <strong>{match.homeTeamName || (match.isHome ? context.teamName : match.opponentName) || "LOCAL"}</strong>
+        <span aria-hidden="true" />
+        <strong>{match.awayTeamName || (match.isHome ? match.opponentName : context.teamName) || "VISITANTE"}</strong>
+      </div>
+      <div className="match-event-compact-grid">
+        <DelegateActaTeamEvents context={context} events={homeEvents} match={match} side="home" />
+        <span className="match-event-compact-divider" aria-hidden="true" />
+        <DelegateActaTeamEvents context={context} events={awayEvents} match={match} side="away" />
+      </div>
+      {generalEvents.length > 0 && (
+        <div className="match-compact-general-events">
+          <strong>Registros generales</strong>
+          <DelegateActaTeamEvents context={context} events={generalEvents} match={match} side="general" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DelegateActaTeamEvents({ context, events, match, side }) {
+  return (
+    <div className={`match-compact-team-events ${side}`}>
+      {events.map((eventItem, index) => {
+        const minute = getReportEventMinute(eventItem);
+        const detail = getReportEventDetail(eventItem);
+        const secondaryName = getDelegateReportEventSecondaryName(eventItem);
+        const typeClass = getDelegateReportEventTypeClass(eventItem);
+        return (
+          <article className={`match-compact-event ${typeClass} ${isDelegateSecondYellowEvent(eventItem) ? "double-yellow" : ""}`} key={`${eventItem.id || eventItem.localUuid || eventItem.minute || eventItem.type || "event"}-${index}`}>
+            <span className="match-compact-event-icon" aria-hidden="true">{getReportEventIcon(eventItem)}</span>
+            <div>
+              <strong>{getDelegateReportEventPlayerName(eventItem)}</strong>
+              <small>
+                {minute && <b>{minute}</b>}
+                <span>{getReportEventLabel(eventItem)}</span>
+                {secondaryName && <i>{secondaryName}</i>}
+                {detail && <i>{detail}</i>}
+                {side === "general" && <i>{getDelegateReportEventTeamName(match, eventItem, context)}</i>}
+              </small>
+            </div>
+          </article>
+        );
+      })}
+      {!events.length && <p>Sin eventos</p>}
+    </div>
+  );
 }
 
 function normalizeJerseyNumberInput(value) {
@@ -1314,30 +1431,10 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                       <strong>Eventos registrados</strong>
                       <span>{activeReportEvents.length}</span>
                     </div>
-                    <div className="delegate-acta-mini-events full">
-                      {activeReportEvents.map((eventItem, index) => {
-                        const minute = getReportEventMinute(eventItem);
-                        const detail = getReportEventDetail(eventItem);
-                        const secondaryName = getDelegateReportEventSecondaryName(eventItem);
-                        return (
-                          <span className={`delegate-acta-event-row event-kind-${eventItem.type || "event"} ${minute ? "" : "without-minute"}`} key={`${eventItem.id || eventItem.localUuid || eventItem.minute || eventItem.type || "event"}-${index}`}>
-                            <b>{getReportEventIcon(eventItem)}</b>
-                            {minute && <strong>{minute}</strong>}
-                            <small>
-                              <em>{getReportEventLabel(eventItem)}</em>
-                              <span>{getDelegateReportEventPlayerName(eventItem)}</span>
-                              {secondaryName && <span>{secondaryName}</span>}
-                              {detail && <span>{detail}</span>}
-                              <i>{getDelegateReportEventTeamName(activeMatch, eventItem, context)}</i>
-                            </small>
-                          </span>
-                        );
-                      })}
-                      {!activeReportEvents.length && <small>No hay eventos registrados en el acta preliminar.</small>}
-                    </div>
+                    <DelegateActaEventSummary context={context} events={activeReportEvents} match={activeMatch} />
                     {activeReportObservations && (
-                      <div className="delegate-acta-notes-card">
-                        <span>Observaciones</span>
+                      <div className="public-match-notes-card delegate-acta-public-notes">
+                        <span>Notas del acta</span>
                         <p>{activeReportObservations}</p>
                       </div>
                     )}

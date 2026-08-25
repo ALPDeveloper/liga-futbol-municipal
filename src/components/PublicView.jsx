@@ -1636,7 +1636,7 @@ function PublicScheduleMatchCard({ focused = false, league, match, onSelectMatch
   const awayTeam = getTeam(league, match.awayTeamId);
   const statusLabel = getMatchStatusLabel(match);
   const isFinished = match.status === "finished" || match.status === "walkover";
-  const canOpenDetail = isFinished && (match.events || []).length > 0;
+  const canOpenDetail = isFinished && ((match.events || []).length > 0 || match.observations || match.resolutionNote);
   const statusGroup = getPublicMatchStatusGroup(match);
   const tone = getPublicMatchTone(match);
   const matchContent = (
@@ -6626,12 +6626,13 @@ function MatchEventSummary({ league, match, homeTeam, awayTeam }) {
   const events = sortMatchEvents(match.events || []);
   const homeEvents = events.filter((event) => event.teamId === match.homeTeamId);
   const awayEvents = events.filter((event) => event.teamId === match.awayTeamId);
+  const generalEvents = events.filter((event) => event.teamId !== match.homeTeamId && event.teamId !== match.awayTeamId);
 
   if (!events.length) {
     return (
       <div className="match-events-empty">
         <strong>Detalle del partido</strong>
-        <span>Aun no hay goles o tarjetas capturadas en el acta.</span>
+        <span>Aun no hay eventos capturados en el acta.</span>
       </div>
     );
   }
@@ -6648,6 +6649,12 @@ function MatchEventSummary({ league, match, homeTeam, awayTeam }) {
         <span className="match-event-compact-divider" aria-hidden="true" />
         <CompactTeamEvents events={awayEvents} league={league} side="away" />
       </div>
+      {generalEvents.length > 0 && (
+        <div className="match-compact-general-events">
+          <strong>Registros generales</strong>
+          <CompactTeamEvents events={generalEvents} league={league} side="general" />
+        </div>
+      )}
     </div>
   );
 }
@@ -6720,7 +6727,7 @@ function getEventPhaseLabel(phase) {
 
 function sortMatchEvents(events) {
   const indexedEvents = events
-    .filter((event) => ["goal", "own_goal", "yellow", "red"].includes(event.type))
+    .filter((event) => event && typeof event === "object")
     .map((event, index) => ({ event, index }));
   const hasMinutes = indexedEvents.some(({ event }) => hasEventMinute(event));
 
@@ -6831,24 +6838,31 @@ function getPublicEventCardDetail(event) {
 }
 
 function isPublicSecondYellowEvent(event) {
-  return Boolean(event) && event.type === "yellow" && getPublicEventCardDetail(event) === "double_yellow_second";
+  return Boolean(event) && ["yellow", "yellow_card"].includes(event.type) && getPublicEventCardDetail(event) === "double_yellow_second";
 }
 
 function getPublicEventIcon(type, event = null) {
   if (type === "goal") return "⚽";
   if (type === "own_goal") return "⚽";
-  if (type === "yellow" && isPublicSecondYellowEvent(event)) return "🟨🟥";
-  if (type === "yellow") return "🟨";
-  if (type === "red") return "🟥";
+  if ((type === "yellow" || type === "yellow_card") && isPublicSecondYellowEvent(event)) return "🟨🟥";
+  if (type === "yellow" || type === "yellow_card") return "🟨";
+  if (type === "red" || type === "red_card") return "🟥";
+  if (type === "substitution") return "↔";
+  if (type === "injury_note") return "✚";
+  if (type === "incident" || type === "other_note") return "⚠";
   return "•";
 }
 
 function getPublicEventDetail(event) {
   if (event.type === "goal") return "Gol";
   if (event.type === "own_goal") return "Autogol";
-  if (event.type === "yellow" && isPublicSecondYellowEvent(event)) return "Segunda amarilla + roja";
-  if (event.type === "yellow") return "Amarilla";
-  if (event.type === "red") return event.reason || "Roja";
+  if ((event.type === "yellow" || event.type === "yellow_card") && isPublicSecondYellowEvent(event)) return "Segunda amarilla + roja";
+  if (event.type === "yellow" || event.type === "yellow_card") return "Amarilla";
+  if (event.type === "red" || event.type === "red_card") return event.reason || "Roja";
+  if (event.type === "substitution") return "Cambio";
+  if (event.type === "injury_note") return event.reason || event.notes || "Lesion";
+  if (event.type === "incident") return event.reason || event.notes || event.description || "Incidente";
+  if (event.type === "other_note") return event.reason || event.notes || event.description || "Nota";
   return "Evento";
 }
 

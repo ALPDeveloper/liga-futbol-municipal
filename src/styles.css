@@ -39719,6 +39719,19 @@ button.arbitration-metric-card {
   --event-accent: #ef4444;
 }
 
+.match-compact-event.substitution {
+  --event-accent: #38bdf8;
+}
+
+.match-compact-event.injury_note {
+  --event-accent: #fb7185;
+}
+
+.match-compact-event.incident,
+.match-compact-event.other_note {
+  --event-accent: #f97316;
+}
+
 .match-compact-event.own_goal {
   --event-accent: #ef4444;
 }
@@ -39773,6 +39786,7 @@ button.arbitration-metric-card {
 .match-compact-event small {
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
   color: var(--event-accent);
@@ -39790,6 +39804,47 @@ button.arbitration-metric-card {
   color: #f8fbff;
   font: inherit;
   font-weight: 1000;
+}
+
+.match-compact-event small span,
+.match-compact-event small i {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.match-compact-event small i {
+  color: rgba(216, 226, 241, 0.72);
+  font-style: normal;
+  text-transform: none;
+}
+
+.match-compact-general-events {
+  display: grid;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.match-compact-general-events > strong {
+  color: rgba(216, 226, 241, 0.76);
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.match-compact-general-events .match-compact-team-events.general {
+  grid-template-columns: 1fr;
+}
+
+.team-portal-page .delegate-acta-public-events {
+  max-height: min(48vh, 520px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.team-portal-page .delegate-acta-public-notes {
+  margin-top: 10px;
+  border-radius: 12px;
 }
 
 @media (max-width: 390px) {
