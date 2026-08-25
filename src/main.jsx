@@ -435,6 +435,8 @@ function normalizeLandingSearch(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/[^\p{L}\p{N}#]+/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -443,11 +445,46 @@ function landingMatchesSearch(values, query) {
   const term = normalizeLandingSearch(query);
   if (!term) return true;
   if (searchable.includes(term)) return true;
-  const compactSearchable = searchable.replace(/[^a-z0-9]+/g, "");
-  const compactTerm = term.replace(/[^a-z0-9]+/g, "");
+  const searchableTokens = getLandingSearchTokens(searchable);
+  const compactSearchable = searchableTokens.join("");
+  const termTokens = getLandingSearchTokens(term).filter((token) => token.length >= 2 || /^\d+$/.test(token));
+  const compactTerm = termTokens.join("");
   if (compactTerm.length >= 3 && compactSearchable.includes(compactTerm)) return true;
-  const tokens = term.split(/\s+/).filter((token) => token.length >= 2);
-  return tokens.length > 0 && tokens.every((token) => searchable.includes(token));
+  return termTokens.length > 0 && termTokens.every((token) => landingTokenMatches(searchableTokens, token));
+}
+
+function getLandingSearchTokens(value) {
+  return normalizeLandingSearch(value).split(/\s+/).filter(Boolean);
+}
+
+function landingTokenMatches(searchableTokens, token) {
+  if (!token) return true;
+  if (searchableTokens.some((searchToken) => searchToken === token || searchToken.startsWith(token))) return true;
+  if (token.length >= 3 && searchableTokens.some((searchToken) => searchToken.includes(token) || token.includes(searchToken))) return true;
+  if (token.length < 4) return false;
+  return searchableTokens.some((searchToken) => {
+    if (searchToken.length < 4) return false;
+    const allowedDistance = Math.min(2, Math.floor(Math.max(searchToken.length, token.length) / 5));
+    return getLandingEditDistance(searchToken, token, allowedDistance) <= allowedDistance;
+  });
+}
+
+function getLandingEditDistance(a, b, maxDistance = 2) {
+  if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = current[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+      current[j] = value;
+      rowMin = Math.min(rowMin, value);
+    }
+    if (rowMin > maxDistance) return maxDistance + 1;
+    previous = current;
+  }
+  return previous[b.length];
 }
 
 function getLeagueLandingStats(league) {
@@ -492,11 +529,15 @@ function LeagueDirectoryPage({ onNavigate, store }) {
     const search = normalizeLandingSearch(query);
     if (!search) return activeLeagues;
     return activeLeagues.filter((league) => {
+      const teamsById = new Map((league.teams || []).map((team) => [team.id, team]));
       const searchGroups = {
         municipio: [league.name, league.city],
         torneo: [league.season, ...(league.competitions || []).map((competition) => `${competition.name} ${competition.season || ""}`)],
         equipo: (league.teams || []).map((team) => team.name),
-        jugador: (league.players || []).slice(0, 80).map((player) => player.name)
+        jugador: (league.players || []).map((player) => {
+          const team = teamsById.get(player.teamId);
+          return `${player.name || ""} ${player.number || ""} ${team?.name || ""}`;
+        })
       };
       const searchable = searchScope === "all"
         ? Object.values(searchGroups).flat().join(" ")
@@ -564,10 +605,10 @@ function LeagueDirectoryPage({ onNavigate, store }) {
           value: team.name
         });
       });
-      (league.players || []).slice(0, 120).forEach((player) => {
+      (league.players || []).forEach((player) => {
         const playerTeam = (league.teams || []).find((team) => team.id === player.teamId);
         addSuggestion({
-          context: playerTeam?.name || league.name,
+          context: [playerTeam?.name, player.number ? `#${player.number}` : "", league.name].filter(Boolean).join(" | "),
           icon: "user",
           leagueId: league.id,
           scope: "jugador",
@@ -698,9 +739,9 @@ function LeagueDirectoryPage({ onNavigate, store }) {
             </button>
           )}
         </label>
-        {directorySearchTerm && (
+        {directorySearchTerm && searchSuggestions.length > 0 && (
           <div className="directory-search-suggestions" role="listbox" aria-label="Coincidencias disponibles">
-            {searchSuggestions.length ? searchSuggestions.map((suggestion) => (
+            {searchSuggestions.map((suggestion) => (
               <button
                 key={`${suggestion.leagueId}-${suggestion.scope}-${suggestion.value}`}
                 type="button"
@@ -718,12 +759,7 @@ function LeagueDirectoryPage({ onNavigate, store }) {
                 </span>
                 <span className="directory-suggestion-arrow" aria-hidden="true">›</span>
               </button>
-            )) : (
-              <div className="directory-search-empty">
-                <strong>Sin coincidencias rapidas</strong>
-                <small>Intenta buscar por municipio, torneo, equipo o jugador.</small>
-              </div>
-            )}
+            ))}
           </div>
         )}
         <div className="directory-filter-chips" aria-label="Filtrar busqueda por tipo">

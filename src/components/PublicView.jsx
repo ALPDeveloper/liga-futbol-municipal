@@ -2232,18 +2232,18 @@ function getPublicSearchTypePriority(type) {
 
 function getPublicSearchRank(values, query) {
   const term = normalizeSearchTerm(query);
-  const normalizedValues = (Array.isArray(values) ? values : [values])
-    .map((value) => normalizeSearchTerm(value))
-    .filter(Boolean);
-  const searchable = normalizedValues.join(" ");
-  if (!term || !matchesSearchQuery(normalizedValues, term)) return Number.POSITIVE_INFINITY;
-  if (normalizedValues.some((value) => value === term)) return 0;
-  if (normalizedValues.some((value) => value.startsWith(term))) return 1;
-  const words = searchable.split(/\s+/).filter(Boolean);
-  const tokens = term.split(/\s+/).filter(Boolean);
-  if (tokens.length && tokens.every((token) => words.some((word) => word.startsWith(token)))) return 2;
-  if (searchable.includes(term)) return 3;
-  return 4;
+  const profile = getSearchProfile(values);
+  if (!term || !matchesSearchQuery(profile.searchable, term)) return Number.POSITIVE_INFINITY;
+  if (profile.values.some((value) => value === term)) return 0;
+  if (profile.values.some((value) => value.startsWith(term))) return 1;
+  const termTokens = getSearchTokens(term).filter((token) => token.length >= 2 || /^\d+$/.test(token));
+  const qualities = termTokens.map((token) => getSearchTokenQuality(profile.tokens, token));
+  if (qualities.length && qualities.every((quality) => quality <= 1)) return 2;
+  if (profile.searchable.includes(term)) return 3;
+  if (qualities.length && qualities.every((quality) => Number.isFinite(quality))) {
+    return 3.4 + qualities.reduce((sum, quality) => sum + quality, 0) / qualities.length;
+  }
+  return 5;
 }
 
 function getRoundMatchSearchResults(league, matches, query) {
@@ -2289,25 +2289,74 @@ function getRoundMatchSearchResults(league, matches, query) {
 }
 
 function matchesSearchQuery(values, query) {
-  const searchable = Array.isArray(values)
-    ? normalizeSearchTerm(values.filter(Boolean).join(" "))
-    : normalizeSearchTerm(values);
+  const profile = getSearchProfile(values);
+  const searchable = profile.searchable;
   const term = normalizeSearchTerm(query);
   if (!term) return true;
-  if (searchable.includes(term) || isLooseSearchMatch(searchable, term)) return true;
-  const tokens = term.split(/\s+/).filter((token) => token.length >= 2);
+  if (searchable.includes(term) || isLooseSearchMatch(profile, term)) return true;
+  const tokens = getSearchTokens(term).filter((token) => token.length >= 2 || /^\d+$/.test(token));
   if (!tokens.length) return false;
-  return tokens.every((token) => searchable.includes(token) || isLooseSearchMatch(searchable, token));
+  return tokens.every((token) => Number.isFinite(getSearchTokenQuality(profile.tokens, token)) || isLooseSearchMatch(profile, token));
 }
 
-function isLooseSearchMatch(searchable, term) {
-  if (term.length < 4) return false;
-  const compactSearchable = searchable.replace(/[^a-z0-9]+/g, "");
-  const compactTerm = term.replace(/[^a-z0-9]+/g, "");
-  if (compactSearchable.includes(compactTerm)) return true;
+function getSearchProfile(values) {
+  const normalizedValues = (Array.isArray(values) ? values : [values])
+    .map((value) => normalizeSearchTerm(value))
+    .filter(Boolean);
+  const searchable = normalizedValues.join(" ");
+  const tokens = Array.from(new Set(getSearchTokens(searchable)));
+  return {
+    values: normalizedValues,
+    searchable,
+    tokens,
+    compact: tokens.join("")
+  };
+}
+
+function getSearchTokens(value) {
+  return normalizeSearchTerm(value).split(/\s+/).filter(Boolean);
+}
+
+function getSearchTokenQuality(searchableTokens, token) {
+  if (!token) return 0;
+  if (searchableTokens.some((searchToken) => searchToken === token)) return 0;
+  if (searchableTokens.some((searchToken) => searchToken.startsWith(token))) return 1;
+  if (token.length >= 3 && searchableTokens.some((searchToken) => searchToken.includes(token) || token.includes(searchToken))) return 2;
+  if (token.length < 4) return Number.POSITIVE_INFINITY;
+  const fuzzyMatch = searchableTokens.some((searchToken) => {
+    if (searchToken.length < 4) return false;
+    const allowedDistance = Math.min(2, Math.floor(Math.max(searchToken.length, token.length) / 5));
+    return getSearchEditDistance(searchToken, token, allowedDistance) <= allowedDistance;
+  });
+  return fuzzyMatch ? 3 : Number.POSITIVE_INFINITY;
+}
+
+function isLooseSearchMatch(profileOrSearchable, term) {
+  const profile = typeof profileOrSearchable === "string" ? getSearchProfile(profileOrSearchable) : profileOrSearchable;
+  const compactTerm = getSearchTokens(term).join("");
+  if (compactTerm.length < 3) return false;
+  if (profile.compact.includes(compactTerm)) return true;
   const consonants = (value) => value.replace(/[aeiou]/g, "");
   const compactTermConsonants = consonants(compactTerm);
-  return compactTermConsonants.length >= 3 && consonants(compactSearchable).includes(compactTermConsonants);
+  return compactTermConsonants.length >= 3 && consonants(profile.compact).includes(compactTermConsonants);
+}
+
+function getSearchEditDistance(a, b, maxDistance = 2) {
+  if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = current[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+      current[j] = value;
+      rowMin = Math.min(rowMin, value);
+    }
+    if (rowMin > maxDistance) return maxDistance + 1;
+    previous = current;
+  }
+  return previous[b.length];
 }
 
 function normalizeSearchTerm(value) {
@@ -2315,6 +2364,8 @@ function normalizeSearchTerm(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("es-MX")
+    .replace(/[^\p{L}\p{N}#]+/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -3801,7 +3852,7 @@ function PublicUtilityBar({ leagueName, onSearch, onSelectResult, onShare, query
         )}
       </label>
       <ShareActionButton className="public-share-button" label="Compartir liga" onClick={onShare} />
-      {query.trim().length >= 2 && (
+      {query.trim().length >= 2 && results.length > 0 && (
         <div className="public-search-results">
           {results.map((result) => (
             <a
@@ -3818,7 +3869,6 @@ function PublicUtilityBar({ leagueName, onSearch, onSelectResult, onShare, query
               {result.competitionId && !result.isCurrentCompetition && <em>Ver en su torneo</em>}
             </a>
           ))}
-          {!results.length && <p>Sin resultados para {leagueName}.</p>}
         </div>
       )}
     </section>
