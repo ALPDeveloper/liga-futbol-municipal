@@ -721,7 +721,7 @@ function LeagueAdmin({
             {activeSection === "sheet" && (
               <section className="panel">
                 <SectionHeading eyebrow="Acta" title="Acta de partido" />
-                <MatchSheet league={league} onSaveMatchSheet={onSaveMatchSheet} />
+                <MatchSheet league={league} onAddPlayer={onAddPlayer} onSaveMatchSheet={onSaveMatchSheet} />
               </section>
             )}
 
@@ -3304,37 +3304,58 @@ function AffiliationsPanel({
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (payload.sourceTeamId === payload.targetTeamId) {
-      setNotice("El equipo origen y receptor deben ser distintos.");
+      const message = "El equipo origen y receptor deben ser distintos.";
+      setNotice(message);
+      showAdminAlert(message, "error");
       return;
     }
     if (affiliationAlreadyExists) {
-      setNotice("Esta afiliacion ya esta activa.");
+      const message = "Esta afiliacion ya esta activa.";
+      setNotice(message);
+      showAdminAlert(message, "error");
       return;
     }
     const source = getTeam(league, payload.sourceTeamId);
     const target = getTeam(league, payload.targetTeamId);
     if (!window.confirm(`¿Afiliar la plantilla de ${source?.name || "origen"} con ${target?.name || "receptor"}?`)) return;
-    onAddTeamAffiliation(payload);
-    setNotice("Afiliacion guardada. La plantilla origen ya puede capturarse en actas del equipo receptor.");
-    event.currentTarget.reset();
+    try {
+      onAddTeamAffiliation(payload);
+      const message = "Afiliacion guardada. La plantilla origen ya puede capturarse en actas del equipo receptor.";
+      setNotice(message);
+      showAdminAlert(message);
+      event.currentTarget.reset();
+    } catch (error) {
+      const message = error.message || "No se pudo guardar la afiliacion.";
+      setNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   function submitMerge(event) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (payload.targetPlayerId === payload.duplicatePlayerId) {
-      setNotice("El jugador principal y el duplicado deben ser distintos.");
+      const message = "El jugador principal y el duplicado deben ser distintos.";
+      setNotice(message);
+      showAdminAlert(message, "error");
       return;
     }
     const target = getPlayer(league, payload.targetPlayerId);
     const duplicate = getPlayer(league, payload.duplicatePlayerId);
-    if (!target || !duplicate) return;
+    if (!target || !duplicate) {
+      const message = "Selecciona jugador principal y registro duplicado.";
+      setNotice(message);
+      showAdminAlert(message, "error");
+      return;
+    }
     const targetTeam = getTeam(league, target.teamId);
     const duplicateTeam = getTeam(league, duplicate.teamId);
     const targetCompetitionId = target.competitionId || targetTeam?.competitionId || getDefaultCompetitionId(league);
     const duplicateCompetitionId = duplicate.competitionId || duplicateTeam?.competitionId || getDefaultCompetitionId(league);
     if (targetCompetitionId !== duplicateCompetitionId) {
-      setNotice("No fusione jugadores de categorias distintas. Usa Vincular misma persona para conservar cada historial en su torneo.");
+      const message = "No fusione jugadores de categorias distintas. Usa Vincular misma persona para conservar cada historial en su torneo.";
+      setNotice(message);
+      showAdminAlert(message, "error");
       return;
     }
     const hasAffiliation = (league.teamAffiliations || []).some((affiliation) => (
@@ -3342,38 +3363,63 @@ function AffiliationsPanel({
     ));
     const affiliationWarning = hasAffiliation ? "" : "\n\nAviso: no encontre una afiliacion del equipo principal hacia el equipo del duplicado. Conviene crearla antes para conservar numero alterno y elegibilidad.";
     if (!window.confirm(`¿Fusionar el duplicado ${duplicate.name} (${duplicateTeam?.name || "sin equipo"}) dentro de ${target.name} (${targetTeam?.name || "sin equipo"})?\n\nSe moveran actas, goles, tarjetas, sanciones y movimientos manuales al jugador principal.${affiliationWarning}`)) return;
-    onMergeDuplicatePlayer(payload);
-    setNotice("Jugador duplicado fusionado. Revisa estadisticas y actas del jugador principal.");
-    event.currentTarget.reset();
+    try {
+      onMergeDuplicatePlayer(payload);
+      const message = "Jugador duplicado fusionado. Revisa estadisticas y actas del jugador principal.";
+      setNotice(message);
+      showAdminAlert(message);
+      event.currentTarget.reset();
+    } catch (error) {
+      const message = error.message || "No se pudo fusionar el jugador duplicado.";
+      setNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   function submitIdentityLink(event) {
     event.preventDefault();
     const payload = getFormPayload(event.currentTarget);
     if (payload.playerId === payload.linkedPlayerId) {
-      setNotice("Selecciona dos registros distintos de la misma persona.");
+      const message = "Selecciona dos registros distintos de la misma persona.";
+      setNotice(message);
+      showAdminAlert(message, "error");
       return;
     }
     const player = getPlayer(league, payload.playerId);
     const linkedPlayer = getPlayer(league, payload.linkedPlayerId);
-    if (!player || !linkedPlayer) return;
+    if (!player || !linkedPlayer) {
+      const message = "Selecciona dos jugadores para vincular.";
+      setNotice(message);
+      showAdminAlert(message, "error");
+      return;
+    }
     const alreadyLinked = activeIdentityLinks.some((link) => (
       (link.playerIds || []).includes(player.id) && (link.playerIds || []).includes(linkedPlayer.id)
     ));
     if (alreadyLinked) {
-      setNotice("Estos registros ya estan vinculados.");
+      const message = "Estos registros ya estan vinculados.";
+      setNotice(message);
+      showAdminAlert(message, "error");
       return;
     }
     const playerTeam = getTeam(league, player.teamId);
     const linkedTeam = getTeam(league, linkedPlayer.teamId);
     if (!window.confirm(`¿Vincular ${player.name} (${playerTeam?.name || "sin equipo"}) con ${linkedPlayer.name} (${linkedTeam?.name || "sin equipo"})?\n\nNo se moveran goles, tarjetas, sanciones ni actas. Cada registro conservara su historial en su categoria.`)) return;
-    onLinkPlayerIdentity({
-      playerId: player.id,
-      linkedPlayerId: linkedPlayer.id,
-      notes: payload.notes || "VINCULO DE IDENTIDAD DEPORTIVA"
-    });
-    setNotice("Identidad vinculada. Los historiales por torneo se conservan separados.");
-    event.currentTarget.reset();
+    try {
+      onLinkPlayerIdentity({
+        playerId: player.id,
+        linkedPlayerId: linkedPlayer.id,
+        notes: payload.notes || "VINCULO DE IDENTIDAD DEPORTIVA"
+      });
+      const message = "Identidad vinculada. Los historiales por torneo se conservan separados.";
+      setNotice(message);
+      showAdminAlert(message);
+      event.currentTarget.reset();
+    } catch (error) {
+      const message = error.message || "No se pudo vincular la identidad deportiva.";
+      setNotice(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   return (
@@ -3508,8 +3554,16 @@ function AffiliationsPanel({
                 {link.notes && <p>{link.notes}</p>}
                 <button className="danger" type="button" onClick={() => {
                   if (!window.confirm("¿Quitar este vinculo de identidad? No se modificaran eventos ni jugadores.")) return;
-                  onDeletePlayerIdentityLink(link.id);
-                  setNotice("Vinculo de identidad eliminado.");
+                  try {
+                    onDeletePlayerIdentityLink(link.id);
+                    const message = "Vinculo de identidad eliminado.";
+                    setNotice(message);
+                    showAdminAlert(message);
+                  } catch (error) {
+                    const message = error.message || "No se pudo quitar el vinculo de identidad.";
+                    setNotice(message);
+                    showAdminAlert(message, "error");
+                  }
                 }}>Quitar vinculo</button>
               </article>
             );
@@ -3547,8 +3601,16 @@ function AffiliationsPanel({
                 {affiliation.notes && <p>{affiliation.notes}</p>}
                 <form className="affiliation-number-form" onSubmit={(event) => {
                   event.preventDefault();
-                  onUpdateTeamAffiliationPlayerNumber(affiliation.id, getFormPayload(event.currentTarget));
-                  setNotice("Numero de afiliado actualizado.");
+                  try {
+                    onUpdateTeamAffiliationPlayerNumber(affiliation.id, getFormPayload(event.currentTarget));
+                    const message = "Numero de afiliado actualizado.";
+                    setNotice(message);
+                    showAdminAlert(message);
+                  } catch (error) {
+                    const message = error.message || "No se pudo actualizar el numero de afiliado.";
+                    setNotice(message);
+                    showAdminAlert(message, "error");
+                  }
                 }}>
                   <label>Numero alterno en {target?.name || "receptor"}
                     <select name="playerId" required>
@@ -3562,8 +3624,16 @@ function AffiliationsPanel({
                 </form>
                 <button className="danger" type="button" onClick={() => {
                   if (!window.confirm("¿Eliminar esta afiliacion? Los jugadores dejaran de estar disponibles en el equipo receptor.")) return;
-                  onDeleteTeamAffiliation(affiliation.id);
-                  setNotice("Afiliacion eliminada.");
+                  try {
+                    onDeleteTeamAffiliation(affiliation.id);
+                    const message = "Afiliacion eliminada.";
+                    setNotice(message);
+                    showAdminAlert(message);
+                  } catch (error) {
+                    const message = error.message || "No se pudo eliminar la afiliacion.";
+                    setNotice(message);
+                    showAdminAlert(message, "error");
+                  }
                 }}>Quitar afiliacion</button>
               </article>
             );
@@ -5913,7 +5983,7 @@ function ManagementBoard({
   );
 }
 
-function MatchSheet({ league, onSaveMatchSheet }) {
+function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(getDefaultCompetitionId(league));
   const competitionLeague = useMemo(
     () => scopeLeagueToCompetition(league, selectedCompetitionId),
@@ -5925,6 +5995,27 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     () => competitionLeague.matches.find((match) => match.id === matchId) || preferredMatch,
     [competitionLeague.matches, matchId, preferredMatch]
   );
+  const selectedMatchCaptureKey = selectedMatch
+    ? JSON.stringify({
+      id: selectedMatch.id,
+      status: selectedMatch.status,
+      homeGoals: selectedMatch.homeGoals,
+      awayGoals: selectedMatch.awayGoals,
+      extraTimeHomeGoals: selectedMatch.extraTimeHomeGoals,
+      extraTimeAwayGoals: selectedMatch.extraTimeAwayGoals,
+      penaltyHomeGoals: selectedMatch.penaltyHomeGoals,
+      penaltyAwayGoals: selectedMatch.penaltyAwayGoals,
+      observations: selectedMatch.observations,
+      events: (selectedMatch.events || []).map((item) => ({
+        type: item.type,
+        teamId: item.teamId,
+        playerId: item.playerId,
+        minute: item.minute,
+        minuteLabel: item.minuteLabel,
+        reason: item.reason
+      }))
+    })
+    : "";
   const rounds = useMemo(() => (
     [...new Set(competitionLeague.matches.map((match) => Number(match.round || 0)).filter(Boolean))]
       .sort((a, b) => b - a)
@@ -5985,6 +6076,8 @@ function MatchSheet({ league, onSaveMatchSheet }) {
   const [sheetStep, setSheetStep] = useState("select");
   const [eventDraft, setEventDraft] = useState(null);
   const [eventTeamId, setEventTeamId] = useState("");
+  const [quickPlayerOpen, setQuickPlayerOpen] = useState(false);
+  const [quickPlayerSaving, setQuickPlayerSaving] = useState(false);
   const eventComposerRef = useRef(null);
 
   useEffect(() => {
@@ -6035,6 +6128,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
       setValidationMessage("");
       setSheetStep("select");
       setEventDraft(null);
+      setQuickPlayerOpen(false);
       setEventTeamId("");
       return;
     }
@@ -6077,8 +6171,9 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     setValidationMessage("");
     setSheetNotice("");
     setEventDraft(null);
+    setQuickPlayerOpen(false);
     setEventTeamId(selectedMatch.homeTeamId || "");
-  }, [selectedMatch]);
+  }, [selectedMatchCaptureKey]);
 
   useEffect(() => {
     if (sheetStep !== "events" || !eventDraft) return;
@@ -6144,6 +6239,7 @@ function MatchSheet({ league, onSaveMatchSheet }) {
 
   function openEventModal(type, teamId = selectedMatch?.homeTeamId, existingEvent = null) {
     if (teamId) setEventTeamId(teamId);
+    setQuickPlayerOpen(false);
     if (type === "injury_note" || type === "other_note") {
       setEventDraft({
         id: `note-${Date.now()}`,
@@ -6217,30 +6313,78 @@ function MatchSheet({ league, onSaveMatchSheet }) {
     };
   }
 
-  function saveEventDraft() {
-    if (!eventDraft) return;
-    if (eventDraft.type === "injury_note" || eventDraft.type === "other_note") {
-      const team = getTeam(league, eventDraft.teamId);
-      const player = getPlayer(league, eventDraft.playerId);
-      const minuteText = eventDraft.minute ? `${eventDraft.minute}' · ` : "";
-      const label = eventDraft.type === "injury_note" ? "Lesion" : "Incidencia";
+  function findQuickCreatedPlayer(result, payload) {
+    if (result?.player?.id) return result.player;
+    const players = result?.store?.leagues?.find((item) => item.id === league.id)?.players || league.players || [];
+    return [...players].reverse().find((player) => (
+      player.teamId === payload.teamId &&
+      normalizeAdminSearchTerm(player.name) === normalizeAdminSearchTerm(payload.name)
+    )) || null;
+  }
+
+  async function submitQuickPlayer(event, playerTeamId) {
+    event.preventDefault();
+    if (!eventDraft || !onAddPlayer || quickPlayerSaving) return;
+    const panel = event.currentTarget.closest(".quick-player-modal");
+    const controls = [...(panel?.querySelectorAll("input, select") || [])];
+    const invalid = controls.find((control) => !control.checkValidity());
+    if (invalid) {
+      invalid.reportValidity();
+      return;
+    }
+    const payload = {
+      ...Object.fromEntries(controls.map((control) => [control.name, control.type === "number" ? control.value : String(control.value || "").trim().toLocaleUpperCase("es-MX")]).filter(([name]) => name)),
+      teamId: playerTeamId,
+      competitionId: selectedCompetitionId,
+      photoUrl: "",
+      photoAuthorized: false
+    };
+    setQuickPlayerSaving(true);
+    try {
+      const result = await onAddPlayer(payload);
+      if (result === false) return;
+      const createdPlayer = findQuickCreatedPlayer(result, payload);
+      if (!createdPlayer?.id) throw new Error("El jugador se guardo, pero no se pudo seleccionarlo para el evento.");
+      showAdminAlert(`Jugador ${createdPlayer.name || payload.name} registrado correctamente.`);
+      saveEventDraft({
+        ...eventDraft,
+        playerId: createdPlayer.id,
+        playerQuery: createdPlayer.name || payload.name
+      });
+      setQuickPlayerOpen(false);
+    } catch (error) {
+      showAdminAlert(error.message || "No se pudo registrar el jugador.", "error");
+    } finally {
+      setQuickPlayerSaving(false);
+    }
+  }
+
+  function saveEventDraft(draftOverride = null) {
+    const draftToSave = draftOverride || eventDraft;
+    if (!draftToSave) return;
+    if (draftToSave.type === "injury_note" || draftToSave.type === "other_note") {
+      const team = getTeam(league, draftToSave.teamId);
+      const player = getPlayer(league, draftToSave.playerId);
+      const minuteText = draftToSave.minute ? `${draftToSave.minute}' · ` : "";
+      const label = draftToSave.type === "injury_note" ? "Lesion" : "Incidencia";
       const playerText = player ? `${player.name} (${team?.name || "Equipo"})` : team?.name || "Equipo";
-      appendObservationLine(`${label}: ${minuteText}${playerText}${eventDraft.note ? ` — ${eventDraft.note}` : ""}`);
+      appendObservationLine(`${label}: ${minuteText}${playerText}${draftToSave.note ? ` — ${draftToSave.note}` : ""}`);
       setSheetStep("events");
-      setEventTeamId(eventDraft.teamId || selectedEventTeamId);
+      setEventTeamId(draftToSave.teamId || selectedEventTeamId);
       setEventDraft(null);
       return;
     }
 
-    let savedDraft = eventDraft;
+    let savedDraft = draftToSave;
     setEvents((current) => {
-      savedDraft = normalizeEventDraftForSave(eventDraft, current);
-      const exists = current.some((item) => item.id === eventDraft.id);
+      savedDraft = normalizeEventDraftForSave(draftToSave, current);
+      const exists = current.some((item) => item.id === draftToSave.id);
       return exists
-        ? current.map((item) => item.id === eventDraft.id ? savedDraft : item)
+        ? current.map((item) => item.id === draftToSave.id ? savedDraft : item)
         : [...current, savedDraft];
     });
     setEventTeamId(savedDraft.teamId || selectedEventTeamId);
+    setQuickPlayerOpen(false);
     setEventDraft(null);
   }
 
@@ -6560,6 +6704,38 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                 {eventDraft.playerQuery && <button type="button" onClick={() => updateEventDraft("playerQuery", "")} aria-label="Limpiar jugador">×</button>}
               </div>
           </label>
+
+          {!isNoteEvent && (
+            <div className="admin-sheet-quick-player-actions wide-field">
+              <button type="button" onClick={() => setQuickPlayerOpen(true)}>Agregar jugador</button>
+            </div>
+          )}
+
+          {quickPlayerOpen && !isNoteEvent && (
+            <div className="quick-player-modal wide-field">
+              <div>
+                <span>Alta rapida</span>
+                <strong>{eventDraft.type === "own_goal" ? `Jugador de ${getTeam(league, playerTeamId)?.name || "equipo rival"}` : `Jugador de ${eventTeam?.name || "equipo"}`}</strong>
+              </div>
+              <label>Nombre completo
+                <input name="name" required pattern=".*\S+\s+\S+.*" placeholder="Nombre y apellidos" title="Registra nombre(s) y apellido(s)" />
+              </label>
+              <div className="quick-player-fields">
+                <label>Numero
+                  <input name="number" type="number" min="0" max="9999" placeholder="10" />
+                </label>
+                <label>Posicion
+                  <PlayerPositionSelect name="position" />
+                </label>
+              </div>
+              <div className="quick-player-actions">
+                <button type="button" onClick={() => setQuickPlayerOpen(false)} disabled={quickPlayerSaving}>Cancelar</button>
+                <button className="primary" type="button" onClick={(event) => submitQuickPlayer(event, playerTeamId)} disabled={quickPlayerSaving || !onAddPlayer}>
+                  {quickPlayerSaving ? "Guardando..." : "Guardar y agregar evento"}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="admin-player-suggestions wide-field" aria-label="Opciones de jugador">
             {suggestedPlayers.map((player) => {
@@ -7013,15 +7189,12 @@ function MatchSheet({ league, onSaveMatchSheet }) {
                 </div>
                 <div className="event-quick-panel admin-sheet-action-grid" aria-label="Agregar eventos rapidos">
                   {ADMIN_SHEET_EVENT_ACTIONS.map((action) => {
-                    const canUseWithoutRoster = ["injury_note", "other_note"].includes(action.type);
-                    const availablePlayers = getPlayersForEvent(action.type, selectedEventTeamId);
                     return (
                       <button
                         className={action.className}
                         key={action.type}
                         type="button"
                         onClick={() => openEventModal(action.type, selectedEventTeamId)}
-                        disabled={!canUseWithoutRoster && !availablePlayers.length}
                       >
                         <span aria-hidden="true">{action.icon}</span>
                         <strong>{action.label}</strong>
@@ -7584,13 +7757,130 @@ function getPlayerAdminTeamIds(league, player) {
 
 function getPlayerAdminSearchValues(league, player) {
   const teamIds = getPlayerAdminTeamIds(league, player);
-  const values = [player.name, player.number];
+  const values = [player.name, player.number, player.position, getPlayerPositionOptionValue(player.position)];
   for (const teamId of teamIds) {
     const team = getTeam(league, teamId);
     const competition = getCompetition(league, team?.competitionId || player.competitionId || getDefaultCompetitionId(league));
     values.push(team?.name, competition?.name);
   }
   return values;
+}
+
+function SanctionPlayerPicker({
+  competitionId,
+  league,
+  onSearchQueryChange,
+  onSelectPlayer,
+  onTeamFilterChange,
+  players,
+  searchQuery,
+  selectedPlayerId,
+  teamFilter
+}) {
+  const teams = useMemo(() => {
+    return (league.teams || [])
+      .filter((team) => !competitionId || (team.competitionId || getDefaultCompetitionId(league)) === competitionId)
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "es"));
+  }, [competitionId, league]);
+
+  const filteredPlayers = useMemo(() => {
+    return (players || [])
+      .filter((player) => {
+        const playerTeamIds = getPlayerAdminTeamIds(league, player);
+        if (competitionId) {
+          const playerCompetitionIds = new Set([
+            player.competitionId,
+            ...playerTeamIds.map((teamId) => getTeam(league, teamId)?.competitionId || getDefaultCompetitionId(league))
+          ].filter(Boolean));
+          if (!playerCompetitionIds.has(competitionId)) return false;
+        }
+        if (teamFilter && !playerTeamIds.includes(teamFilter)) return false;
+        return adminSearchMatches(getPlayerAdminSearchValues(league, player), searchQuery);
+      })
+      .sort((a, b) => {
+        const teamA = getTeam(league, a.teamId)?.name || "";
+        const teamB = getTeam(league, b.teamId)?.name || "";
+        return (
+          teamA.localeCompare(teamB, "es") ||
+          String(a.name || "").localeCompare(String(b.name || ""), "es")
+        );
+      });
+  }, [competitionId, league, players, searchQuery, teamFilter]);
+
+  const visiblePlayers = filteredPlayers.slice(0, 18);
+  const selectedPlayer = getPlayer(league, selectedPlayerId);
+  const selectedTeam = selectedPlayer ? getTeam(league, selectedPlayer.teamId) : null;
+
+  return (
+    <div className="sanction-player-picker wide-field">
+      <input type="hidden" name="playerId" value={selectedPlayerId || ""} readOnly />
+      <div className="sanction-player-picker-head">
+        <label>Jugador
+          <div className="admin-search-input-wrap">
+            <input
+              type="search"
+              inputMode="search"
+              value={searchQuery}
+              onChange={(event) => onSearchQueryChange(event.target.value)}
+              placeholder="Nombre, numero, posicion o equipo"
+              aria-label="Buscar jugador sancionado"
+            />
+            {searchQuery && <button type="button" onClick={() => onSearchQueryChange("")} aria-label="Limpiar busqueda">×</button>}
+          </div>
+        </label>
+        <label>Equipo
+          <select
+            value={teamFilter}
+            onChange={(event) => {
+              onTeamFilterChange(event.target.value);
+              onSelectPlayer("");
+            }}
+            disabled={!teams.length}
+          >
+            <option value="">Todos los equipos</option>
+            {teams.map((team) => (
+              <option key={team.id} value={team.id}>{team.name}</option>
+            ))}
+          </select>
+        </label>
+        <span className="sanction-player-count"><strong>{filteredPlayers.length}</strong> jugadores</span>
+      </div>
+      <div className="sanction-player-results">
+        {visiblePlayers.map((player) => {
+          const playerTeamIds = getPlayerAdminTeamIds(league, player);
+          const displayTeamId = teamFilter && playerTeamIds.includes(teamFilter)
+            ? teamFilter
+            : player.teamId || playerTeamIds[0];
+          const team = getTeam(league, displayTeamId);
+          const isSelected = player.id === selectedPlayerId;
+          return (
+            <button
+              aria-pressed={isSelected}
+              className={`sanction-player-option${isSelected ? " active" : ""}`}
+              key={player.id}
+              type="button"
+              onClick={() => onSelectPlayer(player.id)}
+            >
+              <span>#{player.number || "-"}</span>
+              <strong>{player.name}</strong>
+              <small>{team?.name || "Sin equipo"} | {getPlayerPositionOptionValue(player.position)}</small>
+            </button>
+          );
+        })}
+      </div>
+      {!visiblePlayers.length && <p className="sanction-player-empty">No hay jugadores con esos filtros.</p>}
+      {filteredPlayers.length > visiblePlayers.length && (
+        <small className="sanction-player-more">Mostrando 18 de {filteredPlayers.length}. Refina la busqueda.</small>
+      )}
+      {selectedPlayer && (
+        <div className="sanction-player-selected">
+          <span>Seleccionado</span>
+          <strong>{selectedPlayer.name}</strong>
+          <small>#{selectedPlayer.number || "-"} | {selectedTeam?.name || "Sin equipo"} | {getPlayerPositionOptionValue(selectedPlayer.position)}</small>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function normalizeAdminSearchTerm(value) {
@@ -7723,6 +8013,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
       : (league.sanctions || [])
   };
   const sanctions = activeLeague.sanctions || [];
+  const defaultSanctionCompetitionId = getDefaultCompetitionId(league);
   const suspensionNoticesBySanctionId = useMemo(() => {
     const map = new Map();
     for (const notice of calculateSuspensionNotices(activeLeague)) {
@@ -7748,6 +8039,10 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   const [pendingResolutionType, setPendingResolutionType] = useState({});
   const [sanctionQuery, setSanctionQuery] = useState("");
   const [sanctionStatusFilter, setSanctionStatusFilter] = useState("active");
+  const [sanctionCompetitionId, setSanctionCompetitionId] = useState(defaultSanctionCompetitionId);
+  const [sanctionPlayerQuery, setSanctionPlayerQuery] = useState("");
+  const [sanctionTeamFilter, setSanctionTeamFilter] = useState("");
+  const [selectedSanctionPlayerId, setSelectedSanctionPlayerId] = useState("");
   const visibleActiveSanctions = useMemo(() => {
     return activeSanctions.filter((sanction) => {
       const player = getPlayer(activeLeague, sanction.playerId);
@@ -7765,14 +8060,26 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
 
   async function submitSanction(event) {
     event.preventDefault();
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
+    if (!payload.playerId) {
+      const message = "Selecciona el jugador sancionado.";
+      setSanctionNotice(message);
+      showAdminAlert(message, "error");
+      return;
+    }
     if (!window.confirm("¿Confirmas agregar esta sancion extraordinaria?")) return;
     try {
-      await onAddPlayerSanction(getFormPayload(event.currentTarget));
+      await onAddPlayerSanction(payload);
       const message = "Sancion agregada correctamente.";
       setSanctionNotice(message);
       showAdminAlert(message);
-      event.currentTarget.reset();
+      form.reset();
       setSanctionIndefinite(false);
+      setSanctionCompetitionId(defaultSanctionCompetitionId);
+      setSanctionPlayerQuery("");
+      setSanctionTeamFilter("");
+      setSelectedSanctionPlayerId("");
     } catch (error) {
       const message = error.message || "No se pudo agregar la sancion.";
       setSanctionNotice(message);
@@ -7821,9 +8128,28 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
       {sanctionNotice && <p className="auth-ok">{sanctionNotice}</p>}
       <form className="sanction-form" onSubmit={submitSanction}>
         <label>Torneo
-          <CompetitionSelect league={league} name="competitionId" defaultValue={getDefaultCompetitionId(league)} />
+          <CompetitionSelect
+            league={league}
+            name="competitionId"
+            value={sanctionCompetitionId}
+            onChange={(event) => {
+              setSanctionCompetitionId(event.target.value);
+              setSanctionTeamFilter("");
+              setSelectedSanctionPlayerId("");
+            }}
+          />
         </label>
-        <SearchablePlayerSelect league={activeLeague} name="playerId" players={activeLeague.players} placeholder="Buscar jugador sancionado..." />
+        <SanctionPlayerPicker
+          competitionId={sanctionCompetitionId}
+          league={activeLeague}
+          players={activeLeague.players}
+          searchQuery={sanctionPlayerQuery}
+          selectedPlayerId={selectedSanctionPlayerId}
+          teamFilter={sanctionTeamFilter}
+          onSearchQueryChange={setSanctionPlayerQuery}
+          onSelectPlayer={setSelectedSanctionPlayerId}
+          onTeamFilterChange={setSanctionTeamFilter}
+        />
         <label>Tipo
           <select name="type" defaultValue="Agresion">
             <option value="Agresion">Agresion</option>
@@ -7864,7 +8190,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
         <label className="wide-field">Notas
           <textarea name="notes" placeholder="Resolucion, evidencia, acuerdo de comision o folio." />
         </label>
-        <button className="primary" type="submit" disabled={!activeLeague.players.length}>Agregar sancion</button>
+        <button className="primary" type="submit" disabled={!activeLeague.players.length || !selectedSanctionPlayerId}>Agregar sancion</button>
       </form>
 
       <div className="admin-filter-console">

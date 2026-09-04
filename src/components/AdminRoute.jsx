@@ -57,7 +57,7 @@ import { deleteLeagueFromApi } from "../lib/leagueApi.js";
 import { createMatchInApi, deleteMatchInApi, resolveMatchDisciplineInApi, saveMatchResultInApi, saveMatchSheetInApi, updateMatchInApi } from "../lib/matchApi.js";
 import { createPlayerInApi, deletePlayerInApi, updatePlayerInApi } from "../lib/playerApi.js";
 import { updateLeagueRulesInApi } from "../lib/rulesApi.js";
-import { findDuplicatePlayer, validatePlayerFullName } from "../lib/playerValidation.js";
+import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../lib/playerValidation.js";
 import { AdminView } from "./AdminView.jsx";
 
 export function AdminRoute({
@@ -224,14 +224,25 @@ export function AdminRoute({
   async function createPlayerFromPanel(payload) {
     if (!guardPlayerName(payload)) return false;
     if (!authToken) {
-      commit(addPlayer(store, league.id, payload));
-      return true;
+      const nextStore = addPlayer(store, league.id, payload);
+      commit(nextStore);
+      const nextLeague = nextStore.leagues.find((item) => item.id === league.id);
+      const player = [...(nextLeague?.players || [])].reverse().find((item) => (
+        item.teamId === payload.teamId &&
+        normalizePlayerNameForMatch(item.name) === normalizePlayerNameForMatch(payload.name)
+      ));
+      return { player };
     }
     try {
       const apiStore = await createPlayerInApi(authToken, league.id, payload);
       applyApiStore(apiStore);
       setApiStatus("connected");
-      return true;
+      const nextLeague = apiStore.leagues.find((item) => item.id === league.id);
+      const player = [...(nextLeague?.players || [])].reverse().find((item) => (
+        item.teamId === payload.teamId &&
+        normalizePlayerNameForMatch(item.name) === normalizePlayerNameForMatch(payload.name)
+      ));
+      return { player };
     } catch (playerError) {
       window.alert(playerError.message || "No se pudo registrar el jugador.");
       return false;

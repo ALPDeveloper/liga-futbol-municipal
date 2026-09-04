@@ -181,6 +181,9 @@ function runMigrations() {
   if (!matchColumns.includes("fourth_referee_user_id")) {
     db.prepare("ALTER TABLE matches ADD COLUMN fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL").run();
   }
+  if (!matchColumns.includes("referee_crew_mode")) {
+    db.prepare("ALTER TABLE matches ADD COLUMN referee_crew_mode TEXT").run();
+  }
   [
     ["workflow_status", "TEXT NOT NULL DEFAULT 'scheduled'"],
     ["capture_mode", "TEXT NOT NULL DEFAULT 'admin'"],
@@ -939,6 +942,7 @@ export function getStore() {
       assistantReferee1UserId: row.assistant_referee1_user_id || "",
       assistantReferee2UserId: row.assistant_referee2_user_id || "",
       fourthRefereeUserId: row.fourth_referee_user_id || "",
+      refereeCrewMode: row.referee_crew_mode || "",
       events: db.prepare("SELECT * FROM match_events WHERE match_id = ? ORDER BY id").all(row.id).map((event) => ({
         localUuid: event.local_uuid || "",
         type: event.type,
@@ -1394,8 +1398,8 @@ export function importStore(store) {
 
       for (const match of league.matches) {
         db.prepare(`
-          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, extra_time_home_goals, extra_time_away_goals, penalty_home_goals, penalty_away_goals, round, date, time, venue, schedule_note, original_date, original_time, original_round, schedule_updated_at, home_team_id, away_team_id, status, workflow_status, capture_mode, current_report_id, published_at, finalized_at, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO matches (id, league_id, competition_id, stage, playoff_round, playoff_leg, aggregate_home, aggregate_away, extra_time_home_goals, extra_time_away_goals, penalty_home_goals, penalty_away_goals, round, date, time, venue, schedule_note, original_date, original_time, original_round, schedule_updated_at, home_team_id, away_team_id, status, workflow_status, capture_mode, current_report_id, published_at, finalized_at, home_goals, away_goals, observations, resolution_type, resolution_note, central_referee_user_id, assistant_referee1_user_id, assistant_referee2_user_id, fourth_referee_user_id, referee_crew_mode)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           match.id,
           league.id,
@@ -1434,7 +1438,8 @@ export function importStore(store) {
           match.centralRefereeUserId || null,
           match.assistantReferee1UserId || null,
           match.assistantReferee2UserId || null,
-          match.fourthRefereeUserId || null
+          match.fourthRefereeUserId || null,
+          match.refereeCrewMode || ""
         );
 
         for (const event of match.events || []) {

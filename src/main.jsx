@@ -90,6 +90,15 @@ function findLeague(store, leagueId) {
   return store.leagues.find((item) => item.id === leagueId) || null;
 }
 
+function hasLivePublicMatches(league) {
+  return Boolean((league?.matches || []).some((match) => (
+    match.status === "in_progress" ||
+    match.status === "live" ||
+    match.workflowStatus === "in_progress" ||
+    match.liveState?.status === "in_progress"
+  )));
+}
+
 function canAccessLeague(user, leagueId) {
   if (!user || !leagueId || ["disabled", "suspended", "deleted"].includes(user.status)) return false;
   if (user.role === "super_admin") return true;
@@ -1489,6 +1498,31 @@ function App() {
         clearAuth();
       });
   }, [auth.token]);
+
+  useEffect(() => {
+    if (isPrivateRoute || !league?.id || !hasLivePublicMatches(league)) return undefined;
+    let cancelled = false;
+    const refreshPublicLiveStore = async () => {
+      try {
+        const apiStore = await fetchStoreFromApi(auth.token);
+        if (cancelled) return;
+        const normalized = normalizeStore({
+          ...apiStore,
+          currentLeagueId: apiStore.leagues?.some((item) => item.id === league.id) ? league.id : apiStore.currentLeagueId
+        });
+        setStore(normalized);
+        saveStore(normalized);
+        setApiStatus("connected");
+      } catch {
+        if (!cancelled) setApiStatus("offline");
+      }
+    };
+    const intervalId = window.setInterval(refreshPublicLiveStore, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [auth.token, isPrivateRoute, league?.id, league?.matches]);
 
   useEffect(() => {
     if (adminPanel === "super" && !canUseSuperAdmin) setAdminPanel("league");

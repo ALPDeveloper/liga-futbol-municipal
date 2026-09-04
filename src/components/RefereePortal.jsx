@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 import {
+  assignRefereeMatch,
   fetchRefereePortal,
   fetchRefereeLiveState,
   fetchRefereeMatchReport,
   cancelRefereeMatchSession,
+  createRefereeMatchPlayer,
   finishRefereeMatchSession,
   finalizeRefereeMatchReport,
   resumeRefereeMatchSession,
@@ -325,7 +327,26 @@ function getRefereeRoleLabel(match) {
   if (match?.refereeRole === "auxiliar_1") return "Tu: Auxiliar 1";
   if (match?.refereeRole === "auxiliar_2") return "Tu: Auxiliar 2";
   if (match?.refereeRole === "cuarto_arbitro") return "Tu: Cuarto arbitro";
+  if (match?.canSelfAssign) return "Disponible";
   return "Asignado";
+}
+
+function getRefereeRoleShortLabel(role) {
+  if (role === "central") return "Central";
+  if (role === "auxiliar_1") return "Auxiliar 1";
+  if (role === "auxiliar_2") return "Auxiliar 2";
+  if (role === "cuarto_arbitro") return "Cuarto arbitro";
+  return "Auxiliar";
+}
+
+function getAssignedRoleText(match, role, currentUserLabel = "Tu") {
+  if (!match) return "Por asignar";
+  if (match.refereeRole === role) return currentUserLabel;
+  if (role === "central" && match.centralRefereeUserId) return "Asignado";
+  if (role === "auxiliar_1" && match.assistantReferee1UserId) return "Asignado";
+  if (role === "auxiliar_2" && match.assistantReferee2UserId) return "Asignado";
+  if (role === "cuarto_arbitro" && match.fourthRefereeUserId) return "Asignado";
+  return "Por asignar";
 }
 
 function getRefereeDayGroupLabel(dateKey) {
@@ -360,6 +381,7 @@ function getRefereeAssignmentStatus(match) {
   if (match.sessionStatus === "temporarily_saved") return { className: "progress", label: "Guardado" };
   if (match.sessionStatus === "in_progress" || match.workflowStatus === "in_progress" || isMatchInCapture(match)) return { className: "progress", label: "En progreso" };
   if (isPreliminaryReportMatch(match)) return { className: "review", label: "Acta preliminar" };
+  if (match.canSelfAssign) return { className: "ready", label: "Disponible" };
   if (match.homeRosterSubmitted && match.awayRosterSubmitted) return { className: "ready", label: "Listo para capturar" };
   return { className: "pending", label: "Convocatorias pendientes" };
 }
@@ -377,14 +399,15 @@ function groupRefereeMatchesByDate(matches) {
   }));
 }
 
-function RefereeAssignmentCard({ match, onCapture }) {
+function RefereeAssignmentCard({ match, onCapture, onAssign }) {
   const status = getRefereeAssignmentStatus(match);
   const assistantCount = [
-    match.assistantReferee1Name,
-    match.assistantReferee2Name,
-    match.fourthRefereeName
+    match.assistantReferee1UserId,
+    match.assistantReferee2UserId,
+    match.fourthRefereeUserId
   ].filter(Boolean).length;
   const canPrepare = match.canCapture && match.status !== "postponed";
+  const canAssign = match.canSelfAssign && match.status !== "postponed";
   const openVenueMap = () => {
     if (!match.venue || typeof window === "undefined") return;
     const query = encodeURIComponent([match.venue, match.leagueName].filter(Boolean).join(" "));
@@ -423,7 +446,12 @@ function RefereeAssignmentCard({ match, onCapture }) {
       </div>
       {getRosterLabel(match) && <small className="referee-assignment-note">{getRosterLabel(match)}</small>}
       <div className="referee-assignment-actions">
-        <button className="primary" type="button" disabled={!canPrepare} onClick={() => onCapture?.(match.id)}>
+        <button
+          className="primary"
+          type="button"
+          disabled={!canPrepare && !canAssign}
+          onClick={() => (canAssign ? onAssign?.(match) : onCapture?.(match.id))}
+        >
           <RefereeTinyIcon type="flag" />
           <span>{getMatchActionLabel(match)}</span>
         </button>
@@ -473,6 +501,7 @@ function getMatchStatus(match, history) {
   if (match.sessionStatus === "match_finished") return { className: "review", label: "Acta preliminar" };
   if (isPreliminaryReportMatch(match)) return { className: "review", label: "Acta preliminar" };
   if (history) return { className: "done", label: "Finalizado" };
+  if (match.canSelfAssign) return { className: "ready", label: "Disponible" };
   if (!match.canCapture) return { className: "readonly", label: "Solo consulta" };
   return { className: "ready", label: "Listo para capturar" };
 }
@@ -483,6 +512,7 @@ function getMatchActionLabel(match) {
   if (isPreliminaryReportMatch(match)) return "Revisar acta";
   if (match.sessionStatus === "in_progress" || match.workflowStatus === "in_progress" || isMatchInCapture(match)) return "Continuar captura";
   if (match.sessionStatus === "temporarily_saved") return "Continuar captura";
+  if (match.canSelfAssign) return "Asignar mi partido";
   if (match.homeRosterSubmitted && match.awayRosterSubmitted) return "Preparar partido";
   if (match.canCapture) return "Ver partido";
   return "Solo consulta";
@@ -607,7 +637,7 @@ function RefereeHomeOverview({ nextMatch, pendingCount, savedCount, publishedCou
   );
 }
 
-function RefereeAssignmentHero({ match, onOpen }) {
+function RefereeAssignmentHero({ match, onOpen, onAssign }) {
   const status = getMatchStatus(match, false);
   return (
     <article className="referee-home-assignment-card" aria-label="Asignacion principal">
@@ -639,14 +669,14 @@ function RefereeAssignmentHero({ match, onOpen }) {
       </div>
       <div className="referee-home-meta-row">
         <span><RefereeTinyIcon type="field" />{match.venue || "Cancha por definir"}</span>
-        <span><RefereeTinyIcon type="flag" />{match.refereeRole === "central" ? "Arbitro central" : "Arbitro asignado"}</span>
+        <span><RefereeTinyIcon type="flag" />{match.canSelfAssign ? "Disponible" : match.refereeRole === "central" ? "Arbitro central" : "Arbitro asignado"}</span>
       </div>
       <em className={match.homeRosterSubmitted && match.awayRosterSubmitted ? "ready" : "waiting"}>
         <RefereeTinyIcon type="check" />
         {getRosterLabel(match)}
       </em>
-      <button className="portal-primary-action blue" type="button" onClick={() => onOpen(match.id)}>
-        <span>Ver partido</span>
+      <button className="portal-primary-action blue" type="button" onClick={() => (match.canSelfAssign ? onAssign?.(match) : onOpen(match.id))}>
+        <span>{match.canSelfAssign ? "Asignar mi partido" : "Ver partido"}</span>
         <b>›</b>
       </button>
     </article>
@@ -661,8 +691,8 @@ function RefereeNoAssignmentHero({ lastMatch, totalHistory, onViewHistory }) {
         <span><RefereeTinyIcon /></span>
         <div>
           <small>Sin asignaciones</small>
-          <strong>Actualmente no tienes partidos programados.</strong>
-          <p>Tu proxima asignacion aparecera aqui automaticamente.</p>
+          <strong>No hay partidos disponibles en tu municipio.</strong>
+          <p>Cuando la liga programe partidos activos, apareceran aqui para que elijas el tuyo.</p>
         </div>
       </div>
       <div className="referee-empty-stats">
@@ -892,7 +922,107 @@ function CaptureModeSelector({ match, onBack, onSelect }) {
   );
 }
 
-function MatchCard({ match, history = false, onCapture }) {
+function RefereeSelfAssignDialog({ match, saving = false, onClose, onSubmit }) {
+  const existingCrewMode = match?.refereeCrewMode || "";
+  const initialCrewMode = existingCrewMode === "with_assistants" ? "with_assistants" : "";
+  const [crewMode, setCrewMode] = useState(initialCrewMode);
+  const [role, setRole] = useState(match?.availableAssignmentRoles?.includes("central") ? "central" : "assistant");
+  const availableRoles = new Set(match?.availableAssignmentRoles || []);
+  const canChooseCrewMode = !existingCrewMode;
+  const canChooseCentral = availableRoles.has("central");
+  const canChooseAssistant = ["auxiliar_1", "auxiliar_2", "cuarto_arbitro"].some((item) => availableRoles.has(item));
+  const roleRequired = crewMode === "with_assistants";
+
+  useEffect(() => {
+    if (role === "central" && !canChooseCentral && canChooseAssistant) setRole("assistant");
+    if (role !== "central" && !canChooseAssistant && canChooseCentral) setRole("central");
+  }, [canChooseAssistant, canChooseCentral, role]);
+
+  if (!match) return null;
+
+  const submitAssignment = (event) => {
+    event.preventDefault();
+    if (!crewMode) {
+      window.alert("Primero indica si el partido sera puro arbitro o con auxiliares.");
+      return;
+    }
+    if (roleRequired && !role) {
+      window.alert("Indica si te asignaras como central o auxiliar.");
+      return;
+    }
+    onSubmit?.({
+      crewMode,
+      role: crewMode === "solo" ? "central" : role
+    });
+  };
+
+  return (
+    <div className="referee-assign-backdrop" role="presentation" onClick={onClose}>
+      <form className="referee-assign-dialog" onSubmit={submitAssignment} onClick={(event) => event.stopPropagation()}>
+        <div className="referee-assign-head">
+          <span>Asignar partido</span>
+          <strong>{match.homeTeamName} vs {match.awayTeamName}</strong>
+          <small>{formatDate(match.date)} | {match.time || "Hora por definir"} | {match.venue || "Cancha por definir"}</small>
+        </div>
+
+        <section className="referee-assign-step">
+          <b>Tipo de equipo arbitral</b>
+          <div className="referee-assign-options">
+            {canChooseCrewMode && (
+              <button className={crewMode === "solo" ? "active" : ""} type="button" onClick={() => {
+                setCrewMode("solo");
+                setRole("central");
+              }}>
+                <strong>Puro arbitro</strong>
+                <small>Tu quedas como central y el partido deja de estar disponible.</small>
+              </button>
+            )}
+            <button className={crewMode === "with_assistants" ? "active" : ""} type="button" onClick={() => setCrewMode("with_assistants")}>
+              <strong>Con auxiliares</strong>
+              <small>El partido sigue abierto hasta completar roles auxiliares.</small>
+            </button>
+          </div>
+        </section>
+
+        {crewMode === "with_assistants" && (
+          <section className="referee-assign-step">
+            <b>Tu rol en este partido</b>
+            <div className="referee-assign-options compact">
+              {canChooseCentral && (
+                <button className={role === "central" ? "active" : ""} type="button" onClick={() => setRole("central")}>
+                  <strong>Central</strong>
+                  <small>Dirigir el partido.</small>
+                </button>
+              )}
+              {canChooseAssistant && (
+                <button className={role !== "central" ? "active" : ""} type="button" onClick={() => setRole("assistant")}>
+                  <strong>Auxiliar</strong>
+                  <small>Tomar el siguiente lugar libre.</small>
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+
+        <div className="referee-assign-crew">
+          <span><b>Central</b><small>{getAssignedRoleText(match, "central")}</small></span>
+          <span><b>Aux 1</b><small>{getAssignedRoleText(match, "auxiliar_1")}</small></span>
+          <span><b>Aux 2</b><small>{getAssignedRoleText(match, "auxiliar_2")}</small></span>
+          <span><b>4to</b><small>{getAssignedRoleText(match, "cuarto_arbitro")}</small></span>
+        </div>
+
+        <div className="referee-assign-actions">
+          <button type="button" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="primary" type="submit" disabled={saving || !crewMode}>
+            {saving ? "Asignando..." : "Asignar mi partido"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function MatchCard({ match, history = false, onCapture, onAssign }) {
   const roleLabel = match.refereeRole === "central"
     ? "Central"
     : match.refereeRole === "auxiliar_1"
@@ -901,6 +1031,8 @@ function MatchCard({ match, history = false, onCapture }) {
     ? "Auxiliar 2"
     : match.refereeRole === "cuarto_arbitro"
     ? "Cuarto arbitro"
+    : match.canSelfAssign
+    ? "Disponible"
     : "Asignado";
   const status = getMatchStatus(match, history);
   const scoreLabel = `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}`;
@@ -941,10 +1073,10 @@ function MatchCard({ match, history = false, onCapture }) {
       </div>
       {!history && (
         <div className="referee-crew-grid" aria-label="Equipo arbitral">
-          <span><b>Central</b><small>{match.refereeRole === "central" ? "Tu" : "Asignado"}</small></span>
-          <span><b>Asistente 1</b><small>Por asignar</small></span>
-          <span><b>Asistente 2</b><small>Por asignar</small></span>
-          <span><b>4to arbitro</b><small>Por asignar</small></span>
+          <span><b>Central</b><small>{getAssignedRoleText(match, "central")}</small></span>
+          <span><b>Asistente 1</b><small>{getAssignedRoleText(match, "auxiliar_1")}</small></span>
+          <span><b>Asistente 2</b><small>{getAssignedRoleText(match, "auxiliar_2")}</small></span>
+          <span><b>4to arbitro</b><small>{getAssignedRoleText(match, "cuarto_arbitro")}</small></span>
         </div>
       )}
       {match.sessionStatus && !history && (
@@ -964,6 +1096,10 @@ function MatchCard({ match, history = false, onCapture }) {
         <button className="referee-action-button warning" type="button" onClick={() => onCapture?.(match.id)}>Corregir acta</button>
       ) : history ? (
         <p className="referee-card-note">Resultado registrado en historial.</p>
+      ) : match.canSelfAssign ? (
+        <button className="referee-action-button primary-action" type="button" onClick={() => onAssign?.(match)}>
+          Asignar mi partido
+        </button>
       ) : !match.canCapture ? (
         <button className="referee-action-button" type="button" disabled>Solo consulta</button>
       ) : (
@@ -1423,7 +1559,9 @@ function createTimerStateFromSources({ draft, serverClock }) {
   });
 }
 
-function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCancel, onSaved }) {
+function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = "live", onCancel, onSaved }) {
+  const [localMatch, setLocalMatch] = useState(sourceMatch);
+  const match = localMatch;
   const draftKey = `ligatec-referee-draft-${match.id}`;
   const savedEvents = (match.events || []).map((event, index) => ({
     id: `saved-${match.id}-${index}-${event.type}-${event.playerId}`,
@@ -1479,10 +1617,17 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
   const [eventComposer, setEventComposer] = useState(null);
   const [eventComposerQuery, setEventComposerQuery] = useState("");
   const [eventComposerFilter, setEventComposerFilter] = useState("all");
+  const [quickPlayerOpen, setQuickPlayerOpen] = useState(false);
+  const [quickPlayerSaving, setQuickPlayerSaving] = useState(false);
   const [pendingRedReasonEventId, setPendingRedReasonEventId] = useState("");
   const wakeLockRef = useRef(null);
+  const liveAutoSyncRef = useRef(Promise.resolve());
   const lastEventRef = useRef({ type: "", teamId: "", at: 0 });
   const signatureSnapshotRef = useRef({ initialized: false, homeSigned: false, awaySigned: false });
+
+  useEffect(() => {
+    setLocalMatch(sourceMatch);
+  }, [sourceMatch]);
 
   useEffect(() => {
     if (!isPreliminaryReportMatch(match)) return;
@@ -1622,12 +1767,14 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         setExtraTimeDuration(Number(recovered.extraTimeDuration || extraTimeDuration));
         setLiveAlerted(Boolean(recovered.liveAlerted));
         setBatterySaver(Boolean(recovered.batterySaver));
-        setLiveStorageStatus("Partido en vivo recuperado de este dispositivo");
+        const recoveredIsSynced = !pendingOps.length && Boolean(liveState?.session);
+        setLiveStorageStatus(recoveredIsSynced ? "Sincronizado con LIGATEC" : "Partido en vivo recuperado de este dispositivo");
         if (pendingOps.length) {
           setSyncStatus(`${pendingOps.length} operacion(es) pendiente(s)`);
           setMessage(`Partido en vivo recuperado. Existen ${pendingOps.length} operacion(es) guardada(s) en este dispositivo pendientes de sincronizar.`);
         } else {
-          setMessage("Partido en vivo recuperado desde este dispositivo.");
+          setSyncStatus(recoveredIsSynced ? "Sincronizado con LIGATEC" : "Guardado en este dispositivo");
+          setMessage(recoveredIsSynced ? "Partido en vivo sincronizado con LIGATEC." : "Partido en vivo recuperado desde este dispositivo.");
         }
       } catch (storageError) {
         if (!cancelled) setMessage(storageError.message || "No se pudo revisar la recuperacion local.");
@@ -1752,6 +1899,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         setSyncStatus(`${pendingOps.length} operacion(es) pendiente(s)`);
       } else {
         setSyncStatus("Sincronizado con LIGATEC");
+        setLiveStorageStatus("Sincronizado con LIGATEC");
       }
     }
     const handleOnline = () => {
@@ -1913,7 +2061,9 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         clientSessionId: nextDraft.liveTimer?.clientSessionId || liveTimer.clientSessionId,
         draft: nextDraft
       });
-      setLiveStorageStatus("Guardado en este dispositivo");
+      if (!options.preserveStorageStatus) {
+        setLiveStorageStatus(options.synced ? "Sincronizado con LIGATEC" : "Guardado en este dispositivo");
+      }
     } catch (storageError) {
       setLiveStorageStatus(storageError.message || "No se pudo guardar en este dispositivo");
     }
@@ -1939,10 +2089,44 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
     }
   }
 
+  async function syncLiveDraftNow(nextDraft = buildDraftPayload(), operation = null) {
+    if (captureMode !== "live" || !authToken || !navigator.onLine) return;
+    const operations = (operation ? [operation] : await listPendingLiveOperations(match.id).catch(() => [])).filter(Boolean);
+    if (!operations.length && !nextDraft.liveStarted) return;
+    setSyncStatus("Sincronizando con LIGATEC...");
+    try {
+      const response = await syncRefereeLiveState(authToken, match.id, {
+        ...buildSessionPayload(nextDraft),
+        status: nextDraft.liveStarted ? "in_progress" : "temporarily_saved",
+        operations
+      });
+      if (response.session?.id) setSessionId(response.session.id);
+      await Promise.all(operations.map((item) => markLiveOperationSynced(item.operationId)));
+      await persistLiveDraft({ ...nextDraft, sessionId: response.session?.id || nextDraft.sessionId || sessionId }, { synced: true });
+      const pendingOps = await listPendingLiveOperations(match.id).catch(() => []);
+      setPendingOperationCount(pendingOps.length);
+      setSyncStatus(pendingOps.length ? `${pendingOps.length} operacion(es) pendiente(s)` : "Sincronizado con LIGATEC");
+      setLiveStorageStatus("Sincronizado con LIGATEC");
+    } catch (syncError) {
+      await Promise.all(operations.map((item) => markLiveOperationFailed(item.operationId)));
+      const pendingOps = await listPendingLiveOperations(match.id).catch(() => []);
+      setPendingOperationCount(pendingOps.length);
+      setSyncStatus(`${syncError.message || "No se pudo sincronizar."} Guardado en este dispositivo.`);
+    }
+  }
+
+  function queueLiveAutoSync(nextDraft, operationOrPromise) {
+    if (captureMode !== "live") return;
+    liveAutoSyncRef.current = liveAutoSyncRef.current.catch(() => {}).then(async () => {
+      const operation = await Promise.resolve(operationOrPromise);
+      await syncLiveDraftNow(nextDraft, operation);
+    });
+  }
+
   function persistDraftSilently() {
     const draftPayload = buildDraftPayload();
     writeRefereeDraft(draftKey, buildDraftPayload());
-    persistLiveDraft(draftPayload);
+    persistLiveDraft(draftPayload, { preserveStorageStatus: true });
   }
 
   function getLiveEventMinute() {
@@ -2173,7 +2357,7 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
   function buildSessionPayload(nextStatus = {}) {
     const captureMode = nextStatus.captureMode || getCaptureMode();
     return {
-      sessionId,
+      sessionId: nextStatus.sessionId || sessionId,
       operationId: nextStatus.operationId || "",
       captureMode,
       period: nextStatus.period || getLivePeriodName(),
@@ -2181,28 +2365,28 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         liveStarted: nextStatus.liveStarted ?? liveStarted,
         liveRunning: nextStatus.liveRunning ?? liveRunning,
         livePeriod: nextStatus.livePeriod ?? livePeriod,
-        liveDuration,
-        extraTimeDuration,
+        liveDuration: nextStatus.liveDuration ?? liveDuration,
+        extraTimeDuration: nextStatus.extraTimeDuration ?? extraTimeDuration,
         liveElapsedSeconds: nextStatus.liveElapsedSeconds ?? liveElapsedSeconds,
-        liveAlerted,
+        liveAlerted: nextStatus.liveAlerted ?? liveAlerted,
         liveTimer: nextStatus.liveTimer || liveTimer,
         currentPeriod: nextStatus.liveTimer?.currentPeriod || liveTimer.currentPeriod,
         timerStatus: nextStatus.liveTimer?.timerStatus || liveTimer.timerStatus,
-        clientSessionId: liveTimer.clientSessionId,
+        clientSessionId: nextStatus.liveTimer?.clientSessionId || liveTimer.clientSessionId,
         version: nextStatus.liveTimer?.version || liveTimer.version
       },
       metadata: {
-        homeGoals,
-        awayGoals,
-        extraTimeEnabled,
-        penaltiesEnabled,
-        extraTimeHomeGoals,
-        extraTimeAwayGoals,
-        penaltyHomeGoals,
-        penaltyAwayGoals,
-        observations,
-        events,
-        sheetMode,
+        homeGoals: nextStatus.homeGoals ?? homeGoals,
+        awayGoals: nextStatus.awayGoals ?? awayGoals,
+        extraTimeEnabled: nextStatus.extraTimeEnabled ?? extraTimeEnabled,
+        penaltiesEnabled: nextStatus.penaltiesEnabled ?? penaltiesEnabled,
+        extraTimeHomeGoals: nextStatus.extraTimeHomeGoals ?? extraTimeHomeGoals,
+        extraTimeAwayGoals: nextStatus.extraTimeAwayGoals ?? extraTimeAwayGoals,
+        penaltyHomeGoals: nextStatus.penaltyHomeGoals ?? penaltyHomeGoals,
+        penaltyAwayGoals: nextStatus.penaltyAwayGoals ?? penaltyAwayGoals,
+        observations: nextStatus.observations ?? observations,
+        events: nextStatus.events ?? events,
+        sheetMode: nextStatus.sheetMode ?? sheetMode,
         savedFrom: "referee_portal"
       }
     };
@@ -2384,7 +2568,17 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
       playerId,
       period: minuteInfo?.period || getCurrentEventPeriod()
     };
-    if (sheetMode === "played" && isGoalEventType(type)) adjustScore(teamId, 1);
+    const shouldAdjustScore = sheetMode === "played" && isGoalEventType(type);
+    const nextHomeGoals = shouldAdjustScore && teamId === match.homeTeamId
+      ? String(Math.max(0, Number(homeGoals || 0) + 1))
+      : homeGoals;
+    const nextAwayGoals = shouldAdjustScore && teamId === match.awayTeamId
+      ? String(Math.max(0, Number(awayGoals || 0) + 1))
+      : awayGoals;
+    if (shouldAdjustScore) {
+      if (teamId === match.homeTeamId) setHomeGoals(nextHomeGoals);
+      if (teamId === match.awayTeamId) setAwayGoals(nextAwayGoals);
+    }
     setEvents((current) => {
       const createsDoubleYellow = type === "yellow" && playerId && current.some((eventItem) => (
         eventItem.type === "yellow" &&
@@ -2392,9 +2586,10 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
         eventItem.teamId === teamId
       ));
       const nextEvents = normalizeDoubleYellowDraftEvents([...current, nextEvent]);
-      const nextDraft = { ...buildDraftPayload(), events: nextEvents };
+      const nextDraft = { ...buildDraftPayload(), homeGoals: nextHomeGoals, awayGoals: nextAwayGoals, events: nextEvents };
       persistLiveDraft(nextDraft);
-      recordLiveOperation("add_event", { event: nextEvent }, nextDraft);
+      const operation = recordLiveOperation("add_event", { event: nextEvent }, nextDraft);
+      queueLiveAutoSync(nextDraft, operation);
       if (type === "red") {
         setPendingRedReasonEventId(nextEvent.id);
         setMessage("Roja directa registrada. Completa el motivo para que el acta quede lista.");
@@ -2420,12 +2615,14 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
     });
     setEventComposerQuery("");
     setEventComposerFilter("all");
+    setQuickPlayerOpen(false);
   }
 
   function cancelEventComposer() {
     setEventComposer(null);
     setEventComposerQuery("");
     setEventComposerFilter("all");
+    setQuickPlayerOpen(false);
   }
 
   function getEventComposerPlayers() {
@@ -2444,6 +2641,82 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
     if (!eventComposer) return;
     createEventFromSelection(eventComposer.type, eventComposer.teamId, player.id, eventComposer.minuteInfo);
     cancelEventComposer();
+  }
+
+  function getComposerPlayerTeamId(composer = eventComposer) {
+    if (!composer) return "";
+    if (composer.type === "own_goal") {
+      return composer.teamId === match.homeTeamId ? match.awayTeamId : match.homeTeamId;
+    }
+    return composer.teamId;
+  }
+
+  function getComposerPlayerTeamName(composer = eventComposer) {
+    const teamId = getComposerPlayerTeamId(composer);
+    if (teamId === match.homeTeamId) return match.homeTeamName;
+    if (teamId === match.awayTeamId) return match.awayTeamName;
+    return "Equipo";
+  }
+
+  function addPlayerToLocalMatch(player, teamId) {
+    const rosterPlayer = {
+      id: player.id,
+      name: player.name,
+      number: player.number,
+      registeredNumber: player.registeredNumber || player.number,
+      position: player.position,
+      teamId,
+      originTeamName: getComposerPlayerTeamName(),
+      isAffiliate: false,
+      isCaptain: false,
+      isGoalkeeper: false,
+      rosterRole: "",
+      isStarter: false,
+      isSubstitute: false
+    };
+    setLocalMatch((current) => {
+      const listKey = teamId === current.homeTeamId ? "homePlayers" : "awayPlayers";
+      if ((current[listKey] || []).some((item) => item.id === rosterPlayer.id)) return current;
+      return { ...current, [listKey]: [...(current[listKey] || []), rosterPlayer] };
+    });
+  }
+
+  async function submitQuickPlayer(event) {
+    event.preventDefault();
+    if (!eventComposer || quickPlayerSaving) return;
+    const panel = event.currentTarget.closest(".referee-quick-player-modal");
+    const controls = [...(panel?.querySelectorAll("input, select") || [])];
+    const invalid = controls.find((control) => !control.checkValidity());
+    if (invalid) {
+      invalid.reportValidity();
+      return;
+    }
+    const teamId = getComposerPlayerTeamId();
+    const payload = {
+      ...Object.fromEntries(controls.map((control) => [control.name, control.value]).filter(([name]) => name)),
+      teamId,
+      competitionId: match.competitionId,
+      photoUrl: "",
+      photoAuthorized: false
+    };
+    setQuickPlayerSaving(true);
+    setMessage("Registrando jugador...");
+    try {
+      const response = await createRefereeMatchPlayer(authToken, match.id, payload);
+      const player = response.player;
+      if (!player?.id) throw new Error("El jugador se guardo, pero no se pudo seleccionarlo para el evento.");
+      if (response.payload) onSaved(response.payload, { draft: true, keepOpen: true, message: "" });
+      addPlayerToLocalMatch(player, teamId);
+      window.alert(`Jugador registrado correctamente.\n\n${player.name}`);
+      createEventFromSelection(eventComposer.type, eventComposer.teamId, player.id, eventComposer.minuteInfo);
+      cancelEventComposer();
+    } catch (error) {
+      const message = error.message || "No se pudo registrar el jugador.";
+      setMessage(message);
+      window.alert(`No se pudo registrar el jugador.\n\n${message}`);
+    } finally {
+      setQuickPlayerSaving(false);
+    }
   }
 
   function updateEvent(eventId, field, value) {
@@ -2498,12 +2771,23 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
   function removeEvent(eventId) {
     if (!window.confirm("¿Cancelar este evento? Se conservara registro local para auditoria hasta sincronizar.")) return;
     const eventToRemove = events.find((event) => event.id === eventId);
-    if (sheetMode === "played" && eventToRemove && isGoalEventType(eventToRemove.type)) adjustScore(eventToRemove.teamId, -1);
+    const shouldAdjustScore = sheetMode === "played" && eventToRemove && isGoalEventType(eventToRemove.type);
+    const nextHomeGoals = shouldAdjustScore && eventToRemove.teamId === match.homeTeamId
+      ? String(Math.max(0, Number(homeGoals || 0) - 1))
+      : homeGoals;
+    const nextAwayGoals = shouldAdjustScore && eventToRemove.teamId === match.awayTeamId
+      ? String(Math.max(0, Number(awayGoals || 0) - 1))
+      : awayGoals;
+    if (shouldAdjustScore) {
+      if (eventToRemove.teamId === match.homeTeamId) setHomeGoals(nextHomeGoals);
+      if (eventToRemove.teamId === match.awayTeamId) setAwayGoals(nextAwayGoals);
+    }
     setEvents((current) => {
       const nextEvents = normalizeDoubleYellowDraftEvents(current.filter((event) => event.id !== eventId));
-      const nextDraft = { ...buildDraftPayload(), events: nextEvents };
+      const nextDraft = { ...buildDraftPayload(), homeGoals: nextHomeGoals, awayGoals: nextAwayGoals, events: nextEvents };
       persistLiveDraft(nextDraft);
-      recordLiveOperation("cancel_event", { eventId, event: eventToRemove || null }, nextDraft);
+      const operation = recordLiveOperation("cancel_event", { eventId, event: eventToRemove || null }, nextDraft);
+      queueLiveAutoSync(nextDraft, operation);
       return nextEvents;
     });
     setPlayerSearches((current) => {
@@ -2854,6 +3138,39 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
             )}
           </div>
         </label>
+        <div className="referee-quick-player-actions">
+          <button type="button" onClick={() => setQuickPlayerOpen(true)}>Agregar jugador</button>
+        </div>
+        {quickPlayerOpen && (
+          <div className="referee-quick-player-modal">
+            <div>
+              <span>Alta rapida</span>
+              <strong>{getComposerPlayerTeamName()}</strong>
+            </div>
+            <label>Nombre completo
+              <input name="name" required pattern=".*\S+\s+\S+.*" placeholder="Nombre y apellidos" title="Registra nombre(s) y apellido(s)" />
+            </label>
+            <div className="referee-quick-player-grid">
+              <label>Numero
+                <input name="number" type="number" min="0" max="9999" placeholder="10" />
+              </label>
+              <label>Posicion
+                <select name="position" defaultValue="Delantero">
+                  <option value="Arquero">Arquero</option>
+                  <option value="Defensor">Defensor</option>
+                  <option value="Mediocampista">Mediocampista</option>
+                  <option value="Delantero">Delantero</option>
+                </select>
+              </label>
+            </div>
+            <div className="referee-quick-player-actions inline">
+              <button type="button" onClick={() => setQuickPlayerOpen(false)} disabled={quickPlayerSaving}>Cancelar</button>
+              <button className="primary" type="button" onClick={submitQuickPlayer} disabled={quickPlayerSaving}>
+                {quickPlayerSaving ? "Guardando..." : "Guardar y agregar evento"}
+              </button>
+            </div>
+          </div>
+        )}
         {suggestedPlayers.length > 0 && (
           <div className="referee-player-suggestions composer" aria-label="Coincidencias de jugador">
             {suggestedPlayers.map((player) => (
@@ -2995,7 +3312,10 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
               </div>
             ) : (
               <div className="referee-red-reason-field">
-                <span>Motivo de expulsion</span>
+                <div className="referee-red-reason-title">
+                  <span>Motivo de expulsion</span>
+                  <small>{eventItem.reason ? "Motivo seleccionado" : "Pendiente por completar"}</small>
+                </div>
                 <div className="referee-red-reason-options" data-red-reason-event-id={eventItem.id}>
                   {RED_CARD_REASON_OPTIONS.map((reason) => (
                     <button
@@ -3012,7 +3332,9 @@ function RefereeSheetForm({ authToken, match, initialCaptureMode = "live", onCan
                   </button>
                 </div>
                 {showCustomRedReason && (
-                  <input data-red-reason-event-id={eventItem.id} value={eventItem.reason || ""} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Describe el motivo de la roja" aria-label="Motivo de roja" />
+                  <label className="referee-red-custom-reason">Detalle del motivo
+                    <input data-red-reason-event-id={eventItem.id} value={eventItem.reason || ""} onChange={(event) => updateEvent(eventItem.id, "reason", event.target.value)} placeholder="Describe el motivo de la roja" aria-label="Motivo de roja" />
+                  </label>
                 )}
               </div>
             )}
@@ -3712,6 +4034,8 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
   const [readOnlyReportError, setReadOnlyReportError] = useState("");
   const [portalNotice, setPortalNotice] = useState("");
   const [localLiveStates, setLocalLiveStates] = useState([]);
+  const [assignMatch, setAssignMatch] = useState(null);
+  const [assignSaving, setAssignSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -3786,7 +4110,7 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
 
   useEffect(() => {
     if (!payload || captureMatchId) return;
-    const matches = payload.pendingMatches || [];
+    const matches = (payload.pendingMatches || []).filter((match) => match.canCapture);
     if (!matches.length) return;
     const localMatchIds = new Set(localLiveStates.map((state) => state.matchId));
     const stored = readRefereeActiveCapture(currentUser?.id);
@@ -3899,6 +4223,42 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
     if (shouldResumeCapture) writeRefereeActiveCapture(currentUser?.id, matchId, targetMatch?.captureMode || "live");
     setCaptureMatchId(matchId);
     scrollRefereePortalToTop();
+  };
+  const openAssign = (match) => {
+    setPortalNotice("");
+    setAssignMatch(match);
+  };
+  const submitSelfAssignment = async (assignmentPayload) => {
+    if (!assignMatch || assignSaving) return;
+    setAssignSaving(true);
+    try {
+      const response = await assignRefereeMatch(authToken, assignMatch.id, assignmentPayload);
+      if (response.payload) {
+        setPayload(response.payload);
+        writeRefereePortalCache(currentUser?.id, response.payload);
+      }
+      window.alert(response.message || "Asignacion guardada correctamente.");
+      setPortalNotice(response.message || "Asignacion guardada correctamente.");
+      const assignedMatchId = assignMatch.id;
+      const nextAssignedMatch = response.payload?.pendingMatches?.find((match) => match.id === assignedMatchId);
+      setAssignMatch(null);
+      if (nextAssignedMatch) {
+        const shouldResume = isMatchInCapture(nextAssignedMatch) || isPreliminaryReportMatch(nextAssignedMatch);
+        setSelectedCaptureMode(nextAssignedMatch.captureMode || "live");
+        setCaptureStep(shouldResume ? "capture" : "prepare");
+        setCaptureMatchId(assignedMatchId);
+        if (shouldResume) writeRefereeActiveCapture(currentUser?.id, assignedMatchId, nextAssignedMatch.captureMode || "live");
+        scrollRefereePortalToTop();
+      } else {
+        openView("matches");
+      }
+    } catch (assignmentError) {
+      const message = assignmentError.message || "No se pudo asignar el partido.";
+      window.alert(message);
+      setPortalNotice(message);
+    } finally {
+      setAssignSaving(false);
+    }
   };
   const openView = (view) => {
     setActiveView(view);
@@ -4063,7 +4423,7 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
           />
         )}
         <ConnectionStatusBar />
-        {operationalMatch && <RefereeAssignmentHero match={operationalMatch} onOpen={openCapture} />}
+        {operationalMatch && <RefereeAssignmentHero match={operationalMatch} onOpen={openCapture} onAssign={openAssign} />}
         {localLiveMatches.length > 0 && (
           <section className="referee-local-resume">
             <div>
@@ -4088,7 +4448,7 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
         <div className="referee-matches-heading">
           <div>
             <h2>Mis partidos</h2>
-            <p>Proximos encuentros asignados</p>
+            <p>Disponibles y asignados en tu municipio</p>
           </div>
           <button
             className={`referee-calendar-button ${calendarOpen || selectedMatchDate ? "active" : ""}`}
@@ -4166,7 +4526,7 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
                 </header>
                 <div className="referee-assignment-day-list">
                   {group.matches.map((match) => (
-                    <RefereeAssignmentCard key={match.id} match={match} onCapture={openCapture} />
+                    <RefereeAssignmentCard key={match.id} match={match} onCapture={openCapture} onAssign={openAssign} />
                   ))}
                 </div>
               </section>
@@ -4195,7 +4555,7 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
         <div className="referee-match-list referee-acts-list">
           {pendingMatches.filter((match) => match.sessionStatus || match.sheetReviewStatus || isPreliminaryReportMatch(match)).map((match) => (
             <div className="referee-capture-wrap" key={match.id}>
-              <MatchCard match={match} onCapture={openCapture} />
+              <MatchCard match={match} onCapture={openCapture} onAssign={openAssign} />
             </div>
           ))}
           {!pendingMatches.some((match) => match.sessionStatus || match.sheetReviewStatus || isPreliminaryReportMatch(match)) && <p className="empty">No hay actas guardadas o pendientes de firma.</p>}
@@ -4351,6 +4711,17 @@ export function RefereePortal({ authToken, currentUser, onLogout, onNavigate, pu
           </article>
         </div>
       </section>
+      )}
+
+      {assignMatch && (
+        <RefereeSelfAssignDialog
+          match={assignMatch}
+          saving={assignSaving}
+          onClose={() => {
+            if (!assignSaving) setAssignMatch(null);
+          }}
+          onSubmit={submitSelfAssignment}
+        />
       )}
 
       <nav className="portal-bottom-nav referee" aria-label="Navegacion arbitro">

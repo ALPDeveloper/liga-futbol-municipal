@@ -120,6 +120,24 @@ export async function saveRefereeMatchSheet(token, matchId, payload) {
   return parseResponse(response, "No se pudo guardar el acta");
 }
 
+export async function createRefereeMatchPlayer(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/players`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo registrar el jugador");
+}
+
+export async function assignRefereeMatch(token, matchId, payload) {
+  const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/assign`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response, "No se pudo asignar el partido");
+}
+
 export async function startRefereeMatchSession(token, matchId, payload) {
   const response = await fetch(`${API_BASE_URL}/referee-portal/matches/${encodeURIComponent(matchId)}/start`, {
     method: "POST",

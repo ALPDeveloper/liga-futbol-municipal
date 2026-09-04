@@ -58,12 +58,12 @@ import {
   listAccessRequestsData,
   listBackupRecordsData,
   listRefereeMatchSheetsData,
-  listRefereeMatchSheetsForRefereeData,
   listMatchReportsData,
   listMatchParticipationsForLeagueData,
   listMatchRostersForLeagueData,
   listRefereesData,
-  listMatchSessionsForRefereeData,
+  listMatchSessionsForLeagueData,
+  listMatchSessionsForMatchData,
   listMatchReportSignaturesData,
   listTeamDelegatesData,
   listTeamPortalPlayersData,
@@ -120,7 +120,7 @@ import {
   validateUserRole,
   validateUserStatus
 } from "./security.js";
-import { findDuplicatePlayer, validatePlayerFullName } from "../src/lib/playerValidation.js";
+import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getPlayerNumberForTeam, getTeam, upperText } from "../src/lib/domain.js";
 import { addPlayer, deletePlayer, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
 import {
@@ -946,6 +946,149 @@ function normalizeOperationId(value) {
   return normalized.replace(/[^a-zA-Z0-9:_-]/g, "");
 }
 
+const REFEREE_MATCH_ROLES = [
+  { key: "central", field: "centralRefereeUserId", label: "Arbitro central" },
+  { key: "auxiliar_1", field: "assistantReferee1UserId", label: "Auxiliar 1" },
+  { key: "auxiliar_2", field: "assistantReferee2UserId", label: "Auxiliar 2" },
+  { key: "cuarto_arbitro", field: "fourthRefereeUserId", label: "Cuarto arbitro" }
+];
+
+const REFEREE_ASSISTANT_ROLE_KEYS = new Set(["auxiliar_1", "auxiliar_2", "cuarto_arbitro"]);
+const REFEREE_CREW_SOLO = "solo";
+const REFEREE_CREW_WITH_ASSISTANTS = "with_assistants";
+
+function getMatchRefereeRole(match, userId) {
+  if (!match || !userId) return "";
+  return REFEREE_MATCH_ROLES.find((role) => match[role.field] === userId)?.key || "";
+}
+
+function getMatchRefereeCrewMode(match) {
+  if (!match) return "";
+  const storedMode = match.refereeCrewMode || match.refereeAssignmentMode || "";
+  if ([REFEREE_CREW_SOLO, REFEREE_CREW_WITH_ASSISTANTS].includes(storedMode)) return storedMode;
+  if (match.assistantReferee1UserId || match.assistantReferee2UserId || match.fourthRefereeUserId) return REFEREE_CREW_WITH_ASSISTANTS;
+  if (match.centralRefereeUserId) return REFEREE_CREW_SOLO;
+  return "";
+}
+
+function getAssignedRefereeIds(match) {
+  return REFEREE_MATCH_ROLES.map((role) => match?.[role.field]).filter(Boolean);
+}
+
+function getRefereeAssignmentRoles(match, userId) {
+  if (!match || getMatchRefereeRole(match, userId)) return [];
+  if (!MATCH_ACTIVE_SCHEDULE_STATUSES.has(match.status || "scheduled")) return [];
+  if ([MATCH_WORKFLOW_STATUSES.FINALIZED_PENDING_SYNC, MATCH_WORKFLOW_STATUSES.FINALIZED, MATCH_WORKFLOW_STATUSES.PUBLISHED].includes(match.workflowStatus)) return [];
+
+  const crewMode = getMatchRefereeCrewMode(match);
+  const roles = [];
+  if (!match.centralRefereeUserId && crewMode !== REFEREE_CREW_SOLO) roles.push("central");
+  if (crewMode !== REFEREE_CREW_SOLO) {
+    for (const role of REFEREE_MATCH_ROLES.filter((item) => REFEREE_ASSISTANT_ROLE_KEYS.has(item.key))) {
+      if (!match[role.field]) roles.push(role.key);
+    }
+  }
+  return roles;
+}
+
+function getRefereeAssignmentStatus(match, userId) {
+  if (getMatchRefereeRole(match, userId)) return "assigned_to_me";
+  if (getRefereeAssignmentRoles(match, userId).length) return "available";
+  if (!MATCH_ACTIVE_SCHEDULE_STATUSES.has(match?.status || "scheduled")) return "closed";
+  if (getMatchRefereeCrewMode(match) === REFEREE_CREW_SOLO && match?.centralRefereeUserId) return "assigned_other";
+  return getAssignedRefereeIds(match).length ? "full" : "closed";
+}
+
+function canRefereeCaptureMatch(match, userId, hasPendingReview = false) {
+  return Boolean(
+    getMatchRefereeRole(match, userId) &&
+    !hasPendingReview &&
+    MATCH_ACTIVE_SCHEDULE_STATUSES.has(match.status || "scheduled") &&
+    ![MATCH_WORKFLOW_STATUSES.FINALIZED_PENDING_SYNC, MATCH_WORKFLOW_STATUSES.FINALIZED, MATCH_WORKFLOW_STATUSES.PUBLISHED].includes(match.workflowStatus)
+  );
+}
+
+function getLatestActiveMatchSession(matchSessions = []) {
+  return (matchSessions || [])
+    .filter((session) => session && session.status !== "cancelled")
+    .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")))[0] || null;
+}
+
+function getSessionScore(session, fallbackMatch) {
+  const metadata = session?.metadata && typeof session.metadata === "object" ? session.metadata : {};
+  return {
+    homeGoals: metadata.homeGoals ?? fallbackMatch?.homeGoals ?? null,
+    awayGoals: metadata.awayGoals ?? fallbackMatch?.awayGoals ?? null
+  };
+}
+
+function getLiveEventMergeKey(eventItem) {
+  if (!eventItem || typeof eventItem !== "object") return "";
+  if (eventItem.id) return String(eventItem.id);
+  return [
+    eventItem.type || "",
+    eventItem.teamId || "",
+    eventItem.playerId || "",
+    eventItem.minute ?? "",
+    eventItem.period || ""
+  ].join("|");
+}
+
+function getCancelledLiveEventIds(operations = []) {
+  return new Set((operations || [])
+    .filter((operation) => operation?.operationType === "cancel_event" && operation?.payload?.eventId)
+    .map((operation) => String(operation.payload.eventId)));
+}
+
+function sortLiveEvents(events = []) {
+  return [...events].sort((left, right) => (
+    Number(left?.minute ?? 9999) - Number(right?.minute ?? 9999) ||
+    String(left?.createdAt || left?.id || "").localeCompare(String(right?.createdAt || right?.id || ""))
+  ));
+}
+
+function mergeLiveSessionMetadata(match, currentMetadata = {}, incomingMetadata = {}, operations = []) {
+  const current = currentMetadata && typeof currentMetadata === "object" ? currentMetadata : {};
+  const incoming = incomingMetadata && typeof incomingMetadata === "object" ? incomingMetadata : {};
+  const cancelledEventIds = getCancelledLiveEventIds(operations);
+  const eventsByKey = new Map();
+
+  for (const eventItem of [...(Array.isArray(current.events) ? current.events : []), ...(Array.isArray(incoming.events) ? incoming.events : [])]) {
+    const key = getLiveEventMergeKey(eventItem);
+    if (!key || cancelledEventIds.has(String(eventItem?.id || ""))) continue;
+    eventsByKey.set(key, { ...(eventsByKey.get(key) || {}), ...eventItem });
+  }
+
+  const events = sortLiveEvents([...eventsByKey.values()]);
+  const metadata = { ...current, ...incoming, events };
+  const sheetMode = metadata.sheetMode || "played";
+  if (sheetMode === "played") {
+    metadata.homeGoals = events.filter((eventItem) => ["goal", "own_goal"].includes(eventItem?.type) && eventItem.teamId === match.homeTeamId).length;
+    metadata.awayGoals = events.filter((eventItem) => ["goal", "own_goal"].includes(eventItem?.type) && eventItem.teamId === match.awayTeamId).length;
+  }
+  return metadata;
+}
+
+function getRefereeRoleLabelForAudit(roleKey) {
+  return REFEREE_MATCH_ROLES.find((role) => role.key === roleKey)?.label || "Arbitro";
+}
+
+function normalizeSelfAssignmentRole(value) {
+  const role = String(value || "").trim();
+  if (role === "assistant" || role === "auxiliar") return "assistant";
+  if (REFEREE_MATCH_ROLES.some((item) => item.key === role)) return role;
+  return "";
+}
+
+function pickAssistantRole(match, preferredRole = "") {
+  if (REFEREE_ASSISTANT_ROLE_KEYS.has(preferredRole)) {
+    const preferred = REFEREE_MATCH_ROLES.find((role) => role.key === preferredRole);
+    return preferred && !match[preferred.field] ? preferred.key : "";
+  }
+  const openAssistant = REFEREE_MATCH_ROLES.find((role) => REFEREE_ASSISTANT_ROLE_KEYS.has(role.key) && !match[role.field]);
+  return openAssistant?.key || "";
+}
+
 async function registerRefereeOperation({ context, user, sessionId = "", operationId = "", operationType = "", payload = {} }) {
   const safeOperationId = normalizeOperationId(operationId);
   if (!safeOperationId) return { duplicate: false, operation: null };
@@ -1029,8 +1172,9 @@ async function getRefereeMatchCaptureContext(user, matchId) {
   if (upperText(league.city || "") !== upperText(referee.municipality)) {
     return { error: { status: 403, message: "No puedes capturar partidos de otro municipio." } };
   }
-  if (match.centralRefereeUserId !== user.id) {
-    return { error: { status: 403, message: "Solo el arbitro central asignado puede capturar esta acta." } };
+  const refereeRole = getMatchRefereeRole(match, user.id);
+  if (!refereeRole) {
+    return { error: { status: 403, message: "Primero asignate este partido desde el panel arbitro." } };
   }
   if (match.status === "finished" || match.status === "walkover") {
     return { error: { status: 400, message: "Esta acta ya fue capturada. Solicita correccion al administrador." } };
@@ -1039,15 +1183,18 @@ async function getRefereeMatchCaptureContext(user, matchId) {
   if (pendingSheet) {
     return { error: { status: 400, message: "Esta acta ya fue enviada y esta pendiente de revision." } };
   }
-  return { referee, store, league, match };
+  return { referee, store, league, match, refereeRole };
 }
 
 async function buildRefereePortalResponse(referee, userId) {
   const store = await getStoreData();
-  const refereeSheets = await listRefereeMatchSheetsForRefereeData(userId, { status: "all" });
-  const matchRosters = await listMatchRostersForStore(store);
   const matchParticipations = await listMatchParticipationsForStore(store);
-  const matchSessions = await listMatchSessionsForRefereeData(userId);
+  const relatedLeagueIds = (store.leagues || [])
+    .filter((league) => upperText(league.city || "") === upperText(referee.municipality))
+    .map((league) => league.id);
+  const refereeSheets = (await Promise.all(relatedLeagueIds.map((leagueId) => listRefereeMatchSheetsData({ leagueId, status: "all" })))).flat();
+  const matchRosters = await listMatchRostersForStore(store);
+  const matchSessions = (await Promise.all(relatedLeagueIds.map((leagueId) => listMatchSessionsForLeagueData(leagueId)))).flat();
   return buildRefereePortalPayload(store, referee, userId, refereeSheets, matchRosters, matchSessions, matchParticipations);
 }
 
@@ -1178,13 +1325,17 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         : match.fourthRefereeUserId === userId
         ? "cuarto_arbitro"
         : "";
-      if (!refereeRole) continue;
+      const reviewSheet = sheetByMatchId.get(match.id);
+      const hasPendingReview = reviewSheet?.status === "pending_review";
+      const assignmentStatus = getRefereeAssignmentStatus(match, userId);
+      const availableAssignmentRoles = getRefereeAssignmentRoles(match, userId);
+      const canSelfAssign = assignmentStatus === "available" && !hasPendingReview;
+      const canCapture = canRefereeCaptureMatch(match, userId, hasPendingReview);
+      if (!canCapture && !canSelfAssign && !refereeRole) continue;
       const competition = (league.competitions || []).find((item) => item.id === match.competitionId);
       const homeTeam = (league.teams || []).find((item) => item.id === match.homeTeamId);
       const awayTeam = (league.teams || []).find((item) => item.id === match.awayTeamId);
-      const reviewSheet = sheetByMatchId.get(match.id);
       const reviewPayload = reviewSheet?.payload || {};
-      const hasPendingReview = reviewSheet?.status === "pending_review";
       const homeRoster = rosterByMatchTeam.get(`${match.id}:${match.homeTeamId}`);
       const awayRoster = rosterByMatchTeam.get(`${match.id}:${match.awayTeamId}`);
       const homeParticipation = participationByMatchTeam.get(`${match.id}:${match.homeTeamId}`);
@@ -1271,11 +1422,17 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         awayPinRequired: Boolean(awayRoster?.captainPin),
         homeCaptainPlayerId: homeRoster?.captainPlayerId || "",
         awayCaptainPlayerId: awayRoster?.captainPlayerId || "",
+        refereeUserId: userId,
+        centralRefereeUserId: match.centralRefereeUserId || "",
+        assistantReferee1UserId: match.assistantReferee1UserId || "",
+        assistantReferee2UserId: match.assistantReferee2UserId || "",
+        fourthRefereeUserId: match.fourthRefereeUserId || "",
+        refereeCrewMode: getMatchRefereeCrewMode(match),
+        assignmentStatus,
+        availableAssignmentRoles,
+        canSelfAssign,
         refereeRole,
-        canCapture: refereeRole === "central" &&
-          !hasPendingReview &&
-          MATCH_ACTIVE_SCHEDULE_STATUSES.has(match.status || "scheduled") &&
-          ![MATCH_WORKFLOW_STATUSES.FINALIZED_PENDING_SYNC, MATCH_WORKFLOW_STATUSES.FINALIZED, MATCH_WORKFLOW_STATUSES.PUBLISHED].includes(match.workflowStatus)
+        canCapture
       });
     }
   }
@@ -1285,8 +1442,8 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
   ));
   return {
     referee,
-    pendingMatches: assignedMatches.filter((match) => match.canCapture),
-    history: assignedMatches.filter((match) => !match.canCapture)
+    pendingMatches: assignedMatches.filter((match) => match.canCapture || match.canSelfAssign),
+    history: assignedMatches.filter((match) => match.refereeRole && !match.canCapture && !match.canSelfAssign)
   };
 }
 
@@ -1294,6 +1451,69 @@ function clearPublicCache() {
   publicStoreCache = null;
   publicStoreCacheUntil = 0;
   publicStoreRefreshPromise = null;
+}
+
+async function withPublicLiveSessions(store) {
+  const leagueSessions = await Promise.all((store.leagues || []).map((league) => listMatchSessionsForLeagueData(league.id)));
+  const sessionByMatchId = new Map();
+  for (const session of leagueSessions.flat()) {
+    if (!session || session.status === "cancelled") continue;
+    const current = sessionByMatchId.get(session.matchId);
+    if (!current || String(session.updatedAt || "").localeCompare(String(current.updatedAt || "")) > 0) {
+      sessionByMatchId.set(session.matchId, session);
+    }
+  }
+
+  const liveStore = {
+    ...store,
+    leagues: (store.leagues || []).map((league) => ({
+      ...league,
+      matches: (league.matches || []).map((match) => {
+        const activeSession = sessionByMatchId.get(match.id);
+        const clockState = activeSession?.clockState && typeof activeSession.clockState === "object" ? activeSession.clockState : {};
+        const liveTimer = clockState.liveTimer && typeof clockState.liveTimer === "object" ? clockState.liveTimer : {};
+        const timerStatus = liveTimer.timerStatus || clockState.timerStatus || "";
+        const hasLiveClock = Boolean(clockState.liveStarted && !["finished", "not_started"].includes(timerStatus));
+        const isLive = Boolean(
+          activeSession &&
+          (
+            activeSession.status === "in_progress" ||
+            (match.workflowStatus || match.status) === MATCH_WORKFLOW_STATUSES.IN_PROGRESS ||
+            hasLiveClock
+          )
+        );
+        if (!isLive) return match;
+        const metadata = activeSession.metadata && typeof activeSession.metadata === "object" ? activeSession.metadata : {};
+        const score = getSessionScore(activeSession, match);
+        const liveEvents = Array.isArray(metadata.events) ? metadata.events : [];
+        return {
+          ...match,
+          publicStatus: match.status,
+          status: "in_progress",
+          workflowStatus: MATCH_WORKFLOW_STATUSES.IN_PROGRESS,
+          homeGoals: score.homeGoals ?? 0,
+          awayGoals: score.awayGoals ?? 0,
+          liveEvents,
+          liveState: {
+            sessionId: activeSession.id,
+            status: activeSession.status,
+            captureMode: activeSession.captureMode,
+            period: activeSession.period || "",
+            clockState: activeSession.clockState || {},
+            score,
+            eventCount: liveEvents.length,
+            updatedAt: activeSession.updatedAt || ""
+          }
+        };
+      })
+    }))
+  };
+
+  return liveStore;
+}
+
+async function buildPublicStorePayload(store) {
+  return scopeStoreForUser(await withPublicLiveSessions(store), null);
 }
 
 async function getPublicStoreCached() {
@@ -1305,8 +1525,9 @@ async function getPublicStoreCached() {
   if (runtimeConfig.publicCacheSeconds > 0 && publicStoreCache) {
     if (!publicStoreRefreshPromise) {
       publicStoreRefreshPromise = getStoreData()
+        .then((store) => buildPublicStorePayload(store))
         .then((store) => {
-          publicStoreCache = scopeStoreForUser(store, null);
+          publicStoreCache = store;
           publicStoreCacheUntil = Date.now() + runtimeConfig.publicCacheSeconds * 1000;
         })
         .catch(() => {})
@@ -1317,7 +1538,7 @@ async function getPublicStoreCached() {
     return publicStoreCache;
   }
 
-  const publicStore = scopeStoreForUser(await getStoreData(), null);
+  const publicStore = await buildPublicStorePayload(await getStoreData());
   publicStoreCache = publicStore;
   publicStoreCacheUntil = now + runtimeConfig.publicCacheSeconds * 1000;
   return publicStore;
@@ -1993,7 +2214,7 @@ app.get("/api/store", async (request, response) => {
     return response.json(await getPublicStoreCached());
   }
   response.setHeader("Cache-Control", "no-store");
-  response.json(scopeStoreForUser(await getStoreData(), user));
+  response.json(scopeStoreForUser(await withPublicLiveSessions(await getStoreData()), user));
 });
 
 app.put("/api/store", requireAuth, async (request, response) => {
@@ -3282,7 +3503,16 @@ app.patch("/api/matches/:matchId/referees", requireAuth, async (request, respons
     centralRefereeUserId: request.body.centralRefereeUserId || "",
     assistantReferee1UserId: request.body.assistantReferee1UserId || "",
     assistantReferee2UserId: request.body.assistantReferee2UserId || "",
-    fourthRefereeUserId: request.body.fourthRefereeUserId || ""
+    fourthRefereeUserId: request.body.fourthRefereeUserId || "",
+    refereeCrewMode: (
+      request.body.assistantReferee1UserId ||
+      request.body.assistantReferee2UserId ||
+      request.body.fourthRefereeUserId
+    )
+      ? REFEREE_CREW_WITH_ASSISTANTS
+      : request.body.centralRefereeUserId
+        ? REFEREE_CREW_SOLO
+        : ""
   });
   clearPublicCache();
 
@@ -3380,18 +3610,123 @@ app.get("/api/referee-portal/me", requireAuth, async (request, response) => {
     return response.status(403).json({ error: "Tu cuenta de arbitro no esta activa." });
   }
   const store = await getStoreData();
-  const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
+  const relatedLeagueIds = (store.leagues || [])
+    .filter((league) => upperText(league.city || "") === upperText(referee.municipality))
+    .map((league) => league.id);
+  const refereeSheets = (await Promise.all(relatedLeagueIds.map((leagueId) => listRefereeMatchSheetsData({ leagueId, status: "all" })))).flat();
   const matchRosters = await listMatchRostersForStore(store);
-  const matchSessions = await listMatchSessionsForRefereeData(request.user.id);
+  const matchSessions = (await Promise.all(relatedLeagueIds.map((leagueId) => listMatchSessionsForLeagueData(leagueId)))).flat();
   const matchParticipations = await listMatchParticipationsForStore(store);
   response.json(buildRefereePortalPayload(store, referee, request.user.id, refereeSheets, matchRosters, matchSessions, matchParticipations));
+});
+
+app.post("/api/referee-portal/matches/:matchId/assign", requireAuth, async (request, response) => {
+  if (!hasActiveRoleAccess(request.user, "referee")) {
+    return response.status(403).json({ error: "Permiso de arbitro requerido" });
+  }
+  const referee = await getRefereeProfileData(request.user.id);
+  if (!referee || referee.status !== "active") {
+    return response.status(403).json({ error: "Tu cuenta de arbitro no esta activa." });
+  }
+
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.matches?.some((match) => match.id === request.params.matchId));
+  const match = league?.matches?.find((item) => item.id === request.params.matchId);
+  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
+  if (upperText(league.city || "") !== upperText(referee.municipality)) {
+    return response.status(403).json({ error: "No puedes asignarte partidos de otro municipio." });
+  }
+  if (!MATCH_ACTIVE_SCHEDULE_STATUSES.has(match.status || "scheduled")) {
+    return response.status(400).json({ error: "Este partido no esta disponible para asignacion arbitral." });
+  }
+  if ([MATCH_WORKFLOW_STATUSES.FINALIZED_PENDING_SYNC, MATCH_WORKFLOW_STATUSES.FINALIZED, MATCH_WORKFLOW_STATUSES.PUBLISHED].includes(match.workflowStatus)) {
+    return response.status(400).json({ error: "Este partido ya tiene acta cerrada." });
+  }
+  const pendingSheet = await getPendingRefereeMatchSheetForMatchData(match.id);
+  if (pendingSheet) {
+    return response.status(400).json({ error: "Este partido ya tiene un acta pendiente de revision." });
+  }
+  if (getMatchRefereeRole(match, request.user.id)) {
+    return response.json({
+      message: "Ya estas asignado a este partido.",
+      payload: await buildRefereePortalResponse(referee, request.user.id)
+    });
+  }
+
+  const currentCrewMode = getMatchRefereeCrewMode(match);
+  const requestedCrewMode = [REFEREE_CREW_SOLO, REFEREE_CREW_WITH_ASSISTANTS].includes(request.body.crewMode)
+    ? request.body.crewMode
+    : currentCrewMode;
+  if (!requestedCrewMode) {
+    return response.status(400).json({ error: "Indica si el partido sera puro arbitro o con auxiliares." });
+  }
+  if (currentCrewMode === REFEREE_CREW_SOLO && match.centralRefereeUserId) {
+    return response.status(409).json({ error: "Este partido ya fue tomado por otro arbitro." });
+  }
+  if (requestedCrewMode === REFEREE_CREW_SOLO && getAssignedRefereeIds(match).length) {
+    return response.status(409).json({ error: "Este partido ya tiene designacion arbitral. Usa la modalidad con auxiliares si corresponde." });
+  }
+
+  let assignedRole = "central";
+  const nextReferees = {
+    centralRefereeUserId: match.centralRefereeUserId || "",
+    assistantReferee1UserId: match.assistantReferee1UserId || "",
+    assistantReferee2UserId: match.assistantReferee2UserId || "",
+    fourthRefereeUserId: match.fourthRefereeUserId || "",
+    refereeCrewMode: requestedCrewMode
+  };
+
+  if (requestedCrewMode === REFEREE_CREW_SOLO) {
+    nextReferees.centralRefereeUserId = request.user.id;
+    nextReferees.assistantReferee1UserId = "";
+    nextReferees.assistantReferee2UserId = "";
+    nextReferees.fourthRefereeUserId = "";
+    assignedRole = "central";
+  } else {
+    const requestedRole = normalizeSelfAssignmentRole(request.body.role);
+    if (!requestedRole) {
+      return response.status(400).json({ error: "Indica si te asignaras como central o auxiliar." });
+    }
+    if (requestedRole === "central") {
+      if (match.centralRefereeUserId) return response.status(409).json({ error: "El arbitro central ya fue asignado." });
+      nextReferees.centralRefereeUserId = request.user.id;
+      assignedRole = "central";
+    } else {
+      const assistantRole = pickAssistantRole(match, requestedRole);
+      if (!assistantRole) return response.status(409).json({ error: "Ya no hay lugares de auxiliar disponibles para este partido." });
+      const assistantField = REFEREE_MATCH_ROLES.find((role) => role.key === assistantRole)?.field;
+      nextReferees[assistantField] = request.user.id;
+      assignedRole = assistantRole;
+    }
+  }
+
+  const nextIds = getAssignedRefereeIds(nextReferees);
+  if (new Set(nextIds).size !== nextIds.length) {
+    return response.status(400).json({ error: "Un arbitro no puede ocupar dos posiciones en el mismo partido." });
+  }
+
+  await updateMatchRefereesData(match.id, nextReferees);
+  clearPublicCache();
+  await logAudit({
+    user: request.user,
+    leagueId: league.id,
+    action: "referee_match_self_assign",
+    entityType: "match",
+    entityId: match.id,
+    detail: `${referee.name || request.user.name || "Arbitro"} se asigno como ${getRefereeRoleLabelForAudit(assignedRole)}`
+  });
+
+  response.status(201).json({
+    message: `Asignacion guardada: ${getRefereeRoleLabelForAudit(assignedRole)}.`,
+    role: assignedRole,
+    payload: await buildRefereePortalResponse(referee, request.user.id)
+  });
 });
 
 app.get("/api/referee-portal/matches/:matchId/live-state", requireAuth, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
-  const sessions = await listMatchSessionsForRefereeData(request.user.id);
-  const session = sessions.find((item) => item.matchId === context.match.id) || null;
+  const session = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
   const report = await getLatestMatchReportForMatchData(context.match.id);
   response.json({
     serverTimestamp: new Date().toISOString(),
@@ -3414,9 +3749,12 @@ app.post("/api/referee-portal/matches/:matchId/sync", requireAuth, async (reques
 
   const operations = Array.isArray(request.body.operations) ? request.body.operations.slice(0, 100) : [];
   const captureMode = normalizeCaptureMode(request.body.captureMode || context.match.captureMode || MATCH_CAPTURE_MODES.LIVE);
-  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const currentSession = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
+  const sessionId = request.body.sessionId || currentSession?.id || `match-session-${crypto.randomUUID()}`;
   let session = null;
   if (request.body.clockState || request.body.metadata) {
+    const incomingMetadata = request.body.metadata && typeof request.body.metadata === "object" ? request.body.metadata : {};
+    const mergedMetadata = mergeLiveSessionMetadata(context.match, currentSession?.metadata, incomingMetadata, operations);
     session = await upsertMatchSessionData({
       id: sessionId,
       leagueId: context.league.id,
@@ -3426,7 +3764,7 @@ app.post("/api/referee-portal/matches/:matchId/sync", requireAuth, async (reques
       status: request.body.status || "temporarily_saved",
       period: request.body.period || "",
       clockState: request.body.clockState || {},
-      metadata: request.body.metadata || {}
+      metadata: mergedMetadata
     });
   }
 
@@ -3448,6 +3786,7 @@ app.post("/api/referee-portal/matches/:matchId/sync", requireAuth, async (reques
       status: result.operation?.status || "synced"
     });
   }
+  if (session) clearPublicCache();
 
   response.json({
     serverTimestamp: new Date().toISOString(),
@@ -3466,7 +3805,8 @@ app.post("/api/referee-portal/matches/:matchId/start", requireAuth, async (reque
   if (duplicate) return response.json(duplicate);
 
   const captureMode = normalizeCaptureMode(request.body.captureMode || MATCH_CAPTURE_MODES.LIVE);
-  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const currentSession = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
+  const sessionId = request.body.sessionId || currentSession?.id || `match-session-${crypto.randomUUID()}`;
   const session = await upsertMatchSessionData({
     id: sessionId,
     leagueId: context.league.id,
@@ -3491,6 +3831,7 @@ app.post("/api/referee-portal/matches/:matchId/start", requireAuth, async (reque
     workflowStatus: MATCH_WORKFLOW_STATUSES.IN_PROGRESS,
     captureMode
   });
+  clearPublicCache();
   await logAudit({
     user: request.user,
     leagueId: context.league.id,
@@ -3515,7 +3856,8 @@ app.post("/api/referee-portal/matches/:matchId/save", requireAuth, async (reques
   if (duplicate) return response.json(duplicate);
 
   const captureMode = normalizeCaptureMode(request.body.captureMode || context.match.captureMode || MATCH_CAPTURE_MODES.LIVE);
-  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const currentSession = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
+  const sessionId = request.body.sessionId || currentSession?.id || `match-session-${crypto.randomUUID()}`;
   const session = await upsertMatchSessionData({
     id: sessionId,
     leagueId: context.league.id,
@@ -3540,6 +3882,7 @@ app.post("/api/referee-portal/matches/:matchId/save", requireAuth, async (reques
     workflowStatus: MATCH_WORKFLOW_STATUSES.TEMPORARILY_SAVED,
     captureMode
   });
+  clearPublicCache();
 
   response.json({
     session,
@@ -3553,7 +3896,9 @@ app.post("/api/referee-portal/matches/:matchId/resume", requireAuth, async (requ
   const operationId = normalizeOperationId(request.body.operationId);
   const duplicate = await getDuplicateRefereeOperationResponse({ operationId, referee: context.referee, userId: request.user.id });
   if (duplicate) return response.json(duplicate);
-  const existingSession = request.body.sessionId ? await getMatchSessionData(request.body.sessionId) : null;
+  const existingSession = request.body.sessionId
+    ? await getMatchSessionData(request.body.sessionId)
+    : getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
 
   const captureMode = normalizeCaptureMode(existingSession?.captureMode || request.body.captureMode || MATCH_CAPTURE_MODES.LIVE);
   const sessionId = existingSession?.id || request.body.sessionId || `match-session-${crypto.randomUUID()}`;
@@ -3581,6 +3926,7 @@ app.post("/api/referee-portal/matches/:matchId/resume", requireAuth, async (requ
     workflowStatus: MATCH_WORKFLOW_STATUSES.IN_PROGRESS,
     captureMode
   });
+  clearPublicCache();
 
   response.json({
     session,
@@ -3600,7 +3946,8 @@ app.post("/api/referee-portal/matches/:matchId/suspend", requireAuth, async (req
   const workflowStatus = request.body.final === true
     ? MATCH_WORKFLOW_STATUSES.SUSPENDED_FINAL
     : MATCH_WORKFLOW_STATUSES.SUSPENDED_PENDING_RESUME;
-  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const currentSession = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
+  const sessionId = request.body.sessionId || currentSession?.id || `match-session-${crypto.randomUUID()}`;
   const session = await upsertMatchSessionData({
     id: sessionId,
     leagueId: context.league.id,
@@ -3626,6 +3973,7 @@ app.post("/api/referee-portal/matches/:matchId/suspend", requireAuth, async (req
     workflowStatus,
     captureMode
   });
+  clearPublicCache();
   await logAudit({
     user: request.user,
     leagueId: context.league.id,
@@ -3645,7 +3993,8 @@ app.post("/api/referee-portal/matches/:matchId/cancel-live", requireAuth, async 
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
 
-  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const currentSession = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
+  const sessionId = request.body.sessionId || currentSession?.id || `match-session-${crypto.randomUUID()}`;
   const session = await upsertMatchSessionData({
     id: sessionId,
     leagueId: context.league.id,
@@ -3666,6 +4015,7 @@ app.post("/api/referee-portal/matches/:matchId/cancel-live", requireAuth, async 
     workflowStatus: MATCH_WORKFLOW_STATUSES.SCHEDULED,
     captureMode: MATCH_CAPTURE_MODES.MANUAL
   });
+  clearPublicCache();
   await logAudit({
     user: request.user,
     leagueId: context.league.id,
@@ -3694,7 +4044,8 @@ app.post("/api/referee-portal/matches/:matchId/finish-match", requireAuth, async
 
   const captureMode = normalizeCaptureMode(request.body.captureMode || context.match.captureMode || MATCH_CAPTURE_MODES.LIVE);
   const nextWorkflowStatus = getNextWorkflowStatusAfterFinish(captureMode);
-  const sessionId = request.body.sessionId || `match-session-${crypto.randomUUID()}`;
+  const currentSession = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
+  const sessionId = request.body.sessionId || currentSession?.id || `match-session-${crypto.randomUUID()}`;
   const session = await upsertMatchSessionData({
     id: sessionId,
     leagueId: context.league.id,
@@ -3742,6 +4093,7 @@ app.post("/api/referee-portal/matches/:matchId/finish-match", requireAuth, async
     currentReportId: report.id,
     finalizedAt: captureMode === MATCH_CAPTURE_MODES.LIVE ? "" : new Date().toISOString()
   });
+  clearPublicCache();
   await logAudit({
     user: request.user,
     leagueId: context.league.id,
@@ -3962,31 +4314,9 @@ app.post("/api/referee-portal/matches/:matchId/report/finalize", requireAuth, as
 });
 
 app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (request, response) => {
-  if (!hasActiveRoleAccess(request.user, "referee")) {
-    return response.status(403).json({ error: "Permiso de arbitro requerido" });
-  }
-  const referee = await getRefereeProfileData(request.user.id);
-  if (!referee || referee.status !== "active") {
-    return response.status(403).json({ error: "Tu cuenta de arbitro no esta activa." });
-  }
-
-  const store = await getStoreData();
-  const league = (store.leagues || []).find((item) => item.matches?.some((match) => match.id === request.params.matchId));
-  const match = league?.matches?.find((item) => item.id === request.params.matchId);
-  if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
-  if (upperText(league.city || "") !== upperText(referee.municipality)) {
-    return response.status(403).json({ error: "No puedes capturar partidos de otro municipio." });
-  }
-  if (match.centralRefereeUserId !== request.user.id) {
-    return response.status(403).json({ error: "Solo el arbitro central asignado puede capturar esta acta." });
-  }
-  if (match.status === "finished" || match.status === "walkover") {
-    return response.status(400).json({ error: "Esta acta ya fue capturada. Solicita correccion al administrador." });
-  }
-  const pendingSheet = await getPendingRefereeMatchSheetForMatchData(match.id);
-  if (pendingSheet) {
-    return response.status(400).json({ error: "Esta acta ya fue enviada y esta pendiente de revision." });
-  }
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+  const { referee, store, league, match } = context;
 
   const isWalkoverSheet = request.body.status === "walkover";
   const matchRosters = await listMatchRostersForLeagueData(league.id);
@@ -4069,16 +4399,70 @@ app.post("/api/referee-portal/matches/:matchId/sheet", requireAuth, async (reque
     detail: `Arbitro central publico acta oficial de ${match.id}`
   });
 
-  const refereeSheets = await listRefereeMatchSheetsForRefereeData(request.user.id, { status: "all" });
-  const nextStore = await getStoreData();
-  response.status(201).json(buildRefereePortalPayload(
-    nextStore,
-    referee,
-    request.user.id,
-    refereeSheets,
-    await listMatchRostersForStore(nextStore),
-    await listMatchSessionsForRefereeData(request.user.id)
+  response.status(201).json(await buildRefereePortalResponse(referee, request.user.id));
+});
+
+app.post("/api/referee-portal/matches/:matchId/players", requireAuth, async (request, response) => {
+  const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
+  if (context.error) return response.status(context.error.status).json({ error: context.error.message });
+
+  const teamId = String(request.body.teamId || "").trim();
+  if (![context.match.homeTeamId, context.match.awayTeamId].includes(teamId)) {
+    return response.status(400).json({ error: "Solo puedes registrar jugadores de los equipos de este partido." });
+  }
+
+  const team = (context.league.teams || []).find((item) => item.id === teamId);
+  const payload = {
+    teamId,
+    competitionId: context.match.competitionId || team?.competitionId || getDefaultCompetitionIdForLeague(context.league),
+    name: request.body.name,
+    number: request.body.number,
+    position: request.body.position,
+    photoUrl: "",
+    photoAuthorized: false,
+    status: "active"
+  };
+  const nameCheck = validatePlayerFullName(payload.name);
+  if (!nameCheck.valid) return response.status(400).json({ error: nameCheck.message });
+  const duplicate = findDuplicatePlayer(context.league, payload);
+  if (duplicate) return response.status(409).json({ error: `Este jugador ya esta registrado como ${duplicate.name}.` });
+
+  const nextStore = await importStoreData(addPlayer(context.store, context.league.id, payload));
+  clearPublicCache();
+  const nextLeague = nextStore.leagues.find((item) => item.id === context.league.id);
+  const player = [...(nextLeague?.players || [])].reverse().find((item) => (
+    item.teamId === teamId &&
+    normalizePlayerNameForMatch(item.name) === normalizePlayerNameForMatch(payload.name)
   ));
+  if (!player) return response.status(500).json({ error: "El jugador se guardo, pero no se pudo recuperar." });
+
+  await logAudit({
+    user: request.user,
+    leagueId: context.league.id,
+    action: "referee_quick_player_create",
+    entityType: "player",
+    entityId: player.id,
+    detail: `Arbitro registro jugador ${upperText(payload.name || "")} desde acta ${context.match.id}`
+  });
+
+  response.status(201).json({
+    player: {
+      id: player.id,
+      name: player.name,
+      number: normalizeJerseyNumber(player.number),
+      registeredNumber: player.number,
+      position: player.position,
+      teamId: player.teamId,
+      originTeamName: team?.name || "",
+      isAffiliate: false,
+      isCaptain: false,
+      isGoalkeeper: false,
+      rosterRole: "",
+      isStarter: false,
+      isSubstitute: false
+    },
+    payload: await buildRefereePortalResponse(context.referee, request.user.id)
+  });
 });
 
 app.post("/api/team-portal/players", requireAuth, async (request, response) => {

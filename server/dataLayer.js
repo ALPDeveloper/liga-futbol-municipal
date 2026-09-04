@@ -902,11 +902,14 @@ export async function removeRefereeRoleData(userId) {
 }
 
 export async function updateMatchRefereesData(matchId, payload) {
+  const preserveCrewMode = payload.refereeCrewMode === undefined;
   const values = [
     payload.centralRefereeUserId || null,
     payload.assistantReferee1UserId || null,
     payload.assistantReferee2UserId || null,
     payload.fourthRefereeUserId || null,
+    preserveCrewMode ? null : payload.refereeCrewMode || null,
+    preserveCrewMode,
     matchId
   ];
   if (isPostgres()) {
@@ -915,8 +918,9 @@ export async function updateMatchRefereesData(matchId, payload) {
       SET central_referee_user_id = $1,
           assistant_referee1_user_id = $2,
           assistant_referee2_user_id = $3,
-          fourth_referee_user_id = $4
-      WHERE id = $5
+          fourth_referee_user_id = $4,
+          referee_crew_mode = CASE WHEN $6::boolean THEN referee_crew_mode ELSE $5 END
+      WHERE id = $7
     `, values);
     return;
   }
@@ -925,9 +929,18 @@ export async function updateMatchRefereesData(matchId, payload) {
     SET central_referee_user_id = ?,
         assistant_referee1_user_id = ?,
         assistant_referee2_user_id = ?,
-        fourth_referee_user_id = ?
+        fourth_referee_user_id = ?,
+        referee_crew_mode = CASE WHEN ? THEN referee_crew_mode ELSE ? END
     WHERE id = ?
-  `).run(...values);
+  `).run(
+    values[0],
+    values[1],
+    values[2],
+    values[3],
+    preserveCrewMode ? 1 : 0,
+    values[4],
+    matchId
+  );
 }
 
 export async function createRefereeMatchSheetData({
@@ -1701,6 +1714,46 @@ export async function listMatchSessionsForRefereeData(refereeUserId) {
     WHERE referee_user_id = ?
     ORDER BY updated_at DESC
   `).all(refereeUserId).map(normalizeMatchSessionRow);
+}
+
+export async function listMatchSessionsForLeagueData(leagueId) {
+  if (!leagueId) return [];
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT *
+      FROM match_sessions
+      WHERE league_id = $1
+      ORDER BY updated_at DESC
+    `, [leagueId]);
+    return rows.map(normalizeMatchSessionRow);
+  }
+
+  return db.prepare(`
+    SELECT *
+    FROM match_sessions
+    WHERE league_id = ?
+    ORDER BY updated_at DESC
+  `).all(leagueId).map(normalizeMatchSessionRow);
+}
+
+export async function listMatchSessionsForMatchData(matchId) {
+  if (!matchId) return [];
+  if (isPostgres()) {
+    const rows = await pgQuery(`
+      SELECT *
+      FROM match_sessions
+      WHERE match_id = $1
+      ORDER BY updated_at DESC
+    `, [matchId]);
+    return rows.map(normalizeMatchSessionRow);
+  }
+
+  return db.prepare(`
+    SELECT *
+    FROM match_sessions
+    WHERE match_id = ?
+    ORDER BY updated_at DESC
+  `).all(matchId).map(normalizeMatchSessionRow);
 }
 
 export async function getMatchSessionData(sessionId) {

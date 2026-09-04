@@ -183,10 +183,17 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const [activeStatsPanel, setActiveStatsPanel] = useState(() => (
     typeof window === "undefined" ? "tabla" : getStatsPanelFromHash(window.location.hash)
   ));
+  const [, setPublicLiveTick] = useState(0);
 
   useEffect(() => {
     preloadLeagueImages(league);
   }, [league]);
+
+  useEffect(() => {
+    if (!(league?.matches || []).some(isPublicMatchLive)) return undefined;
+    const intervalId = window.setInterval(() => setPublicLiveTick((value) => value + 1), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [league?.matches]);
 
   const [selectedCompetitionId, setSelectedCompetitionId] = useState(() => (
     loadLastCompetitionId(league) || getPublicCompetitions(league)[0]?.id || getDefaultCompetitionId(league)
@@ -1459,29 +1466,10 @@ function PublicMatchesScreen({
   selectedRound,
   visibleMatchCount
 }) {
-  const [statusFilter, setStatusFilter] = useState("todos");
   const dateRange = getPublicRoundDateRange(groups);
   const normalizedQuery = normalizeSearchTerm(query);
   const showSearchResults = normalizedQuery.length >= 2;
-  const roundMatches = useMemo(() => groups.flatMap((group) => group.matches), [groups]);
-  const statusOptions = useMemo(() => ([
-    { id: "todos", label: "Todos", count: roundMatches.length },
-    { id: "programados", label: "Programados", count: roundMatches.filter((match) => getPublicMatchStatusGroup(match) === "programados").length },
-    { id: "finalizados", label: "Finalizados", count: roundMatches.filter((match) => getPublicMatchStatusGroup(match) === "finalizados").length }
-  ]), [roundMatches]);
-  const filteredMatches = useMemo(() => (
-    statusFilter === "todos"
-      ? roundMatches
-      : roundMatches.filter((match) => getPublicMatchStatusGroup(match) === statusFilter)
-  ), [roundMatches, statusFilter]);
-  const displayGroups = useMemo(() => {
-    return groups
-      .map((group) => ({
-        ...group,
-        matches: group.matches.filter((match) => filteredMatches.some((item) => item.id === match.id))
-      }))
-      .filter((group) => group.matches.length);
-  }, [filteredMatches, groups]);
+  const displayGroups = groups.filter((group) => group.matches.length);
   const visibleFilteredCount = displayGroups.reduce((total, group) => total + group.matches.length, 0);
 
   return (
@@ -1507,63 +1495,43 @@ function PublicMatchesScreen({
 
       <PublicRoundScroller rounds={rounds} selectedRound={selectedRound} onSelectRound={onSelectRound} />
 
-      <div className="public-match-control-panel">
-        <div className="public-match-status-tabs" aria-label="Filtrar partidos por estado">
-          {statusOptions.map((option) => (
-            <button
-              className={statusFilter === option.id ? "active" : ""}
-              key={option.id}
-              type="button"
-              onClick={() => setStatusFilter(option.id)}
-            >
-              <span aria-hidden="true" />
-              {option.label}
-              <small>{option.count}</small>
-            </button>
-          ))}
-          <button className="public-match-filter-icon" type="button" aria-label="Filtros de partidos">
-            <MatchMetaIcon type="filter" />
-          </button>
-        </div>
-
-        <div className="public-match-tools-row">
-          <div className="match-search-box">
-            <label className={`match-inline-search ${query ? "has-value" : ""}`}>
-              <span aria-hidden="true" />
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => onSearch(event.target.value)}
-                placeholder="Buscar equipo..."
-                aria-controls="match-search-results"
-                aria-expanded={showSearchResults}
-              />
-              {query && (
-                <button
-                  className="search-clear-button"
-                  type="button"
-                  aria-label="Limpiar busqueda"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => onSearch("")}
-                >
-                  X
+      <div className="public-match-control-panel public-match-search-only">
+        <div className="match-search-box">
+          <label className={`match-inline-search ${query ? "has-value" : ""}`}>
+            <span aria-hidden="true" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => onSearch(event.target.value)}
+              placeholder="Buscar partido o equipo..."
+              aria-controls="match-search-results"
+              aria-expanded={showSearchResults}
+            />
+            {query && (
+              <button
+                className="search-clear-button"
+                type="button"
+                aria-label="Limpiar busqueda"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onSearch("")}
+              >
+                X
+              </button>
+            )}
+          </label>
+          <div className={`match-search-results ${showSearchResults ? "is-open" : ""}`} id="match-search-results">
+            {showSearchResults && searchResults.length > 0 && (
+              searchResults.map((result) => (
+                <button key={result.id} type="button" onClick={() => onSelectSearchResult(result.id)}>
+                  <span>{result.label}</span>
+                  <strong>{result.title}</strong>
+                  <small>{result.detail}</small>
                 </button>
-              )}
-            </label>
-            <div className={`match-search-results ${showSearchResults ? "is-open" : ""}`} id="match-search-results">
-              {showSearchResults && searchResults.length > 0 && (
-                searchResults.map((result) => (
-                  <button key={result.id} type="button" onClick={() => onSelectSearchResult(result.id)}>
-                    <span>{result.label}</span>
-                    <strong>{result.title}</strong>
-                    <small>{result.detail}</small>
-                  </button>
-                ))
-              )}
-              {showSearchResults && !searchResults.length && (
-                <p>No hay partidos de esta jornada con esa busqueda.</p>
-              )}
-            </div>
+              ))
+            )}
+            {showSearchResults && !searchResults.length && (
+              <p>No hay partidos de esta jornada con esa busqueda.</p>
+            )}
           </div>
         </div>
       </div>
@@ -1635,30 +1603,36 @@ function PublicScheduleMatchCard({ focused = false, league, match, onSelectMatch
   const homeTeam = getTeam(league, match.homeTeamId);
   const awayTeam = getTeam(league, match.awayTeamId);
   const statusLabel = getMatchStatusLabel(match);
+  const isLive = isPublicMatchLive(match);
   const isFinished = match.status === "finished" || match.status === "walkover";
-  const canOpenDetail = isFinished && ((match.events || []).length > 0 || match.observations || match.resolutionNote);
+  const showMatchTime = !isLive && !isFinished;
+  const canOpenDetail = (isFinished && ((match.events || []).length > 0 || match.observations || match.resolutionNote)) || isLive;
   const statusGroup = getPublicMatchStatusGroup(match);
   const tone = getPublicMatchTone(match);
+  const stateClass = isLive ? "state-live" : isFinished ? "state-finished" : "state-scheduled";
   const matchContent = (
     <>
-      <span className="schedule-match-time">
-        <strong>{match.time || "--:--"}</strong>
-        <small>HRS</small>
-      </span>
+      {showMatchTime && (
+        <span className="schedule-match-time">
+          <strong>{match.time || "--:--"}</strong>
+          <small>HRS</small>
+        </span>
+      )}
       <div className="schedule-match-info">
         <span className="schedule-match-venue"><MatchMetaIcon type="venue" />{match.venue || "Cancha por definir"}</span>
       </div>
-      <div className="schedule-match-versus">
-        <div className="schedule-match-team home">
-          <TeamMark team={homeTeam} className="schedule-match-crest" />
+      <div className={`schedule-scoreboard${isLive ? " is-live" : ""}`}>
+        <div className="schedule-scoreboard-team home">
+          <TeamMark team={homeTeam} className="schedule-scoreboard-crest" />
           <strong>{homeTeam?.name || "LOCAL"}</strong>
         </div>
-        <div className="schedule-match-center">
-          <strong>{isFinished ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : "VS"}</strong>
+        <div className="schedule-scoreboard-center">
+          {isLive && <small className="schedule-live-clock">{getPublicLiveClockLabel(match)}</small>}
+          <strong>{isFinished || isLive ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : "VS"}</strong>
         </div>
-        <div className="schedule-match-team away">
+        <div className="schedule-scoreboard-team away">
+          <TeamMark team={awayTeam} className="schedule-scoreboard-crest" />
           <strong>{awayTeam?.name || "VISITANTE"}</strong>
-          <TeamMark team={awayTeam} className="schedule-match-crest" />
         </div>
       </div>
       <span className={`schedule-status ${statusGroup}`}>{statusLabel}</span>
@@ -1667,7 +1641,7 @@ function PublicScheduleMatchCard({ focused = false, league, match, onSelectMatch
 
   if (!canOpenDetail) {
     return (
-      <article className={`public-schedule-match is-static ${focused ? "is-search-focused" : ""} ${tone}`} data-public-match-id={match.id}>
+      <article className={`public-schedule-match is-static ${stateClass} ${focused ? "is-search-focused" : ""} ${tone}`} data-public-match-id={match.id}>
         <div className="schedule-match-layout">
           {matchContent}
         </div>
@@ -1677,7 +1651,7 @@ function PublicScheduleMatchCard({ focused = false, league, match, onSelectMatch
 
   return (
     <button
-      className={`public-schedule-match is-played ${focused ? "is-search-focused" : ""} ${tone}`}
+      className={`public-schedule-match is-played ${stateClass} ${focused ? "is-search-focused" : ""} ${tone}`}
       data-public-match-id={match.id}
       type="button"
       onClick={() => onSelectMatch?.(match.id)}
@@ -1695,7 +1669,8 @@ function PublicMatchDetailScreen({ league, match, onBack, onShare }) {
   const awayTeam = getTeam(league, match.awayTeamId);
   const competition = getCompetition(league, match.competitionId);
   const statusLabel = getMatchStatusLabel(match);
-  const events = sortMatchEvents(match.events || []);
+  const isLive = isPublicMatchLive(match);
+  const events = sortMatchEvents(isLive ? getPublicLiveEvents(match) : match.events || []);
   const dateCopy = match.date ? formatDate(match.date) : "Fecha por definir";
   const hasNotes = Boolean(match.observations || match.resolutionNote);
 
@@ -1728,6 +1703,7 @@ function PublicMatchDetailScreen({ league, match, onBack, onShare }) {
           <div className="public-match-detail-score">
             <span>{statusLabel}</span>
             <strong>{match.homeGoals ?? 0}-{match.awayGoals ?? 0}</strong>
+            {isLive && <small>{getPublicLiveClockLabel(match)}</small>}
           </div>
           <div className="public-match-detail-team away">
             <TeamMark team={awayTeam} className="public-match-detail-crest" />
@@ -1739,11 +1715,11 @@ function PublicMatchDetailScreen({ league, match, onBack, onShare }) {
         <div className="public-match-events-title">
           <div>
             <span>Acta publica</span>
-            <strong>Eventos del partido</strong>
+            <strong>{isLive ? "Relato en vivo" : "Eventos del partido"}</strong>
           </div>
           <small>{events.length} registros</small>
         </div>
-        <MatchEventSummary league={league} match={match} homeTeam={homeTeam} awayTeam={awayTeam} />
+        <MatchEventSummary league={league} match={isLive ? { ...match, events } : match} homeTeam={homeTeam} awayTeam={awayTeam} />
       </section>
       {hasNotes && (
         <section className="public-match-notes-card">
@@ -4088,9 +4064,9 @@ function PublicHomeDashboard({
           </article>
         )}
 
-        <section className="home-week-highlights" aria-label="Destacados de la semana">
+        <section className="home-week-highlights" aria-label="Destacado del torneo">
           <div className="home-section-head">
-            <h2>Destacados de la semana</h2>
+            <h2>DESTACADO DEL TORNEO</h2>
             <button type="button" onClick={() => onSelectView("tabla", { statsPanel: "goleo" })}>Ver goleo</button>
           </div>
           <div className="home-highlight-strip">
@@ -6379,8 +6355,50 @@ function getMatchStatusLabel(match) {
   return labels[match.status] || "Programado";
 }
 
+function isPublicMatchLive(match) {
+  return Boolean(
+    match?.status === "in_progress" ||
+    match?.status === "live" ||
+    match?.workflowStatus === "in_progress" ||
+    match?.liveState?.status === "in_progress"
+  );
+}
+
+function formatPublicClockSeconds(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds || 0)));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function getPublicLiveClockLabel(match) {
+  const clockState = match?.liveState?.clockState || {};
+  const liveTimer = clockState.liveTimer || {};
+  const accumulatedSeconds = Number(liveTimer.accumulatedSeconds ?? clockState.liveElapsedSeconds ?? 0);
+  const isRunning = (liveTimer.timerStatus || clockState.timerStatus) === "running" || Boolean(clockState.liveRunning);
+  const startedAt = liveTimer.periodStartedAt || clockState.periodStartedAt || "";
+  const startedAtTime = startedAt ? new Date(startedAt).getTime() : 0;
+  const elapsedSinceStart = isRunning && startedAt && Number.isFinite(startedAtTime) ? Math.max(0, (Date.now() - startedAtTime) / 1000) : 0;
+  const period = match?.liveState?.period || clockState.currentPeriod || liveTimer.currentPeriod || "EN VIVO";
+  return `${period} ${formatPublicClockSeconds(accumulatedSeconds + elapsedSinceStart)}`;
+}
+
+function getPublicLiveEvents(match) {
+  return Array.isArray(match?.liveEvents) ? match.liveEvents : [];
+}
+
+function getPublicEventPlayerName(league, eventItem) {
+  if (eventItem?.playerName || eventItem?.player) return eventItem.playerName || eventItem.player;
+  return (league?.players || []).find((player) => player.id === eventItem?.playerId)?.name || "Evento";
+}
+
+function getPublicLiveEventSummary(league, eventItem) {
+  const minute = hasEventMinute(eventItem) ? `${getEventMinuteLabel(eventItem)}' ` : "";
+  return `${getPublicEventIcon(eventItem?.type, eventItem)} ${minute}${getPublicEventPlayerName(league, eventItem)}`;
+}
+
 function isPublicScheduledMatch(match) {
-  return ["scheduled", "rescheduled", "advanced"].includes(match?.status || "scheduled");
+  return ["scheduled", "rescheduled", "advanced", "live", "in_progress"].includes(match?.status || "scheduled");
 }
 
 function isPublicPlayableScheduledMatch(match) {
@@ -6388,7 +6406,7 @@ function isPublicPlayableScheduledMatch(match) {
 }
 
 function getPublicMatchStatusGroup(match) {
-  if (["live", "in_progress"].includes(match?.status)) return "en-vivo";
+  if (isPublicMatchLive(match)) return "en-vivo";
   if (["finished", "walkover", "pending_sheet"].includes(match?.status)) return "finalizados";
   return "programados";
 }
@@ -6399,7 +6417,7 @@ function getPublicMatchTone(match) {
   if (match?.status === "suspended") return "tone-suspended";
   if (match?.status === "pending_sheet") return "tone-pending";
   if (["finished", "walkover", "pending_sheet"].includes(match?.status)) return "tone-finished";
-  if (["live", "in_progress"].includes(match?.status)) return "tone-live";
+  if (isPublicMatchLive(match)) return "tone-live";
   return "tone-scheduled";
 }
 
@@ -6506,17 +6524,18 @@ function getMatchDateParts(value) {
 
 function MatchCard({ focused = false, league, match, onSelectMatch }) {
   const isFinished = match.status === "finished" || match.status === "walkover";
+  const isLive = isPublicMatchLive(match);
   const isPostponed = match.status === "postponed";
   const isScheduleChanged = ["postponed", "rescheduled", "advanced"].includes(match.status || "");
   const timeLabel = match.time ? `${match.time} hrs` : "Hora por definir";
-  const timeOrScore = isFinished ? `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}` : isPostponed ? "POSP." : "VS";
+  const timeOrScore = isFinished || isLive ? `${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}` : isPostponed ? "POSP." : "VS";
   const dateParts = getMatchDateParts(match.date);
   const homeTeam = getTeam(league, match.homeTeamId);
   const awayTeam = getTeam(league, match.awayTeamId);
   const statusLabel = getMatchStatusLabel(match);
   const isPlayoff = (match.stage || "regular") === "playoff";
   const tiebreakerRows = getMatchTiebreakerRows(match);
-  const canOpenPublicDetail = isFinished && typeof onSelectMatch === "function";
+  const canOpenPublicDetail = (isFinished || isLive) && typeof onSelectMatch === "function";
 
   function handleDetailTrigger(event) {
     if (!canOpenPublicDetail) return;
@@ -6554,6 +6573,7 @@ function MatchCard({ focused = false, league, match, onSelectMatch }) {
             </div>
             <div className="match-card-center">
               <strong>{timeOrScore}</strong>
+              {isLive && <small>{getPublicLiveClockLabel(match)}</small>}
               {!isScheduleChanged && <small>{statusLabel}</small>}
               {isFinished && tiebreakerRows.length > 0 && (
                 <small>{tiebreakerRows.map((row) => `${row.label} ${row.value}`).join(" | ")}</small>

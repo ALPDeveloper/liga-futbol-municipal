@@ -147,7 +147,8 @@ CREATE TABLE IF NOT EXISTS matches (
   central_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   assistant_referee1_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   assistant_referee2_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+  fourth_referee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  referee_crew_mode TEXT
 );
 
 CREATE TABLE IF NOT EXISTS match_events (
