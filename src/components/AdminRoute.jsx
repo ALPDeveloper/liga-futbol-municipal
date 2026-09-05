@@ -15,6 +15,7 @@ import {
   addTeam,
   addTeamAffiliation,
   addVenue,
+  advancePlayoffPhase,
   deleteMatch,
   deletePlayoffMatches,
   deleteAnnouncement,
@@ -54,7 +55,7 @@ import {
 } from "../lib/actions.js";
 import { createUser } from "../lib/userApi.js";
 import { deleteLeagueFromApi } from "../lib/leagueApi.js";
-import { createMatchInApi, deleteMatchInApi, resolveMatchDisciplineInApi, saveMatchResultInApi, saveMatchSheetInApi, updateMatchInApi } from "../lib/matchApi.js";
+import { advancePlayoffPhaseInApi, createMatchInApi, deleteMatchInApi, deletePlayoffMatchesInApi, generatePlayoffBracketInApi, resolveMatchDisciplineInApi, saveMatchResultInApi, saveMatchSheetInApi, updateMatchInApi } from "../lib/matchApi.js";
 import { createPlayerInApi, deletePlayerInApi, updatePlayerInApi } from "../lib/playerApi.js";
 import { updateLeagueRulesInApi } from "../lib/rulesApi.js";
 import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../lib/playerValidation.js";
@@ -221,6 +222,52 @@ export function AdminRoute({
     }
   }
 
+  async function deletePlayoffMatchesFromPanel(payload) {
+    if (!authToken) {
+      commit(deletePlayoffMatches(store, league.id, payload));
+      return true;
+    }
+    try {
+      const apiStore = await deletePlayoffMatchesInApi(authToken, league.id, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (matchError) {
+      window.alert(matchError.message || "No se pudo eliminar la liguilla.");
+      return false;
+    }
+  }
+
+  async function generatePlayoffBracketFromPanel(payload) {
+    if (!authToken) {
+      commit(generatePlayoffBracket(store, league.id, payload));
+      return true;
+    }
+    try {
+      const apiStore = await generatePlayoffBracketInApi(authToken, league.id, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (matchError) {
+      throw new Error(matchError.message || "No se pudo generar la liguilla.");
+    }
+  }
+
+  async function advancePlayoffPhaseFromPanel(payload) {
+    if (!authToken) {
+      commit(advancePlayoffPhase(store, league.id, payload));
+      return true;
+    }
+    try {
+      const apiStore = await advancePlayoffPhaseInApi(authToken, league.id, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (matchError) {
+      throw new Error(matchError.message || "No se pudo generar la siguiente fase.");
+    }
+  }
+
   async function createPlayerFromPanel(payload) {
     if (!guardPlayerName(payload)) return false;
     if (!authToken) {
@@ -363,7 +410,7 @@ export function AdminRoute({
       onDeleteDisciplineLink={(linkId) => commit(deleteDisciplineLink(store, league.id, linkId))}
       onDeleteDisciplineReset={(resetId) => commit(deleteDisciplineReset(store, league.id, resetId))}
       onDeleteMatch={deleteMatchFromPanel}
-      onDeletePlayoffMatches={(payload) => commit(deletePlayoffMatches(store, league.id, payload))}
+      onDeletePlayoffMatches={deletePlayoffMatchesFromPanel}
       onDeleteLeague={deleteLeagueWithCleanup}
       onDeleteMediaItem={(mediaId) => commit(deleteMediaItem(store, league.id, mediaId))}
       onDeletePlayer={deletePlayerFromPanel}
@@ -376,7 +423,8 @@ export function AdminRoute({
       onResetDemo={resetDemo}
       onAddPlayerSanction={(payload) => commit(addPlayerSanction(store, league.id, payload))}
       onGenerateSchedule={(payload) => commit(generateSchedule(store, league.id, payload))}
-      onGeneratePlayoffBracket={(payload) => commit(generatePlayoffBracket(store, league.id, payload))}
+      onGeneratePlayoffBracket={generatePlayoffBracketFromPanel}
+      onAdvancePlayoffPhase={advancePlayoffPhaseFromPanel}
       onSaveIdentity={(payload) => commit(saveIdentity(store, league.id, payload))}
       onSaveMatchSheet={saveMatchSheetFromPanel}
       onSaveRules={saveRules}

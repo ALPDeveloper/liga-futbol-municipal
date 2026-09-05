@@ -1,6 +1,7 @@
 import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { ACTIVE_SCHEDULE_MATCH_STATUSES, PLAYER_HISTORICAL_STATUS, calculateStandings, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerNumberForTeam, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, makeId, sanitizeExternalUrl, sanitizeImageUrl, scopeLeagueToCompetition, upperText } from "./domain.js";
 import { MATCH_CAPTURE_MODES, normalizeCaptureMode } from "./matchWorkflow.js";
+import { PLAYOFF_PHASES_BY_VALUE, getAvailableNextPlayoffPhaseStatus, getPlayoffMatchWinnerTeamId, makePlayoffMatches, makePlayoffPairs, normalizePlayoffTieBreaker, sortPlayoffWinnerIdsBySeed } from "./playoffs.js";
 
 function isActiveScheduleMatch(match) {
   return ACTIVE_SCHEDULE_MATCH_STATUSES.includes(match?.status || "scheduled");
@@ -990,78 +991,6 @@ function buildRoundTripRounds(rounds) {
   ];
 }
 
-const PLAYOFF_PHASES = {
-  round32: { label: "16vos de final", teams: 32 },
-  round16: { label: "8vos de final", teams: 16 },
-  quarterfinal: { label: "Cuartos de final", teams: 8 },
-  semifinal: { label: "Semifinal", teams: 4 },
-  final: { label: "Final", teams: 2 }
-};
-
-function makePlayoffPairs(teamIds) {
-  const pairs = [];
-  for (let index = 0; index < teamIds.length / 2; index += 1) {
-    pairs.push({
-      homeTeamId: teamIds[index],
-      awayTeamId: teamIds[teamIds.length - 1 - index]
-    });
-  }
-  return pairs;
-}
-
-function makePlayoffMatches({ competitionId, pairs, phaseLabel, legMode, startDate, venue }) {
-  const isTwoLegs = legMode === "two_legs";
-  const defaultVenue = upperText(venue || "");
-
-  return pairs.flatMap((pair, pairIndex) => {
-    const baseMatch = {
-      competitionId,
-      stage: "playoff",
-      playoffRound: upperText(phaseLabel),
-      aggregateHome: null,
-      aggregateAway: null,
-      round: 0,
-      time: "",
-      venue: defaultVenue,
-      status: "scheduled",
-      homeGoals: null,
-      awayGoals: null,
-      observations: "",
-      events: []
-    };
-
-    if (!isTwoLegs) {
-      return [{
-        ...baseMatch,
-        id: makeId("match"),
-        playoffLeg: "",
-        date: startDate,
-        homeTeamId: pair.homeTeamId,
-        awayTeamId: pair.awayTeamId
-      }];
-    }
-
-    return [
-      {
-        ...baseMatch,
-        id: makeId("match"),
-        playoffLeg: "IDA",
-        date: startDate,
-        homeTeamId: pair.awayTeamId,
-        awayTeamId: pair.homeTeamId
-      },
-      {
-        ...baseMatch,
-        id: makeId("match"),
-        playoffLeg: "VUELTA",
-        date: addDays(startDate, 7),
-        homeTeamId: pair.homeTeamId,
-        awayTeamId: pair.awayTeamId
-      }
-    ].map((match, index) => ({ ...match, id: `${match.id}-${pairIndex}-${index}` }));
-  });
-}
-
 export function generateSchedule(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => {
     const competitionId = payload.competitionId || getDefaultCompetitionId(league);
@@ -1116,7 +1045,7 @@ export function generateSchedule(store, leagueId, payload) {
 export function generatePlayoffBracket(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => {
     const competitionId = payload.competitionId || getDefaultCompetitionId(league);
-    const phase = PLAYOFF_PHASES[payload.phase] || PLAYOFF_PHASES.quarterfinal;
+    const phase = PLAYOFF_PHASES_BY_VALUE[payload.phase] || PLAYOFF_PHASES_BY_VALUE.quarterfinal;
     const competitionLeague = scopeLeagueToCompetition(league, competitionId);
     const standings = calculateStandings(competitionLeague)
       .filter((row) => row.team.status !== "withdrawn")
@@ -1141,6 +1070,62 @@ export function generatePlayoffBracket(store, leagueId, payload) {
           match.competitionId !== competitionId ||
           (match.stage || "regular") !== "playoff" ||
           match.playoffRound !== targetPhase ||
+          !isActiveScheduleMatch(match)
+        ))
+      : league.matches;
+
+    return {
+      ...league,
+      matches: [...matches, ...generatedMatches]
+    };
+  });
+}
+
+export function advancePlayoffPhase(store, leagueId, payload = {}) {
+  return updateLeague(store, leagueId, (league) => {
+    const competitionId = payload.competitionId || getDefaultCompetitionId(league);
+    const phaseStatus = getAvailableNextPlayoffPhaseStatus(league, competitionId, payload.phase || "");
+    if (!phaseStatus?.isReadyToAdvance || !phaseStatus.nextPhase) {
+      throw new Error("No hay una fase de liguilla lista para avanzar. Primero finaliza todos los partidos y define ganador en cada cruce.");
+    }
+
+    const winnerTeamIds = sortPlayoffWinnerIdsBySeed(
+      league,
+      competitionId,
+      phaseStatus.winners.map((matchup) => matchup.winnerTeamId)
+    );
+    if (winnerTeamIds.length !== phaseStatus.nextPhase.teams) {
+      throw new Error(`La siguiente fase requiere ${phaseStatus.nextPhase.teams} equipos clasificados.`);
+    }
+
+    const targetPhase = upperText(phaseStatus.nextPhase.label);
+    const existingNextPhaseMatches = league.matches.filter((match) => (
+      (match.competitionId || competitionId) === competitionId &&
+      (match.stage || "regular") === "playoff" &&
+      upperText(match.playoffRound || "") === targetPhase
+    ));
+    const shouldReplace = payload.replaceNextPlayoffs === "on" || payload.replacePlayoffs === "on";
+    if (existingNextPhaseMatches.length && !shouldReplace) {
+      throw new Error(`${phaseStatus.nextPhase.label} ya tiene partidos generados. Activa reemplazar si necesitas rehacerlos.`);
+    }
+    if (shouldReplace && existingNextPhaseMatches.some((match) => !isActiveScheduleMatch(match))) {
+      throw new Error(`${phaseStatus.nextPhase.label} ya tiene partidos capturados. No se pueden reemplazar resultados de liguilla.`);
+    }
+
+    const pairs = makePlayoffPairs(winnerTeamIds);
+    const generatedMatches = makePlayoffMatches({
+      competitionId,
+      pairs,
+      phaseLabel: phaseStatus.nextPhase.label,
+      legMode: payload.legMode || "single",
+      startDate: payload.startDate || new Date().toISOString().slice(0, 10),
+      venue: payload.venue
+    });
+    const matches = shouldReplace
+      ? league.matches.filter((match) => (
+          (match.competitionId || competitionId) !== competitionId ||
+          (match.stage || "regular") !== "playoff" ||
+          upperText(match.playoffRound || "") !== targetPhase ||
           !isActiveScheduleMatch(match)
         ))
       : league.matches;
@@ -1259,6 +1244,8 @@ export function updateLeagueRules(store, leagueId, payload) {
       disciplineScope: payload.disciplineScope === "league" ? "league" : "competition",
       playoffQualifiers: Number(payload.playoffQualifiers ?? league.rules?.playoffQualifiers ?? 8),
       minimumPlayoffAppearances: Number(payload.minimumPlayoffAppearances ?? league.rules?.minimumPlayoffAppearances ?? 0),
+      playoffTieBreaker: normalizePlayoffTieBreaker(payload.playoffTieBreaker, league.rules?.playoffTieBreaker || "extra_time_penalties"),
+      playoffFinalTieBreaker: normalizePlayoffTieBreaker(payload.playoffFinalTieBreaker, league.rules?.playoffFinalTieBreaker || "extra_time_penalties"),
       notes: upperText(payload.notes || "")
     }
   }));
@@ -1351,7 +1338,7 @@ export function saveResult(store, leagueId, payload) {
         }
       }
 
-      return {
+      const nextMatch = {
         ...match,
         homeGoals: Number(payload.homeGoals),
         awayGoals: Number(payload.awayGoals),
@@ -1361,6 +1348,10 @@ export function saveResult(store, leagueId, payload) {
         currentReportId: "",
         events
       };
+      if ((nextMatch.stage || "regular") === "playoff" && !nextMatch.playoffLeg && !getPlayoffMatchWinnerTeamId(nextMatch, { league, competitionId: match.competitionId || getDefaultCompetitionId(league) })) {
+        throw new Error("En liguilla a juego unico debe quedar definido un ganador con marcador, tiempo extra o penales.");
+      }
+      return nextMatch;
     })
   }));
 }
@@ -1458,7 +1449,7 @@ export function saveMatchSheet(store, leagueId, payload) {
         throw new Error("Los goleadores capturados no coinciden con el marcador.");
       }
 
-      return {
+      const nextMatch = {
         ...match,
         homeGoals,
         awayGoals,
@@ -1475,6 +1466,10 @@ export function saveMatchSheet(store, leagueId, payload) {
         penaltyAwayGoals: optionalMatchScore(payload.penaltyAwayGoals),
         events
       };
+      if ((nextMatch.stage || "regular") === "playoff" && !nextMatch.playoffLeg && !getPlayoffMatchWinnerTeamId(nextMatch, { league, competitionId: match.competitionId || getDefaultCompetitionId(league) })) {
+        throw new Error("En liguilla a juego unico debe quedar definido un ganador con marcador, tiempo extra o penales.");
+      }
+      return nextMatch;
     })
   }));
 }

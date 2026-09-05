@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS league_rules (
   discipline_scope TEXT NOT NULL DEFAULT 'competition',
   playoff_qualifiers INTEGER NOT NULL DEFAULT 8,
   minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0,
+  playoff_tiebreaker TEXT NOT NULL DEFAULT 'extra_time_penalties',
+  playoff_final_tiebreaker TEXT NOT NULL DEFAULT 'extra_time_penalties',
   notes TEXT
 );
 

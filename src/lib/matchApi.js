@@ -39,6 +39,33 @@ export async function deleteMatchInApi(token, leagueId, matchId) {
   return parseResponse(response);
 }
 
+export async function generatePlayoffBracketInApi(token, leagueId, payload) {
+  const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/playoffs/generate`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response);
+}
+
+export async function advancePlayoffPhaseInApi(token, leagueId, payload) {
+  const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/playoffs/advance`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response);
+}
+
+export async function deletePlayoffMatchesInApi(token, leagueId, payload) {
+  const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/playoffs`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response);
+}
+
 export async function saveMatchResultInApi(token, leagueId, matchId, payload) {
   const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/matches/${encodeURIComponent(matchId)}/result`, {
     method: "POST",

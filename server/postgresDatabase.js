@@ -149,6 +149,8 @@ async function runPostgresMigrations(pool) {
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS discipline_scope TEXT NOT NULL DEFAULT 'competition'");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS playoff_qualifiers INTEGER NOT NULL DEFAULT 8");
   await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS playoff_tiebreaker TEXT NOT NULL DEFAULT 'extra_time_penalties'");
+  await pool.query("ALTER TABLE IF EXISTS league_rules ADD COLUMN IF NOT EXISTS playoff_final_tiebreaker TEXT NOT NULL DEFAULT 'extra_time_penalties'");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS team_affiliations (
       id TEXT PRIMARY KEY,
@@ -970,6 +972,8 @@ export async function getPostgresStore() {
         disciplineScope: rules.discipline_scope,
         playoffQualifiers: rules.playoff_qualifiers,
         minimumPlayoffAppearances: rules.minimum_playoff_appearances,
+        playoffTieBreaker: rules.playoff_tiebreaker,
+        playoffFinalTieBreaker: rules.playoff_final_tiebreaker,
         notes: rules.notes
       },
       highlights,
@@ -1168,8 +1172,8 @@ export async function importPostgresStore(store) {
       ]);
 
       await query(client, `
-        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, minimum_playoff_appearances, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, minimum_playoff_appearances, playoff_tiebreaker, playoff_final_tiebreaker, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       `, [
         league.id,
         league.rules?.withdrawalPolicy || "award_walkover",
@@ -1181,6 +1185,8 @@ export async function importPostgresStore(store) {
         league.rules?.disciplineScope === "league" ? "league" : "competition",
         Number(league.rules?.playoffQualifiers ?? 8),
         Number(league.rules?.minimumPlayoffAppearances ?? 0),
+        league.rules?.playoffTieBreaker || "extra_time_penalties",
+        league.rules?.playoffFinalTieBreaker || "extra_time_penalties",
         league.rules?.notes || "Si un equipo se da de baja, la liga puede otorgar triunfo por default segun sus estatutos."
       ]);
 

@@ -186,9 +186,13 @@ export function normalizeStore(data) {
           disciplineScope: "competition",
           playoffQualifiers: 8,
           minimumPlayoffAppearances: 0,
+          playoffTieBreaker: "extra_time_penalties",
+          playoffFinalTieBreaker: "extra_time_penalties",
           notes: "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.",
           ...(league.rules || {}),
           minimumPlayoffAppearances: Math.max(0, Number(league.rules?.minimumPlayoffAppearances ?? 0)),
+          playoffTieBreaker: ["extra_time_penalties", "higher_seed", "away_goals_higher_seed", "away_goals_penalties"].includes(league.rules?.playoffTieBreaker) ? league.rules.playoffTieBreaker : "extra_time_penalties",
+          playoffFinalTieBreaker: ["extra_time_penalties", "higher_seed", "away_goals_higher_seed", "away_goals_penalties"].includes(league.rules?.playoffFinalTieBreaker) ? league.rules.playoffFinalTieBreaker : "extra_time_penalties",
           disciplineScope: league.rules?.disciplineScope === "league" ? "league" : "competition",
           notes: upperText(league.rules?.notes || "SI UN EQUIPO SE DA DE BAJA, LA LIGA PUEDE OTORGAR TRIUNFO POR DEFAULT SEGUN SUS ESTATUTOS.")
         },

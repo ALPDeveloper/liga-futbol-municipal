@@ -3043,6 +3043,8 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
       setMessage(`Captura el PIN del capitan de ${match.awayTeamName}.`);
       return;
     }
+    const extraTimeSummary = getExtraTimeGoalSummary(cleanEvents);
+    const penaltySummary = getPenaltyShootoutSummary();
 
     const confirmed = window.confirm(
       `¿Finalizar y publicar acta?\n\nPartido: ${match.homeTeamName} vs ${match.awayTeamName}\nMarcador reportado: ${homeGoals}-${awayGoals}\nEventos: ${cleanEvents.length}\nModo: ${requiresDigitalSignature ? "en vivo con firma digital" : "manual sin firma digital"}\nPIN local: ${requiresDigitalSignature && !isDefault && match.homePinRequired ? "capturado" : "no requerido"}\nPIN visitante: ${requiresDigitalSignature && !isDefault && match.awayPinRequired ? "capturado" : "no requerido"}\n\nEl resultado se publicara inmediatamente en la parte publica. Las rojas quedaran sujetas a comision disciplinaria.`
@@ -3051,8 +3053,6 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
 
     setSaving(true);
     try {
-      const extraTimeSummary = getExtraTimeGoalSummary(cleanEvents);
-      const penaltySummary = getPenaltyShootoutSummary();
       const nextPayload = await saveRefereeMatchSheet(authToken, match.id, {
         captureMode: getCaptureMode(),
         homeGoals,

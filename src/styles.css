@@ -28,6 +28,7 @@ html {
 }
 
 html:has(.public-league-page) {
+  background: #020812;
   scroll-behavior: auto;
 }
 
@@ -43,6 +44,18 @@ body {
 
 body:has(.admin-route-shell) {
   background: #020811;
+}
+
+body:has(.public-league-page) {
+  min-height: 100svh;
+  background: #020812;
+}
+
+#app:has(.public-league-page),
+.app-shell:has(.public-league-page),
+.public-route-shell:has(.public-league-page) {
+  min-height: 100svh;
+  background: #020812;
 }
 
 #app {
@@ -16516,6 +16529,15 @@ th {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.playoff-advance-form {
+  border-color: rgba(24, 121, 78, 0.28);
+  background: #fbfdfb;
+}
+
+.playoff-advance-form .helper-text {
+  background: #eef8f1;
 }
 
 .sponsor-form {
@@ -39272,6 +39294,32 @@ button.arbitration-metric-card {
     inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
+.public-league-page .public-round-scroller-divider {
+  width: 1px;
+  min-width: 1px;
+  height: 42px;
+  align-self: center;
+  background: rgba(119, 159, 204, 0.18);
+}
+
+.public-league-page .public-round-scroller button.is-playoff-tab {
+  min-width: 118px;
+  border-color: rgba(255, 210, 29, 0.22);
+  color: #ffe277;
+  font-size: 0.86rem;
+  line-height: 1.05;
+  text-transform: none;
+}
+
+.public-league-page .public-round-scroller button.is-playoff-tab.active {
+  border-color: rgba(255, 210, 29, 0.68);
+  background: linear-gradient(145deg, #b47710, #ffd21d);
+  color: #08111d;
+  box-shadow:
+    0 16px 32px rgba(255, 210, 29, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
 .public-league-page .public-match-control-panel {
   position: relative;
   z-index: 5;
@@ -39429,6 +39477,102 @@ button.arbitration-metric-card {
 
 .public-league-page .public-match-day-list {
   gap: 28px;
+}
+
+.public-league-page .public-playoffs-section {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(255, 210, 29, 0.2);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 86% 0%, rgba(255, 210, 29, 0.15), transparent 30%),
+    linear-gradient(180deg, rgba(9, 22, 34, 0.94), rgba(5, 13, 22, 0.9));
+  box-shadow:
+    0 20px 46px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.public-league-page .public-playoffs-head,
+.public-league-page .public-playoffs-head > div {
+  min-width: 0;
+}
+
+.public-league-page .public-playoffs-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.public-league-page .public-playoffs-head span,
+.public-league-page .public-playoffs-head em {
+  color: #ffd21d;
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.public-league-page .public-playoffs-head strong {
+  display: block;
+  margin-top: 3px;
+  color: #f8fbff;
+  font-size: clamp(1.2rem, 4vw, 1.65rem);
+  line-height: 1;
+}
+
+.public-league-page .public-playoffs-head em {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 210, 29, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 210, 29, 0.1);
+  white-space: nowrap;
+}
+
+.public-league-page .public-playoffs-section .playoff-list {
+  gap: 14px;
+}
+
+.public-league-page .public-playoffs-section .playoff-phase-group {
+  gap: 10px;
+}
+
+.public-league-page .public-playoffs-section .playoff-round-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(232, 240, 250, 0.72);
+}
+
+.public-league-page .public-playoffs-section .playoff-round-summary strong {
+  color: #fff;
+}
+
+.public-league-page .public-playoffs-section .playoff-round-summary span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(232, 240, 250, 0.76);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.public-league-page .public-playoffs-section .match-list {
+  gap: 10px;
 }
 
 .public-league-page .public-match-day {
@@ -42217,6 +42361,42 @@ button.arbitration-metric-card {
   height: 76px;
   border-radius: 24px;
   box-shadow: 0 16px 32px rgba(0, 0, 0, 0.36);
+}
+
+.home-champion-team {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.home-champion-team strong {
+  max-width: 100%;
+  color: #ffffff;
+  font-size: clamp(1.35rem, 6vw, 3rem);
+  font-weight: 1000;
+  line-height: 0.95;
+  text-align: center;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.home-champion-team em {
+  max-width: 880px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: clamp(0.88rem, 3.5vw, 1.42rem);
+  font-style: normal;
+  font-weight: 1000;
+  line-height: 1.05;
+  text-align: center;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.home-champion-crest {
+  width: clamp(116px, 28vw, 210px);
+  height: clamp(116px, 28vw, 210px);
 }
 
 .home-featured-meta {
@@ -46639,6 +46819,40 @@ body:has(.public-league-page.public-view-equipos) .public-route-shell {
   color: #ffffff !important;
   font-size: clamp(1.9rem, 7vw, 3.7rem) !important;
   text-shadow: 0 0 18px rgba(21, 151, 255, 0.44);
+}
+
+.public-league-page.public-view-inicio .home-featured-match.is-champion .home-match-showcard {
+  background:
+    linear-gradient(135deg, rgba(116, 255, 72, 0.24), rgba(21, 151, 255, 0.2) 52%, rgba(255, 215, 72, 0.24)),
+    rgba(2, 10, 20, 0.66);
+}
+
+.public-league-page.public-view-inicio .home-champion-team {
+  min-height: clamp(230px, 50vw, 390px);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 217, 79, 0.24), transparent 42%),
+    rgba(2, 10, 20, 0.34);
+}
+
+.public-league-page.public-view-inicio .home-champion-crest {
+  width: clamp(118px, 30vw, 220px) !important;
+  height: clamp(118px, 30vw, 220px) !important;
+  border-radius: 36px !important;
+}
+
+.public-league-page.public-view-inicio .home-champion-team strong {
+  font-size: clamp(1.8rem, 7vw, 3.8rem) !important;
+  font-style: italic;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.public-league-page.public-view-inicio .home-champion-team em {
+  width: min(100%, 920px);
+  color: #dfff7a;
+  font-size: clamp(0.95rem, 3.6vw, 1.65rem);
+  text-shadow: 0 0 18px rgba(116, 255, 72, 0.22);
 }
 
 .public-league-page.public-view-inicio .home-featured-meta {
@@ -53890,6 +54104,21 @@ body.ligatec-home-chrome-hidden .public-league-page.public-view-mas .public-quic
   text-shadow: 0 0 20px rgba(35, 167, 255, 0.42);
 }
 
+.public-view-mas .more-hero-logo.has-logo {
+  overflow: visible !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  clip-path: none !important;
+  filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.42));
+}
+
+.public-view-mas .more-hero-logo.has-logo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
 .public-view-mas .more-hero-metrics {
   grid-column: 1 / -1;
   gap: 0 !important;
@@ -58225,8 +58454,8 @@ body:has(.league-directory-redesign) {
 }
 
 .public-league-page.public-view-calendario .match-search-box {
-  width: min(100%, 420px);
-  justify-self: end;
+  width: 100%;
+  justify-self: stretch;
 }
 
 .public-league-page.public-view-calendario .match-card-team {
@@ -58520,6 +58749,13 @@ body:has(.league-directory-redesign) {
   border-radius: clamp(14px, 4vw, 19px) !important;
   font-size: clamp(0.8rem, 3vw, 0.98rem) !important;
   letter-spacing: 0 !important;
+}
+
+.public-league-page.public-view-calendario .public-round-scroller button.is-playoff-tab {
+  min-width: clamp(104px, 29vw, 134px) !important;
+  padding-inline: clamp(12px, 3vw, 16px) !important;
+  font-size: clamp(0.74rem, 2.8vw, 0.88rem) !important;
+  white-space: normal !important;
 }
 
 .public-league-page.public-view-mas .more-hero-card > div:first-child strong {
@@ -69835,4 +70071,57 @@ main.public-league-page.public-view-calendario .public-match-control-panel.publi
   .discipline-control-panel .discipline-admin-trace > div {
     grid-template-columns: 1fr !important;
   }
+}
+
+/* Public overscroll guard: keep the document backdrop dark during mobile bounce. */
+html:has(.public-league-page),
+body:has(.public-league-page),
+#app:has(.public-league-page),
+.app-shell:has(.public-league-page) {
+  background-color: #020812 !important;
+}
+
+.public-route-shell:has(.public-league-page) {
+  background: #020812 !important;
+}
+
+body:has(.public-league-page) {
+  min-height: 100svh !important;
+}
+
+/* Public More width restore: keep overscroll fix without compacting the hub. */
+.public-league-page.public-view-mas {
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+}
+
+.public-league-page.public-view-mas .public-app-workspace {
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+  padding-inline: clamp(8px, 2vw, 14px) !important;
+}
+
+.public-league-page.public-view-mas .public-more-hub {
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+}
+
+/* Public standings insights: keep numeric summaries centered on narrow screens. */
+.public-league-page.public-view-tabla .standings-showcase .standings-insights article {
+  justify-items: center !important;
+  text-align: center !important;
+}
+
+.public-league-page.public-view-tabla .standings-showcase .standings-insights strong {
+  max-width: 100% !important;
+  text-align: center !important;
+}
+
+.public-league-page.public-view-tabla .standings-showcase .standings-insights small {
+  justify-self: center !important;
+  margin-inline: auto !important;
+  text-align: center !important;
 }

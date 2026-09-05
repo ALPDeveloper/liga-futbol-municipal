@@ -122,7 +122,7 @@ import {
 } from "./security.js";
 import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getPlayerNumberForTeam, getTeam, upperText } from "../src/lib/domain.js";
-import { addPlayer, deletePlayer, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
+import { addPlayer, advancePlayoffPhase, deletePlayer, deletePlayoffMatches, generatePlayoffBracket, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
 import {
   MATCH_CAPTURE_MODES,
   MATCH_REPORT_STATUSES,
@@ -130,6 +130,7 @@ import {
   getNextWorkflowStatusAfterFinish,
   normalizeCaptureMode
 } from "../src/lib/matchWorkflow.js";
+import { normalizePlayoffTieBreaker } from "../src/lib/playoffs.js";
 
 validateRuntimeConfig();
 await initializeData();
@@ -2506,6 +2507,92 @@ app.delete("/api/leagues/:leagueId/players/:playerId", requireAuth, async (reque
   response.json(nextStore);
 });
 
+app.post("/api/leagues/:leagueId/playoffs/generate", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "matches")) {
+    return response.status(403).json({ error: "No puedes generar liguilla en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida" });
+
+  let nextStoreCandidate;
+  try {
+    nextStoreCandidate = generatePlayoffBracket(store, leagueId, request.body || {});
+  } catch (playoffError) {
+    return response.status(400).json({ error: playoffError.message || "No se pudo generar la liguilla." });
+  }
+
+  const nextStore = await importStoreData(nextStoreCandidate);
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "playoff_generate",
+    entityType: "competition",
+    entityId: request.body?.competitionId || league.currentCompetitionId || "",
+    detail: "Genero fase de liguilla"
+  });
+  response.json(nextStore);
+});
+
+app.post("/api/leagues/:leagueId/playoffs/advance", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "matches")) {
+    return response.status(403).json({ error: "No puedes generar la siguiente fase en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida" });
+
+  let nextStoreCandidate;
+  try {
+    nextStoreCandidate = advancePlayoffPhase(store, leagueId, request.body || {});
+  } catch (playoffError) {
+    return response.status(400).json({ error: playoffError.message || "No se pudo generar la siguiente fase." });
+  }
+
+  const nextStore = await importStoreData(nextStoreCandidate);
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "playoff_advance",
+    entityType: "competition",
+    entityId: request.body?.competitionId || league.currentCompetitionId || "",
+    detail: "Genero siguiente fase de liguilla"
+  });
+  response.json(nextStore);
+});
+
+app.delete("/api/leagues/:leagueId/playoffs", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "matches")) {
+    return response.status(403).json({ error: "No puedes eliminar liguilla en esta liga" });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida" });
+
+  const nextStore = await importStoreData(deletePlayoffMatches(store, leagueId, request.body || {}));
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "playoff_delete",
+    entityType: "competition",
+    entityId: request.body?.competitionId || league.currentCompetitionId || "",
+    detail: "Elimino partidos de liguilla"
+  });
+  response.json(nextStore);
+});
+
 app.post("/api/leagues/:leagueId/matches/:matchId/result", requireAuth, async (request, response) => {
   const leagueId = String(request.params.leagueId || "").trim();
   if (!canEditMatchResults(request.user, leagueId)) {
@@ -2518,10 +2605,16 @@ app.post("/api/leagues/:leagueId/matches/:matchId/result", requireAuth, async (r
   if (!league || !match) return response.status(404).json({ error: "Partido no encontrado" });
   if (league.status !== "active") return response.status(404).json({ error: "Liga suspendida" });
 
-  const nextStore = await importStoreData(saveResult(store, leagueId, {
-    ...request.body,
-    matchId: match.id
-  }));
+  let nextStoreCandidate;
+  try {
+    nextStoreCandidate = saveResult(store, leagueId, {
+      ...request.body,
+      matchId: match.id
+    });
+  } catch (resultError) {
+    return response.status(400).json({ error: resultError.message || "No se pudo validar el resultado del partido." });
+  }
+  const nextStore = await importStoreData(nextStoreCandidate);
   clearPublicCache();
 
   await logAudit({
@@ -5429,6 +5522,8 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
     disciplineScope: request.body.disciplineScope === "league" ? "league" : "competition",
     playoffQualifiers: parseIntegerInRange(request.body.playoffQualifiers, current.playoffQualifiers ?? 8, { min: 2, max: 64, label: "Clasificados a liguilla" }),
     minimumPlayoffAppearances: parseIntegerInRange(request.body.minimumPlayoffAppearances, current.minimumPlayoffAppearances ?? 0, { min: 0, max: 64, label: "Partidos minimos por jugador para liguilla" }),
+    playoffTieBreaker: normalizePlayoffTieBreaker(request.body.playoffTieBreaker, current.playoffTieBreaker || "extra_time_penalties"),
+    playoffFinalTieBreaker: normalizePlayoffTieBreaker(request.body.playoffFinalTieBreaker, current.playoffFinalTieBreaker || "extra_time_penalties"),
     notes
   };
 
@@ -5446,7 +5541,7 @@ app.patch("/api/leagues/:leagueId/rules", requireAuth, async (request, response)
     action: "rules_update",
     entityType: "league_rules",
     entityId: request.params.leagueId,
-    detail: `Actualizo reglas: default ${next.forfeitGoalsFor}-${next.forfeitGoalsAgainst}, amarillas ${next.yellowSuspensionLimit}, roja ${next.defaultRedSuspensionMatches}, liguilla ${next.playoffQualifiers}, minimo jugador ${next.minimumPlayoffAppearances}`
+    detail: `Actualizo reglas: default ${next.forfeitGoalsFor}-${next.forfeitGoalsAgainst}, amarillas ${next.yellowSuspensionLimit}, roja ${next.defaultRedSuspensionMatches}, liguilla ${next.playoffQualifiers}, desempate ${next.playoffTieBreaker}, final ${next.playoffFinalTieBreaker}`
   });
 
   response.json(nextStore);

@@ -74,6 +74,12 @@ function runMigrations() {
   if (!ruleColumns.includes("minimum_playoff_appearances")) {
     db.prepare("ALTER TABLE league_rules ADD COLUMN minimum_playoff_appearances INTEGER NOT NULL DEFAULT 0").run();
   }
+  if (!ruleColumns.includes("playoff_tiebreaker")) {
+    db.prepare("ALTER TABLE league_rules ADD COLUMN playoff_tiebreaker TEXT NOT NULL DEFAULT 'extra_time_penalties'").run();
+  }
+  if (!ruleColumns.includes("playoff_final_tiebreaker")) {
+    db.prepare("ALTER TABLE league_rules ADD COLUMN playoff_final_tiebreaker TEXT NOT NULL DEFAULT 'extra_time_penalties'").run();
+  }
 
   const matchEventColumns = db.prepare("PRAGMA table_info(match_events)").all().map((column) => column.name);
   if (!matchEventColumns.includes("suspension_indefinite")) {
@@ -1049,6 +1055,8 @@ export function getStore() {
         disciplineScope: rules.discipline_scope,
         playoffQualifiers: rules.playoff_qualifiers,
         minimumPlayoffAppearances: rules.minimum_playoff_appearances,
+        playoffTieBreaker: rules.playoff_tiebreaker,
+        playoffFinalTieBreaker: rules.playoff_final_tiebreaker,
         notes: rules.notes
       },
       highlights,
@@ -1197,8 +1205,8 @@ export function importStore(store) {
       );
 
       db.prepare(`
-        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, minimum_playoff_appearances, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO league_rules (league_id, withdrawal_policy, forfeit_points, forfeit_goals_for, forfeit_goals_against, yellow_suspension_limit, default_red_suspension_matches, discipline_scope, playoff_qualifiers, minimum_playoff_appearances, playoff_tiebreaker, playoff_final_tiebreaker, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         league.id,
         league.rules?.withdrawalPolicy || "award_walkover",
@@ -1210,6 +1218,8 @@ export function importStore(store) {
         league.rules?.disciplineScope === "league" ? "league" : "competition",
         Number(league.rules?.playoffQualifiers ?? 8),
         Number(league.rules?.minimumPlayoffAppearances ?? 0),
+        league.rules?.playoffTieBreaker || "extra_time_penalties",
+        league.rules?.playoffFinalTieBreaker || "extra_time_penalties",
         league.rules?.notes || "Si un equipo se da de baja, la liga puede otorgar triunfo por default segun sus estatutos."
       );
 

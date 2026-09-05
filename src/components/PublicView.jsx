@@ -26,6 +26,7 @@ import {
   regularMatches,
   scopeLeagueToCompetition
 } from "../lib/domain.js";
+import { PLAYOFF_PHASES, PLAYOFF_TIE_BREAKER_OPTIONS, getPlayoffMatchupWinnerTeamId, normalizePlayoffTieBreaker } from "../lib/playoffs.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 
 function getPublicCompetitionStorageKey(leagueId) {
@@ -78,7 +79,7 @@ function getPublicViewFromHash(hashValue = "") {
   const hash = String(hashValue || "").replace("#", "");
   if (hash === "goleo" || hash === "disciplina" || hash === "expulsiones") return "tabla";
   if (hash === "jugador" || hash === "equipo") return "equipos";
-  if (hash === "liguilla") return "mas";
+  if (hash === "liguilla") return "calendario";
   if (hash === "fotos") return "fotos";
   if (hash === "patrocinadores") return "patrocinadores";
   if (hash === "partido") return "partido";
@@ -107,6 +108,91 @@ function getCompetitionAccent(competitions, competitionId) {
 
 function getPublicCompetitions(league) {
   return (league.competitions || []).filter((competition) => !["archived", "hidden"].includes(competition.status));
+}
+
+function getTournamentChampionHighlight(league, competition) {
+  const competitionId = competition?.id || getDefaultCompetitionId(league);
+  if (!competitionId) return null;
+  const finalMatches = playoffMatches(league)
+    .filter((match) => (
+      (match.competitionId || competitionId) === competitionId &&
+      String(match.playoffRound || "").toLocaleUpperCase("es-MX") === "FINAL"
+    ))
+    .sort((a, b) => (
+      String(a.playoffLeg || "").localeCompare(String(b.playoffLeg || "")) ||
+      String(a.date || "").localeCompare(String(b.date || "")) ||
+      String(a.time || "").localeCompare(String(b.time || ""))
+    ));
+  if (!finalMatches.length || finalMatches.some((match) => !["finished", "walkover"].includes(match.status || ""))) return null;
+  const championTeamId = getPlayoffMatchupWinnerTeamId(finalMatches, { league, competitionId, tieBreaker: league.rules?.playoffFinalTieBreaker });
+  const champion = championTeamId ? getTeam(league, championTeamId) : null;
+  if (!champion) return null;
+  const competitionName = competition?.name || league.name;
+  const seasonName = competition?.season || league.season || "";
+  return {
+    champion,
+    competitionName,
+    seasonName,
+    phrase: `CAMPEON DE ${competitionName} ${seasonName}`.replace(/\s+/g, " ").trim(),
+    finalMatch: finalMatches.at(-1),
+    finalMatches
+  };
+}
+
+function getPublicPlayoffSegmentTitle(match) {
+  const phase = String(match?.playoffRound || "Liguilla").trim();
+  const leg = String(match?.playoffLeg || "").trim();
+  return [phase, leg].filter(Boolean).join(" ");
+}
+
+function getPublicPlayoffSegmentShortLabel(title = "") {
+  const normalized = String(title || "").trim().toLocaleLowerCase("es-MX");
+  const hasIda = /\bida\b/.test(normalized);
+  const hasVuelta = /\bvuelta\b/.test(normalized);
+  const leg = hasIda ? " ida" : hasVuelta ? " vuelta" : "";
+  if (normalized.includes("octavos")) return `8vos final${leg}`;
+  if (normalized.includes("cuartos")) return `4tos final${leg}`;
+  if (normalized.includes("semifinal")) return `Semifinal${leg}`;
+  if (normalized.includes("final")) return `Final${leg}`;
+  if (normalized.includes("repechaje")) return `Repechaje${leg}`;
+  return `${title || "Liguilla"}`.replace(/\s+/g, " ").trim();
+}
+
+function getPublicMatchStageLabel(match) {
+  if ((match?.stage || "regular") === "playoff") return getPublicPlayoffSegmentTitle(match);
+  return `Jornada ${match?.round || "-"}`;
+}
+
+function getPublicPlayoffSegments(matches = []) {
+  const phaseOrder = new Map(PLAYOFF_PHASES.map((phase, index) => [phase.label.toLocaleUpperCase("es-MX"), index]));
+  const getPhaseOrder = (match) => phaseOrder.get(String(match.playoffRound || "").toLocaleUpperCase("es-MX")) ?? PLAYOFF_PHASES.length;
+  const sortedMatches = [...matches].sort((a, b) => (
+    getPhaseOrder(a) - getPhaseOrder(b) ||
+    String(a.playoffLeg || "").localeCompare(String(b.playoffLeg || "")) ||
+    String(a.date || "").localeCompare(String(b.date || "")) ||
+    String(a.time || "").localeCompare(String(b.time || ""))
+  ));
+  return sortedMatches.reduce((items, match) => {
+    const title = getPublicPlayoffSegmentTitle(match);
+    const id = `playoff:${title.toLocaleLowerCase("es-MX").replace(/[^a-z0-9]+/gi, "-")}`;
+    const last = items[items.length - 1];
+    if (last?.id === id) {
+      last.matches.push(match);
+    } else {
+      items.push({
+        id,
+        title,
+        shortLabel: getPublicPlayoffSegmentShortLabel(title),
+        matches: [match]
+      });
+    }
+    return items;
+  }, []);
+}
+
+function getPublicPlayoffSegmentIdForMatch(segments = [], match) {
+  if (!match) return "";
+  return segments.find((segment) => segment.matches.some((item) => item.id === match.id))?.id || "";
 }
 
 function getCompetitionScopedPublicAssets(items = [], competitionId = "") {
@@ -221,6 +307,14 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   );
   const playoffs = useMemo(() => playoffMatches(activeLeague), [activeLeague]);
   const activeCompetition = getCompetition(league, selectedCompetitionId);
+  const championHighlight = useMemo(
+    () => getTournamentChampionHighlight(activeLeague, activeCompetition),
+    [activeLeague, activeCompetition]
+  );
+  const playoffSegments = useMemo(() => getPublicPlayoffSegments(playoffs), [playoffs]);
+  const championPlayoffSegmentId = useMemo(() => (
+    getPublicPlayoffSegmentIdForMatch(playoffSegments, championHighlight?.finalMatch) || playoffSegments.at(-1)?.id || ""
+  ), [championHighlight?.finalMatch, playoffSegments]);
   const competitionAccent = getCompetitionAccent(league.competitions || [], selectedCompetitionId);
   const publicCompetitions = getPublicCompetitions(league);
   const archivedPublicCompetitions = getArchivedPublicCompetitions(league);
@@ -250,18 +344,29 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     ""
   ), [activeCompetition?.activeRound, regularLeague.matches, rounds]);
   const [selectedRound, setSelectedRound] = useState(defaultRound);
+  const [selectedPlayoffSegmentId, setSelectedPlayoffSegmentId] = useState("");
+  const urlPlayoffSegmentId = typeof window !== "undefined" && window.location.hash === "#liguilla"
+    ? championPlayoffSegmentId || playoffSegments.at(-1)?.id || ""
+    : "";
+  const activeSelectedPlayoffSegmentId = selectedPlayoffSegmentId || urlPlayoffSegmentId;
   const selectedRoundMatches = useMemo(() => (
     regularLeague.matches
       .filter((match) => Number(match.round) === Number(selectedRound))
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)))
   ), [regularLeague.matches, selectedRound]);
+  const selectedPlayoffSegment = useMemo(() => (
+    playoffSegments.find((segment) => segment.id === activeSelectedPlayoffSegmentId) || null
+  ), [activeSelectedPlayoffSegmentId, playoffSegments]);
+  const selectedScheduleMatches = selectedPlayoffSegment?.matches || selectedRoundMatches;
   const matchSearchResults = useMemo(() => (
-    getRoundMatchSearchResults(activeLeague, selectedRoundMatches, matchSearchQuery)
-  ), [activeLeague, matchSearchQuery, selectedRoundMatches]);
+    getRoundMatchSearchResults(activeLeague, selectedScheduleMatches, matchSearchQuery)
+  ), [activeLeague, matchSearchQuery, selectedScheduleMatches]);
   const matchDayGroups = useMemo(() => (
-    groupPublicMatchesByDay(selectedRoundMatches)
-  ), [selectedRoundMatches]);
+    groupPublicMatchesByDay(selectedScheduleMatches)
+  ), [selectedScheduleMatches]);
+  const selectedScheduleTitle = selectedPlayoffSegment?.shortLabel || `Jornada ${selectedRound || "-"}`;
   const restingTeams = useMemo(() => {
+    if (selectedPlayoffSegment) return [];
     if (!selectedRoundMatches.length) return [];
     const competitionTeamIds = new Set(
       regularLeague.matches.flatMap((match) => [match.homeTeamId, match.awayTeamId])
@@ -273,7 +378,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     return activeLeague.teams
       .filter((team) => competitionTeamIds.has(team.id) && !playingTeamIds.has(team.id) && team.status !== "withdrawn")
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [activeLeague.teams, regularLeague.matches, selectedRoundMatches]);
+  }, [activeLeague.teams, regularLeague.matches, selectedPlayoffSegment, selectedRoundMatches]);
   const allScorers = useMemo(() => (
     stats
       .filter((row) => row.goals > 0)
@@ -336,11 +441,17 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
 
   function selectPublicView(viewId, options = {}) {
     const nextView = PUBLIC_SCREEN_VIEWS.has(viewId) ? viewId : "inicio";
-    if (options.round) {
+    if (options.playoffSegmentId) {
+      setSelectedPlayoffSegmentId(options.playoffSegmentId);
+      setMatchSearchQuery("");
+      setFocusedMatchId("");
+    } else if (options.round) {
+      setSelectedPlayoffSegmentId("");
       setSelectedRound(options.round);
       setMatchSearchQuery("");
       setFocusedMatchId("");
     } else if (nextView === "calendario" && !options.preserveRound) {
+      setSelectedPlayoffSegmentId("");
       setSelectedRound(defaultRound);
       setMatchSearchQuery("");
       setFocusedMatchId("");
@@ -351,7 +462,7 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     if (nextView === "tabla" && !options.statsPanel) setActiveStatsPanel("tabla");
     setActivePublicView(nextView);
     try {
-      const hash = options.statsPanel || options.teamsPanel || nextView;
+      const hash = options.playoffSegmentId ? "liguilla" : options.statsPanel || options.teamsPanel || nextView;
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${hash}`);
     } catch {
       // La vista publica funciona por estado; el hash solo ayuda a compartir la seccion.
@@ -584,7 +695,20 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
 
   useEffect(() => {
     setSelectedRound(defaultRound);
+    setSelectedPlayoffSegmentId("");
   }, [defaultRound, selectedCompetitionId]);
+
+  useEffect(() => {
+    if (selectedPlayoffSegmentId && !playoffSegments.some((segment) => segment.id === selectedPlayoffSegmentId)) {
+      setSelectedPlayoffSegmentId("");
+    }
+  }, [playoffSegments, selectedPlayoffSegmentId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash !== "#liguilla" || !playoffSegments.length || selectedPlayoffSegmentId) return;
+    setSelectedPlayoffSegmentId(championPlayoffSegmentId || playoffSegments.at(-1)?.id || "");
+  }, [championPlayoffSegmentId, playoffSegments, selectedPlayoffSegmentId]);
 
   useEffect(() => {
     if (!rounds.length) {
@@ -678,6 +802,8 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             <PublicHomeDashboard
               activeCompetition={activeCompetition}
               announcements={activeAnnouncements}
+              championHighlight={championHighlight}
+              championPlayoffSegmentId={championPlayoffSegmentId}
               featuredMatch={featuredMatch}
               heroImage={heroImage}
               league={publicContentLeague}
@@ -727,24 +853,33 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             groups={matchDayGroups}
             focusedMatchId={focusedMatchId}
             league={activeLeague}
-            matchCount={selectedRoundMatches.length}
+            matchCount={selectedScheduleMatches.length}
             onBack={() => selectPublicView("inicio")}
             onLogin={() => onNavigate?.("/acceso")}
             onSearch={setMatchSearchQuery}
             onSelectSearchResult={selectRoundMatchSearchResult}
             onSelectMatch={selectPublicMatch}
+            onSelectPlayoffSegment={(segmentId) => {
+              setSelectedPlayoffSegmentId(segmentId);
+              setMatchSearchQuery("");
+              setFocusedMatchId("");
+            }}
             onSelectRound={(round) => {
+              setSelectedPlayoffSegmentId("");
               setSelectedRound(round);
               setMatchSearchQuery("");
               setFocusedMatchId("");
             }}
-            onShare={() => shareRoundCard({ league: activeLeague, selectedRound, matches: selectedRoundMatches })}
+            onShare={() => shareRoundCard({ league: activeLeague, selectedRound: selectedPlayoffSegment?.shortLabel || selectedRound, matches: selectedScheduleMatches })}
+            playoffSegments={playoffSegments}
             query={matchSearchQuery}
             restingTeams={restingTeams}
             rounds={rounds}
             searchResults={matchSearchResults}
+            selectedPlayoffSegmentId={activeSelectedPlayoffSegmentId}
             selectedRound={selectedRound}
-            visibleMatchCount={selectedRoundMatches.length}
+            title={selectedScheduleTitle}
+            visibleMatchCount={selectedScheduleMatches.length}
           />
         )}
 
@@ -1105,6 +1240,7 @@ function PublicMoreHub({
   const activeSponsors = (publicContentLeague.sponsors || []).filter((sponsor) => (sponsor.status || "active") === "active");
   const qualifierCount = Number(rules.playoffQualifiers || 0);
   const yellowLimit = Number(rules.yellowSuspensionLimit || 3);
+  const leagueLogoUrl = league.identity?.logoUrl || league.logoUrl || "";
   const latestAnnouncements = announcements.length
     ? announcements.slice(0, 2)
     : [{
@@ -1141,8 +1277,8 @@ function PublicMoreHub({
           <strong>{league.name}</strong>
           <small>{getSeasonValue(activeCompetition, league)}</small>
         </div>
-        <span className="more-hero-logo" aria-hidden="true">
-          {getTeamInitials(activeCompetition?.name || league.name)}
+        <span className={`more-hero-logo${leagueLogoUrl ? " has-logo" : ""}`} aria-hidden="true">
+          {leagueLogoUrl ? <img alt="" src={leagueLogoUrl} loading="lazy" /> : getTeamInitials(league.name)}
         </span>
         <div className="more-hero-metrics">
           <span><strong>{competitionLeague.teams.length}</strong><small>Equipos</small></span>
@@ -1457,13 +1593,17 @@ function PublicMatchesScreen({
   onSearch,
   onSelectSearchResult,
   onSelectMatch,
+  onSelectPlayoffSegment,
   onSelectRound,
   onShare,
+  playoffSegments = [],
   query,
   restingTeams,
   rounds,
   searchResults,
+  selectedPlayoffSegmentId = "",
   selectedRound,
+  title,
   visibleMatchCount
 }) {
   const dateRange = getPublicRoundDateRange(groups);
@@ -1471,6 +1611,8 @@ function PublicMatchesScreen({
   const showSearchResults = normalizedQuery.length >= 2;
   const displayGroups = groups.filter((group) => group.matches.length);
   const visibleFilteredCount = displayGroups.reduce((total, group) => total + group.matches.length, 0);
+  const isPlayoffSelected = Boolean(selectedPlayoffSegmentId);
+  const emptyCopy = isPlayoffSelected ? "No hay partidos en esta fase." : "No hay partidos en esta jornada.";
 
   return (
     <section className="public-matches-screen" id="calendario">
@@ -1482,7 +1624,7 @@ function PublicMatchesScreen({
       />
       <div className="public-matches-top">
         <div className="matches-title-block">
-          <strong>Jornada {selectedRound || "-"}</strong>
+          <strong>{title || `Jornada ${selectedRound || "-"}`}</strong>
           <div className="public-matches-meta">
             <span><MatchMetaIcon type="calendar" />{dateRange}</span>
             <span><MatchMetaIcon type="ball" />{matchCount} partido(s)</span>
@@ -1493,7 +1635,14 @@ function PublicMatchesScreen({
         </div>
       </div>
 
-      <PublicRoundScroller rounds={rounds} selectedRound={selectedRound} onSelectRound={onSelectRound} />
+      <PublicRoundScroller
+        onSelectPlayoffSegment={onSelectPlayoffSegment}
+        onSelectRound={onSelectRound}
+        playoffSegments={playoffSegments}
+        rounds={rounds}
+        selectedPlayoffSegmentId={selectedPlayoffSegmentId}
+        selectedRound={selectedRound}
+      />
 
       <div className="public-match-control-panel public-match-search-only">
         <div className="match-search-box">
@@ -1530,7 +1679,7 @@ function PublicMatchesScreen({
               ))
             )}
             {showSearchResults && !searchResults.length && (
-              <p>No hay partidos de esta jornada con esa busqueda.</p>
+              <p>No hay partidos de {isPlayoffSelected ? "esta fase" : "esta jornada"} con esa busqueda.</p>
             )}
           </div>
         </div>
@@ -1563,14 +1712,14 @@ function PublicMatchesScreen({
         {Boolean(visibleMatchCount) && !visibleFilteredCount && (
           <p className="empty empty-polished">No hay partidos con los filtros seleccionados.</p>
         )}
-        {!visibleMatchCount && <p className="empty empty-polished">No hay partidos en esta jornada.</p>}
+        {!visibleMatchCount && <p className="empty empty-polished">{emptyCopy}</p>}
         <RestingTeams teams={restingTeams} />
       </div>
     </section>
   );
 }
 
-function PublicRoundScroller({ rounds, selectedRound, onSelectRound }) {
+function PublicRoundScroller({ rounds, selectedRound, onSelectRound, playoffSegments = [], selectedPlayoffSegmentId = "", onSelectPlayoffSegment }) {
   const scrollerRef = useRef(null);
   const selectedButtonRef = useRef(null);
 
@@ -1580,19 +1729,31 @@ function PublicRoundScroller({ rounds, selectedRound, onSelectRound }) {
     if (!scroller || !selectedButton) return;
     const nextLeft = selectedButton.offsetLeft - ((scroller.clientWidth - selectedButton.offsetWidth) / 2);
     scroller.scrollTo({ left: Math.max(0, nextLeft), behavior: "auto" });
-  }, [rounds, selectedRound]);
+  }, [playoffSegments, rounds, selectedPlayoffSegmentId, selectedRound]);
 
   return (
-    <div className="public-round-scroller" aria-label="Seleccionar jornada" ref={scrollerRef}>
+    <div className="public-round-scroller" aria-label="Seleccionar jornada o fase final" ref={scrollerRef}>
       {rounds.map((round) => (
         <button
-          className={Number(round) === Number(selectedRound) ? "active" : ""}
+          className={!selectedPlayoffSegmentId && Number(round) === Number(selectedRound) ? "active" : ""}
           key={round}
-          ref={Number(round) === Number(selectedRound) ? selectedButtonRef : null}
+          ref={!selectedPlayoffSegmentId && Number(round) === Number(selectedRound) ? selectedButtonRef : null}
           type="button"
           onClick={() => onSelectRound(round)}
         >
           J{round}
+        </button>
+      ))}
+      {playoffSegments.length > 0 && <span className="public-round-scroller-divider" aria-hidden="true" />}
+      {playoffSegments.map((segment) => (
+        <button
+          className={selectedPlayoffSegmentId === segment.id ? "active is-playoff-tab" : "is-playoff-tab"}
+          key={segment.id}
+          ref={selectedPlayoffSegmentId === segment.id ? selectedButtonRef : null}
+          type="button"
+          onClick={() => onSelectPlayoffSegment?.(segment.id)}
+        >
+          {segment.shortLabel}
         </button>
       ))}
     </div>
@@ -1673,6 +1834,7 @@ function PublicMatchDetailScreen({ league, match, onBack, onShare }) {
   const events = sortMatchEvents(isLive ? getPublicLiveEvents(match) : match.events || []);
   const dateCopy = match.date ? formatDate(match.date) : "Fecha por definir";
   const hasNotes = Boolean(match.observations || match.resolutionNote);
+  const stageLabel = getPublicMatchStageLabel(match);
 
   return (
     <section className="public-match-detail-screen" id="partido">
@@ -1688,7 +1850,7 @@ function PublicMatchDetailScreen({ league, match, onBack, onShare }) {
       <div className="public-match-detail-hero">
         <div className="public-match-detail-meta">
           <span>{competition?.name || league.name}</span>
-          <strong>Jornada {match.round || "-"}</strong>
+          <strong>{stageLabel}</strong>
           <div>
             <small><MatchMetaIcon type="calendar" />{dateCopy}</small>
             <small><MatchMetaIcon type="time" />{match.time || "Hora por definir"}</small>
@@ -3895,6 +4057,8 @@ function ShareActionButton({ className = "", label, onClick }) {
 function PublicHomeDashboard({
   activeCompetition,
   announcements = [],
+  championHighlight = null,
+  championPlayoffSegmentId = "",
   featuredMatch: selectedFeaturedMatch,
   heroImage,
   league,
@@ -4043,6 +4207,7 @@ function PublicHomeDashboard({
         </div>
 
         <HomeFeaturedMatch
+          championHighlight={championHighlight}
           competitionName={competitionName}
           currentRound={currentRoundLabel}
           heroImage={stadiumHero || heroMedia?.imageUrl || heroImage}
@@ -4052,7 +4217,7 @@ function PublicHomeDashboard({
           seasonName={seasonName}
           home={featuredHome}
           away={featuredAway}
-          onOpen={() => onSelectView("calendario", { round: featuredMatch?.round || currentRoundLabel })}
+          onOpen={() => championHighlight ? onSelectView("calendario", { playoffSegmentId: championPlayoffSegmentId }) : onSelectView("calendario", { round: featuredMatch?.round || currentRoundLabel })}
         />
 
         {activeAnnouncement && (
@@ -4499,7 +4664,63 @@ function getPublicHomeMedia(media, type) {
     ));
 }
 
-function HomeFeaturedMatch({ competitionName, currentRound, heroImage, league, leagueLogoUrl, match, seasonName, home, away, onOpen }) {
+function HomeFeaturedMatch({ championHighlight = null, competitionName, currentRound, heroImage, league, leagueLogoUrl, match, seasonName, home, away, onOpen }) {
+  if (championHighlight?.champion) {
+    const finalMatch = championHighlight.finalMatch;
+    const finalDate = finalMatch?.date ? formatDate(finalMatch.date) : "Final cerrada";
+    return (
+      <article className="home-featured-match is-champion" style={{ "--home-photo": `url(${heroImage})` }}>
+        <header className={`home-featured-identity${leagueLogoUrl ? " has-league-logo" : ""}`}>
+          <span className={`home-league-mark${leagueLogoUrl ? " has-logo" : ""}`} aria-hidden="true">
+            {leagueLogoUrl ? <img alt="" src={leagueLogoUrl} loading="lazy" /> : getTeamInitials(league.name)}
+          </span>
+          <div>
+            <small>{league.name}</small>
+            <h1>{championHighlight.competitionName || competitionName || league.name}</h1>
+            <strong>{championHighlight.seasonName || seasonName}</strong>
+          </div>
+        </header>
+        <section className="home-match-showcard home-champion-showcard">
+          <div className="home-featured-top">
+            <span>Campeon del torneo</span>
+            <strong>Final</strong>
+          </div>
+          <div className="home-champion-team">
+            <TeamMark team={championHighlight.champion} className="home-featured-crest home-champion-crest" />
+            <strong>{championHighlight.champion.name}</strong>
+            <em>{championHighlight.phrase}</em>
+          </div>
+          <div className="home-featured-meta">
+            <span className="is-date">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 3.8v3M17 3.8v3" />
+                <path d="M4.8 6.5h14.4v13H4.8z" />
+                <path d="M4.8 10.2h14.4" />
+                <path d="M8.1 14h3.2M8.1 16.8h5.8" />
+              </svg>
+              {finalDate}
+            </span>
+            <span className="is-time">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3.5 14.6 8.8l5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z" />
+              </svg>
+              Campeon
+            </span>
+            <span className="is-venue">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6.5h16v11H4z" />
+                <path d="M12 6.5v11" />
+                <circle cx="12" cy="12" r="2.2" />
+                <path d="M4 9.2h3.2v5.6H4M20 9.2h-3.2v5.6H20" />
+              </svg>
+              {finalMatch?.venue || "Final"}
+            </span>
+          </div>
+          <button type="button" onClick={onOpen}>Ver liguilla</button>
+        </section>
+      </article>
+    );
+  }
   if (!match) {
     return (
       <article className="home-featured-match is-empty" style={{ "--home-photo": `url(${heroImage})` }}>
@@ -5762,10 +5983,18 @@ function TournamentBottomSheet({ children, onClose, subtitle, title }) {
   );
 }
 
-function PlayoffList({ league, matches }) {
+function PlayoffList({ league, matches, onSelectMatch }) {
   if (!matches.length) return <p className="empty">Aun no hay partidos de liguilla programados en este torneo.</p>;
+  const phaseOrder = new Map(PLAYOFF_PHASES.map((phase, index) => [phase.label.toLocaleUpperCase("es-MX"), index]));
+  const getPhaseOrder = (match) => phaseOrder.get(String(match.playoffRound || "").toLocaleUpperCase("es-MX")) ?? PLAYOFF_PHASES.length;
+  const getTieBreakerLabel = (label) => {
+    const phaseLabel = String(label || "").split("|")[0].trim().toLocaleUpperCase("es-MX");
+    const phase = PLAYOFF_PHASES.find((item) => item.label.toLocaleUpperCase("es-MX") === phaseLabel);
+    const rule = normalizePlayoffTieBreaker(phase?.value === "final" ? league.rules?.playoffFinalTieBreaker : league.rules?.playoffTieBreaker);
+    return PLAYOFF_TIE_BREAKER_OPTIONS.find((option) => option.value === rule)?.label || "Tiempo extra / penales";
+  };
   const sortedMatches = [...matches].sort((a, b) => (
-    String(a.playoffRound || "").localeCompare(String(b.playoffRound || "")) ||
+    getPhaseOrder(a) - getPhaseOrder(b) ||
     String(a.playoffLeg || "").localeCompare(String(b.playoffLeg || "")) ||
     String(a.date || "").localeCompare(String(b.date || "")) ||
     String(a.time || "").localeCompare(String(b.time || ""))
@@ -5788,9 +6017,17 @@ function PlayoffList({ league, matches }) {
           <div className="round-summary playoff-round-summary">
             <strong>{group.label}</strong>
             <span>{group.matches.length} partido(s)</span>
+            <span>Empate: {getTieBreakerLabel(group.label)}</span>
           </div>
           <div className="match-list">
-            {group.matches.map((match) => <MatchCard key={match.id} league={league} match={match} />)}
+            {group.matches.map((match) => (
+              <MatchCard
+                key={match.id}
+                league={league}
+                match={match}
+                onSelectMatch={onSelectMatch}
+              />
+            ))}
           </div>
         </section>
       ))}

@@ -163,7 +163,9 @@ export function sanitizePublicStore(store, options = {}) {
         yellowSuspensionLimit: league.rules?.yellowSuspensionLimit,
         defaultRedSuspensionMatches: league.rules?.defaultRedSuspensionMatches,
         playoffQualifiers: league.rules?.playoffQualifiers,
-        minimumPlayoffAppearances: league.rules?.minimumPlayoffAppearances
+        minimumPlayoffAppearances: league.rules?.minimumPlayoffAppearances,
+        playoffTieBreaker: league.rules?.playoffTieBreaker,
+        playoffFinalTieBreaker: league.rules?.playoffFinalTieBreaker
       }
     }))
   };

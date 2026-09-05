@@ -14,6 +14,7 @@ import {
   addSponsor,
   addTeam,
   addTeamAffiliation,
+  advancePlayoffPhase,
   deleteLeague,
   deleteAppearanceAdjustment,
   deleteAnnouncement,
@@ -34,6 +35,7 @@ import {
   updateLeagueRules,
   updateAnnouncement,
   updateSponsor,
+  updateMatch,
   updateTeam
 } from "../src/lib/actions.js";
 import {
@@ -571,6 +573,116 @@ assert.equal(seededRound32Matches.length, 16);
 assert.equal(seededRound32Matches[0].homeTeamId, "seed-team-01");
 assert.equal(seededRound32Matches[0].awayTeamId, "seed-team-32");
 
+let playoffAdvanceStore = generatePlayoffBracket(seededPlayoffStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  phase: "semifinal",
+  legMode: "single",
+  startDate: "2026-08-15"
+});
+let playoffAdvanceLeague = playoffAdvanceStore.leagues.find((item) => item.id === "liga-siembra");
+const semifinalMatches = playoffMatches(scopeLeagueToCompetition(playoffAdvanceLeague, "comp-siembra"));
+assert.equal(semifinalMatches.length, 2);
+playoffAdvanceStore = updateMatch(playoffAdvanceStore, "liga-siembra", semifinalMatches[0].id, {
+  ...semifinalMatches[0],
+  status: "finished",
+  homeGoals: "1",
+  awayGoals: "0"
+});
+playoffAdvanceStore = updateMatch(playoffAdvanceStore, "liga-siembra", semifinalMatches[1].id, {
+  ...semifinalMatches[1],
+  status: "finished",
+  homeGoals: "2",
+  awayGoals: "2",
+  penaltyHomeGoals: "3",
+  penaltyAwayGoals: "4"
+});
+playoffAdvanceStore = advancePlayoffPhase(playoffAdvanceStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  legMode: "single",
+  startDate: "2026-08-22",
+  venue: "Cancha Final"
+});
+playoffAdvanceLeague = playoffAdvanceStore.leagues.find((item) => item.id === "liga-siembra");
+const finalMatches = playoffMatches(scopeLeagueToCompetition(playoffAdvanceLeague, "comp-siembra"))
+  .filter((match) => match.playoffRound === "FINAL");
+assert.equal(finalMatches.length, 1);
+assert.equal(finalMatches[0].homeTeamId, "seed-team-01");
+assert.equal(finalMatches[0].awayTeamId, "seed-team-03");
+assert.equal(finalMatches[0].date, "2026-08-22");
+assert.equal(finalMatches[0].venue, "CANCHA FINAL");
+
+let higherSeedStore = {
+  ...seededPlayoffStore,
+  leagues: seededPlayoffStore.leagues.map((item) => (
+    item.id === "liga-siembra"
+      ? { ...item, rules: { ...(item.rules || {}), playoffTieBreaker: "higher_seed", playoffFinalTieBreaker: "extra_time_penalties" } }
+      : item
+  ))
+};
+higherSeedStore = generatePlayoffBracket(higherSeedStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  phase: "semifinal",
+  legMode: "single",
+  startDate: "2026-09-01"
+});
+let higherSeedLeague = higherSeedStore.leagues.find((item) => item.id === "liga-siembra");
+const higherSeedSemifinals = playoffMatches(scopeLeagueToCompetition(higherSeedLeague, "comp-siembra"));
+for (const match of higherSeedSemifinals) {
+  higherSeedStore = updateMatch(higherSeedStore, "liga-siembra", match.id, {
+    ...match,
+    status: "finished",
+    homeGoals: "1",
+    awayGoals: "1"
+  });
+}
+higherSeedStore = advancePlayoffPhase(higherSeedStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  legMode: "single",
+  startDate: "2026-09-08"
+});
+higherSeedLeague = higherSeedStore.leagues.find((item) => item.id === "liga-siembra");
+const higherSeedFinal = playoffMatches(scopeLeagueToCompetition(higherSeedLeague, "comp-siembra"))
+  .find((match) => match.playoffRound === "FINAL");
+assert.equal(higherSeedFinal.homeTeamId, "seed-team-01");
+assert.equal(higherSeedFinal.awayTeamId, "seed-team-02");
+
+let awayGoalStore = {
+  ...seededPlayoffStore,
+  leagues: seededPlayoffStore.leagues.map((item) => (
+    item.id === "liga-siembra"
+      ? { ...item, rules: { ...(item.rules || {}), playoffTieBreaker: "away_goals_higher_seed", playoffFinalTieBreaker: "extra_time_penalties" } }
+      : item
+  ))
+};
+awayGoalStore = generatePlayoffBracket(awayGoalStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  phase: "semifinal",
+  legMode: "two_legs",
+  startDate: "2026-09-15"
+});
+let awayGoalLeague = awayGoalStore.leagues.find((item) => item.id === "liga-siembra");
+const awayGoalSemifinals = playoffMatches(scopeLeagueToCompetition(awayGoalLeague, "comp-siembra"));
+for (const match of awayGoalSemifinals) {
+  const isFirstPair = [match.homeTeamId, match.awayTeamId].includes("seed-team-01");
+  const isFirstLeg = match.playoffLeg === "IDA";
+  awayGoalStore = updateMatch(awayGoalStore, "liga-siembra", match.id, {
+    ...match,
+    status: "finished",
+    homeGoals: isFirstPair ? (isFirstLeg ? "1" : "0") : (isFirstLeg ? "0" : "1"),
+    awayGoals: isFirstPair ? (isFirstLeg ? "1" : "0") : (isFirstLeg ? "0" : "1")
+  });
+}
+awayGoalStore = advancePlayoffPhase(awayGoalStore, "liga-siembra", {
+  competitionId: "comp-siembra",
+  legMode: "single",
+  startDate: "2026-09-29"
+});
+awayGoalLeague = awayGoalStore.leagues.find((item) => item.id === "liga-siembra");
+const awayGoalFinal = playoffMatches(scopeLeagueToCompetition(awayGoalLeague, "comp-siembra"))
+  .find((match) => match.playoffRound === "FINAL");
+assert.equal(awayGoalFinal.homeTeamId, "seed-team-01");
+assert.equal(awayGoalFinal.awayTeamId, "seed-team-03");
+
 store = updateLeagueMembership(store, league.id, {
   plan: "Sin limite",
   status: "suspended",
@@ -610,12 +722,16 @@ store = updateLeagueRules(store, league.id, {
   yellowSuspensionLimit: 1,
   defaultRedSuspensionMatches: 2,
   playoffQualifiers: 4,
+  playoffTieBreaker: "higher_seed",
+  playoffFinalTieBreaker: "away_goals_penalties",
   notes: "Regla de prueba"
 });
 league = getCurrentLeague(store);
 assert.equal(league.rules.forfeitGoalsFor, 4);
 assert.equal(league.rules.defaultRedSuspensionMatches, 2);
 assert.equal(league.rules.playoffQualifiers, 4);
+assert.equal(league.rules.playoffTieBreaker, "higher_seed");
+assert.equal(league.rules.playoffFinalTieBreaker, "away_goals_penalties");
 
 store = saveResult(store, league.id, {
   matchId: "m3",

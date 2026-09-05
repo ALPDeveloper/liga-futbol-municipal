@@ -13,6 +13,7 @@ import { createTeamDelegate, deleteTeamDelegate, fetchTeamDelegates, resendTeamD
 import { createReferee, deleteReferee, fetchFinalizedMatchReports, fetchReferees, fetchRefereeMatchSheets, publishFinalizedMatchReport, resendRefereeInvitation, reviewRefereeMatchSheet, updateMatchReferees, updateReferee } from "../lib/refereeApi.js";
 import { uploadImage } from "../lib/uploadApi.js";
 import { updateMatchSheetEventItem } from "../lib/matchSheet.js";
+import { PLAYOFF_TIE_BREAKER_OPTIONS, getAvailableNextPlayoffPhaseStatus, getPlayoffMatchWinnerTeamId, getPlayoffPhaseStatus, normalizePlayoffTieBreaker } from "../lib/playoffs.js";
 import alpLogo from "../../assets/alp-logo.png";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 
@@ -118,6 +119,12 @@ function getPlayoffPhaseValueByTeams(teams) {
   return PLAYOFF_PHASE_OPTIONS.find((phase) => phase.teams === Number(teams))?.value || "quarterfinal";
 }
 
+function getAdminPlayoffPhaseOrder(label) {
+  const normalized = String(label || "").toLocaleUpperCase("es-MX");
+  const index = PLAYOFF_PHASE_OPTIONS.findIndex((phase) => phase.label.toLocaleUpperCase("es-MX") === normalized);
+  return index >= 0 ? index : PLAYOFF_PHASE_OPTIONS.length;
+}
+
 function getPlayerPositionOptionValue(position) {
   const normalized = String(position || "").toLocaleUpperCase("es-MX");
   if (normalized.includes("ARQUERO") || normalized.includes("PORTERO")) return "Arquero";
@@ -150,6 +157,7 @@ export function AdminView({
   onAddTeam,
   onAddTeamAffiliation,
   onAddVenue,
+  onAdvancePlayoffPhase,
   onDeleteMatch,
   onDeletePlayoffMatches,
   onDeleteAnnouncement,
@@ -249,6 +257,7 @@ export function AdminView({
               onAddTeam={onAddTeam}
               onAddTeamAffiliation={onAddTeamAffiliation}
               onAddVenue={onAddVenue}
+              onAdvancePlayoffPhase={onAdvancePlayoffPhase}
               onDeleteMatch={onDeleteMatch}
               onDeletePlayoffMatches={onDeletePlayoffMatches}
               onDeleteAnnouncement={onDeleteAnnouncement}
@@ -325,6 +334,7 @@ function LeagueAdmin({
   onAddTeam,
   onAddTeamAffiliation,
   onAddVenue,
+  onAdvancePlayoffPhase,
   onDeleteMatch,
   onDeletePlayoffMatches,
   onDeleteAnnouncement,
@@ -638,6 +648,7 @@ function LeagueAdmin({
               <CapturePanel
                 authToken={authToken}
                 league={league}
+                onAdvancePlayoffPhase={onAdvancePlayoffPhase}
                 onGenerateSchedule={onGenerateSchedule}
                 onGeneratePlayoffBracket={onGeneratePlayoffBracket}
                 onAddMatch={onAddMatch}
@@ -708,6 +719,7 @@ function LeagueAdmin({
                 onOpenSheet={() => setActiveSection("sheet")}
                 onDeleteMatch={onDeleteMatch}
                 onDeletePlayoffMatches={onDeletePlayoffMatches}
+                onAdvancePlayoffPhase={onAdvancePlayoffPhase}
                 onDeletePlayer={onDeletePlayer}
                 onDeleteTeam={onDeleteTeam}
                 onUpdateMatch={onUpdateMatch}
@@ -4016,7 +4028,7 @@ function TournamentList({ title, competitions, league, onUpdateCompetition }) {
   );
 }
 
-function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAddPlayer, onAddTeam, onGenerateSchedule, onGeneratePlayoffBracket }) {
+function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAddPlayer, onAddTeam, onAdvancePlayoffPhase, onGenerateSchedule, onGeneratePlayoffBracket }) {
   const allowedModeSet = allowedModes ? new Set(allowedModes) : null;
   const [captureMode, setCaptureMode] = useState(allowedModes?.[0] || "team");
   const [matchStage, setMatchStage] = useState("regular");
@@ -4050,6 +4062,14 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
     [activeCompetitionLeague]
   );
   const selectedPlayoffPhaseOption = PLAYOFF_PHASE_OPTIONS.find((phase) => phase.value === selectedPlayoffPhase) || PLAYOFF_PHASE_OPTIONS[2];
+  const playoffAdvanceStatus = useMemo(
+    () => getAvailableNextPlayoffPhaseStatus(league, selectedCompetitionId),
+    [league, selectedCompetitionId]
+  );
+  const selectedPhaseStatus = useMemo(
+    () => getPlayoffPhaseStatus(league, selectedCompetitionId, selectedPlayoffPhaseOption.label),
+    [league, selectedCompetitionId, selectedPlayoffPhaseOption.label]
+  );
   const suggestedMatchRound = matchCompetitionId ? getNextRoundForCapture(activeMatchCompetitionLeague) : "";
   const usedTeamIdsForMatchScope = getUsedTeamIdsForMatchScope(activeMatchCompetitionLeague.matches, {
     competitionId: matchCompetitionId,
@@ -4483,62 +4503,108 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
           )}
 
           {captureMode === "playoffs" && (
-            <form
-              className="capture-form schedule-generator-form"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                const payload = getFormPayload(event.currentTarget);
-                const phase = PLAYOFF_PHASE_OPTIONS.find((item) => item.value === payload.phase) || PLAYOFF_PHASE_OPTIONS[2];
-                if (playoffStandings.length < phase.teams) {
-                  window.alert(`No hay suficientes equipos con tabla para ${phase.label}. Se requieren ${phase.teams} equipos.`);
-                  return;
-                }
-                const message = `Se generara ${phase.label} con cruces por tabla: 1 vs ${phase.teams}, 2 vs ${phase.teams - 1}, etc. ¿Continuar?`;
-                if (!window.confirm(message)) return;
-                setCaptureNotice("");
-                setCaptureError("");
-                try {
-                  const result = await onGeneratePlayoffBracket(payload);
-                  if (result === false) return;
-                  showAdminAlert(`${phase.label} generada correctamente.`);
-                } catch (error) {
-                  const errorMessage = error.message || "No se pudo generar la liguilla.";
-                  setCaptureError(errorMessage);
-                  showAdminAlert(errorMessage, "error");
-                }
-              }}
-            >
-              <h3>Generar liguilla</h3>
-              <p className="helper-text">Toma la tabla de posiciones del torneo actual y arma cruces automaticos por siembra. No modifica el calendario regular.</p>
-              <div className="capture-fields schedule-fields">
-                <label>Categoria<CompetitionSelect league={league} name="competitionId" value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.target.value)} /></label>
-                <label>Iniciar desde
-                  <select name="phase" value={selectedPlayoffPhase} onChange={(event) => setSelectedPlayoffPhase(event.target.value)}>
-                    {PLAYOFF_PHASE_OPTIONS.map((phase) => (
-                      <option key={phase.value} value={phase.value}>{phase.label} ({phase.teams} equipos)</option>
-                    ))}
-                  </select>
-                </label>
-                <label>Formato
-                  <select name="legMode" defaultValue="single">
-                    <option value="single">Juego unico</option>
-                    <option value="two_legs">Ida y vuelta</option>
-                  </select>
-                </label>
-                <label>Fecha inicial<input name="startDate" type="date" defaultValue={today} required /></label>
-                <label>Cancha base<VenueSelect league={league} /></label>
-                <label className="checkbox-field"><input name="replacePlayoffs" type="checkbox" />Reemplazar programados de esta fase</label>
-              </div>
-              <div className="playoff-seeding-preview">
-                <strong>Clasificados por tabla</strong>
-                {playoffStandings.slice(0, selectedPlayoffPhaseOption.teams).map((row, index) => (
-                  <span key={row.team.id}>{index + 1}. {row.team.name} | {row.points} pts</span>
-                ))}
-                {playoffStandings.length > selectedPlayoffPhaseOption.teams && <span>+ {playoffStandings.length - selectedPlayoffPhaseOption.teams} equipo(s) mas</span>}
-                {playoffStandings.length < selectedPlayoffPhaseOption.teams && <span>Faltan {selectedPlayoffPhaseOption.teams - playoffStandings.length} equipo(s) para {selectedPlayoffPhaseOption.label}</span>}
-              </div>
-              <button className="primary" type="submit" disabled={playoffStandings.length < selectedPlayoffPhaseOption.teams}>Generar liguilla</button>
-            </form>
+            <>
+              <form
+                className="capture-form schedule-generator-form"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const payload = getFormPayload(event.currentTarget);
+                  const phase = PLAYOFF_PHASE_OPTIONS.find((item) => item.value === payload.phase) || PLAYOFF_PHASE_OPTIONS[2];
+                  if (playoffStandings.length < phase.teams) {
+                    window.alert(`No hay suficientes equipos con tabla para ${phase.label}. Se requieren ${phase.teams} equipos.`);
+                    return;
+                  }
+                  const message = `Se generara ${phase.label} con cruces por tabla: 1 vs ${phase.teams}, 2 vs ${phase.teams - 1}, etc. ¿Continuar?`;
+                  if (!window.confirm(message)) return;
+                  setCaptureNotice("");
+                  setCaptureError("");
+                  try {
+                    const result = await onGeneratePlayoffBracket(payload);
+                    if (result === false) return;
+                    showAdminAlert(`${phase.label} generada correctamente.`);
+                  } catch (error) {
+                    const errorMessage = error.message || "No se pudo generar la liguilla.";
+                    setCaptureError(errorMessage);
+                    showAdminAlert(errorMessage, "error");
+                  }
+                }}
+              >
+                <h3>Generar liguilla</h3>
+                <p className="helper-text">Toma la tabla de posiciones del torneo actual y arma cruces automaticos por siembra. No modifica el calendario regular.</p>
+                <div className="capture-fields schedule-fields">
+                  <label>Categoria<CompetitionSelect league={league} name="competitionId" value={selectedCompetitionId} onChange={(event) => setSelectedCompetitionId(event.target.value)} /></label>
+                  <label>Iniciar desde
+                    <select name="phase" value={selectedPlayoffPhase} onChange={(event) => setSelectedPlayoffPhase(event.target.value)}>
+                      {PLAYOFF_PHASE_OPTIONS.map((phase) => (
+                        <option key={phase.value} value={phase.value}>{phase.label} ({phase.teams} equipos)</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>Formato
+                    <select name="legMode" defaultValue="single">
+                      <option value="single">Juego unico</option>
+                      <option value="two_legs">Ida y vuelta</option>
+                    </select>
+                  </label>
+                  <label>Fecha inicial<input name="startDate" type="date" defaultValue={today} required /></label>
+                  <label>Cancha base<VenueSelect league={league} /></label>
+                  <label className="checkbox-field"><input name="replacePlayoffs" type="checkbox" />Reemplazar programados de esta fase</label>
+                </div>
+                <div className="playoff-seeding-preview">
+                  <strong>Clasificados por tabla</strong>
+                  {playoffStandings.slice(0, selectedPlayoffPhaseOption.teams).map((row, index) => (
+                    <span key={row.team.id}>{index + 1}. {row.team.name} | {row.points} pts</span>
+                  ))}
+                  {playoffStandings.length > selectedPlayoffPhaseOption.teams && <span>+ {playoffStandings.length - selectedPlayoffPhaseOption.teams} equipo(s) mas</span>}
+                  {playoffStandings.length < selectedPlayoffPhaseOption.teams && <span>Faltan {selectedPlayoffPhaseOption.teams - playoffStandings.length} equipo(s) para {selectedPlayoffPhaseOption.label}</span>}
+                </div>
+                <button className="primary" type="submit" disabled={playoffStandings.length < selectedPlayoffPhaseOption.teams}>Generar liguilla</button>
+              </form>
+
+              <form
+                className="capture-form schedule-generator-form playoff-advance-form"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  if (!playoffAdvanceStatus?.nextPhase) {
+                    showAdminAlert("Aun no hay una fase completa lista para avanzar.", "error");
+                    return;
+                  }
+                  const payload = getFormPayload(event.currentTarget);
+                  const confirmed = window.confirm(`¿Generar ${playoffAdvanceStatus.nextPhase.label} con los ganadores de ${playoffAdvanceStatus.phase.label}?`);
+                  if (!confirmed) return;
+                  try {
+                    const result = await onAdvancePlayoffPhase(payload);
+                    if (result === false) return;
+                    showAdminAlert(`${playoffAdvanceStatus.nextPhase.label} generada correctamente.`);
+                  } catch (error) {
+                    showAdminAlert(error.message || "No se pudo generar la siguiente fase.", "error");
+                  }
+                }}
+              >
+                <h3>Avanzar fase</h3>
+                <p className="helper-text">
+                  {playoffAdvanceStatus?.nextPhase
+                    ? `${playoffAdvanceStatus.phase.label} esta resuelta. Puedes crear ${playoffAdvanceStatus.nextPhase.label} con los ganadores.`
+                    : selectedPhaseStatus?.matches?.length
+                      ? `${selectedPhaseStatus.phase.label}: ${selectedPhaseStatus.matchups.length - selectedPhaseStatus.unresolvedCount}/${selectedPhaseStatus.matchups.length} cruce(s) con ganador definido.`
+                      : "Cuando una fase termine con ganador en todos sus cruces, aqui podras generar la siguiente ronda."}
+                </p>
+                <div className="capture-fields schedule-fields">
+                  <input name="competitionId" type="hidden" value={selectedCompetitionId} readOnly />
+                  <input name="phase" type="hidden" value={playoffAdvanceStatus?.phase?.value || ""} readOnly />
+                  <label>Formato
+                    <select name="legMode" defaultValue="single" disabled={!playoffAdvanceStatus?.nextPhase}>
+                      <option value="single">Juego unico</option>
+                      <option value="two_legs">Ida y vuelta</option>
+                    </select>
+                  </label>
+                  <label>Fecha inicial<input name="startDate" type="date" defaultValue={today} required disabled={!playoffAdvanceStatus?.nextPhase} /></label>
+                  <label>Cancha base<VenueSelect league={league} disabled={!playoffAdvanceStatus?.nextPhase} /></label>
+                  <label className="checkbox-field"><input name="replaceNextPlayoffs" type="checkbox" disabled={!playoffAdvanceStatus?.nextPhase} />Reemplazar programados de la siguiente fase</label>
+                </div>
+                <button className="primary" type="submit" disabled={!playoffAdvanceStatus?.nextPhase}>Generar siguiente fase</button>
+              </form>
+            </>
           )}
         </div>
       </div>
@@ -4552,6 +4618,10 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
   const playoffQualifiers = Number(rules.playoffQualifiers ?? 8);
   const minimumPlayoffAppearances = Number(rules.minimumPlayoffAppearances ?? 0);
   const playoffPhaseLabel = getPlayoffPhaseLabel(playoffQualifiers);
+  const playoffTieBreaker = normalizePlayoffTieBreaker(rules.playoffTieBreaker);
+  const playoffFinalTieBreaker = normalizePlayoffTieBreaker(rules.playoffFinalTieBreaker);
+  const playoffTieBreakerLabel = PLAYOFF_TIE_BREAKER_OPTIONS.find((option) => option.value === playoffTieBreaker)?.label || "Tiempo extra / penales";
+  const playoffFinalTieBreakerLabel = PLAYOFF_TIE_BREAKER_OPTIONS.find((option) => option.value === playoffFinalTieBreaker)?.label || "Tiempo extra / penales";
   const [rulesNotice, setRulesNotice] = useState("");
 
   return (
@@ -4623,6 +4693,20 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
           <label>Partidos minimos por jugador
             <input name="minimumPlayoffAppearances" type="number" min="0" max="64" defaultValue={minimumPlayoffAppearances} />
           </label>
+          <label>Criterio empate liguilla
+            <select name="playoffTieBreaker" defaultValue={playoffTieBreaker}>
+              {PLAYOFF_TIE_BREAKER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>Criterio empate final
+            <select name="playoffFinalTieBreaker" defaultValue={playoffFinalTieBreaker}>
+              {PLAYOFF_TIE_BREAKER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
           <label>Notas del reglamento
             <textarea name="notes" defaultValue={rules.notes || ""} placeholder="Ej. Criterios de sancion, defaults, bajas o acuerdos de asamblea." />
           </label>
@@ -4634,6 +4718,8 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
           <span>Disciplina: {(rules.disciplineScope || "competition") === "league" ? "amarillas compartidas en toda la liga" : "amarillas separadas por categoria"}.</span>
           <span>Liguilla: {playoffQualifiers || 0} clasificado(s){playoffPhaseLabel ? ` | ${playoffPhaseLabel}` : ""}.</span>
           <span>Jugadores: {minimumPlayoffAppearances || 0} partido(s) minimo para poder disputar liguilla.</span>
+          <span>Empate liguilla: {playoffTieBreakerLabel}.</span>
+          <span>Empate final: {playoffFinalTieBreakerLabel}.</span>
         </div>
         <button className="primary" type="submit">Guardar reglas</button>
       </form>
@@ -5305,7 +5391,7 @@ function ManagementBoard({
     () => competitionMatches
       .filter((match) => (match.stage || "regular") === "playoff")
       .sort((a, b) => (
-        String(a.playoffRound || "").localeCompare(String(b.playoffRound || "")) ||
+        getAdminPlayoffPhaseOrder(a.playoffRound) - getAdminPlayoffPhaseOrder(b.playoffRound) ||
         String(a.playoffLeg || "").localeCompare(String(b.playoffLeg || "")) ||
         String(a.date).localeCompare(String(b.date)) ||
         String(a.time).localeCompare(String(b.time))
@@ -5887,13 +5973,14 @@ function ManagementBoard({
                 <button
                   className="admin-round-delete"
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     if (!selectedCompetition?.id) {
                       window.alert("Selecciona una categoria especifica para eliminar toda su liguilla.");
                       return;
                     }
                     if (!window.confirm(`¿Eliminar toda la liguilla de ${selectedCompetition.name || "este torneo"}? Esta accion borrara todos los partidos de fase final de esta categoria.`)) return;
-                    onDeletePlayoffMatches({ competitionId: selectedCompetition.id });
+                    const result = await onDeletePlayoffMatches({ competitionId: selectedCompetition.id });
+                    if (result === false) return;
                     setListNotice("Liguilla eliminada correctamente.");
                   }}
                 >
@@ -6032,7 +6119,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
           : (match.stage || "regular") !== "playoff" && Number(match.round) === Number(selectedRound)
       ))
       .sort((a, b) => (
-        String(a.playoffRound || "").localeCompare(String(b.playoffRound || "")) ||
+        getAdminPlayoffPhaseOrder(a.playoffRound) - getAdminPlayoffPhaseOrder(b.playoffRound) ||
         String(a.playoffLeg || "").localeCompare(String(b.playoffLeg || "")) ||
         String(a.date).localeCompare(String(b.date)) ||
         String(a.time).localeCompare(String(b.time))
@@ -6538,6 +6625,20 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
       if (extraError) return extraError;
       const penaltiesError = validateTiebreaker(penaltiesEnabled, penaltyHomeGoals, penaltyAwayGoals, "penales");
       if (penaltiesError) return penaltiesError;
+      const isSinglePlayoffMatch = (selectedMatch.stage || "regular") === "playoff" && !selectedMatch.playoffLeg;
+      if (isSinglePlayoffMatch) {
+        const projectedWinner = getPlayoffMatchWinnerTeamId({
+          ...selectedMatch,
+          status: "finished",
+          homeGoals: expectedHomeGoals,
+          awayGoals: expectedAwayGoals,
+          extraTimeHomeGoals: extraTimeEnabled ? extraTimeHomeGoals : "",
+          extraTimeAwayGoals: extraTimeEnabled ? extraTimeAwayGoals : "",
+          penaltyHomeGoals: penaltiesEnabled ? penaltyHomeGoals : "",
+          penaltyAwayGoals: penaltiesEnabled ? penaltyAwayGoals : ""
+        }, { league, competitionId: selectedMatch.competitionId });
+        if (!projectedWinner) return "En liguilla a juego unico debe quedar definido un ganador con marcador, tiempo extra o penales.";
+      }
     }
     if (isDefaultSheet) {
       const maxGoals = Math.max(expectedHomeGoals, expectedAwayGoals);
@@ -10554,7 +10655,7 @@ function getSortedVenues(league, { includeInactive = true } = {}) {
     ));
 }
 
-function VenueSelect({ league, name = "venue", defaultValue = "", value, onChange, ariaLabel, required = false, placeholder = "Cancha por definir", className }) {
+function VenueSelect({ league, name = "venue", defaultValue = "", value, onChange, ariaLabel, required = false, placeholder = "Cancha por definir", className, disabled = false }) {
   const activeVenues = getSortedVenues(league, { includeInactive: false });
   const hasDefaultVenue = defaultValue && activeVenues.some((venue) => venue.name === defaultValue);
   const valueProps = value === undefined ? { defaultValue: defaultValue || "" } : { value };
@@ -10565,6 +10666,7 @@ function VenueSelect({ league, name = "venue", defaultValue = "", value, onChang
       name={name}
       onChange={onChange}
       aria-label={ariaLabel}
+      disabled={disabled}
       required={required}
       {...valueProps}
     >
