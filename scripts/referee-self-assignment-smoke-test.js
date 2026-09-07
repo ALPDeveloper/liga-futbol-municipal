@@ -38,6 +38,7 @@ const ids = {
   away: "team-away-self-assign",
   soloMatch: "match-solo-self-assign",
   crewMatch: "match-crew-self-assign",
+  publishedMatch: "match-published-stale-session",
   central: "referee-central-self-assign",
   auxiliar: "referee-aux-self-assign",
   third: "referee-third-self-assign"
@@ -95,6 +96,21 @@ async function seedData() {
             awayTeamId: ids.away,
             status: "scheduled",
             events: []
+          },
+          {
+            id: ids.publishedMatch,
+            competitionId: ids.competition,
+            round: 1,
+            date: "2026-09-05",
+            time: "14:00",
+            venue: "Campo Publicado",
+            homeTeamId: ids.home,
+            awayTeamId: ids.away,
+            status: "finished",
+            workflowStatus: "published",
+            homeGoals: 3,
+            awayGoals: 2,
+            events: [{ type: "goal", teamId: ids.home, playerId: "", minute: 12 }]
           }
         ],
         highlights: [],
@@ -304,6 +320,25 @@ try {
   assert.equal(publicCrewMatch.homeGoals, 0);
   assert.equal(publicCrewMatch.awayGoals, 1);
   assert.equal(publicCrewMatch.liveEvents.length, 1);
+
+  await upsertMatchSessionData({
+    id: "stale-live-session-published-match",
+    leagueId: ids.league,
+    matchId: ids.publishedMatch,
+    refereeUserId: ids.central,
+    captureMode: "live",
+    status: "in_progress",
+    period: "1T",
+    clockState: { liveStarted: true, liveRunning: true, liveElapsedSeconds: 120 },
+    metadata: { homeGoals: 0, awayGoals: 0, events: [] }
+  });
+  const publicStoreWithPublishedMatch = await apiFetch("/store");
+  const publishedMatch = publicStoreWithPublishedMatch.leagues[0].matches.find((match) => match.id === ids.publishedMatch);
+  assert.equal(publishedMatch.status, "finished");
+  assert.equal(publishedMatch.workflowStatus, "published");
+  assert.equal(publishedMatch.homeGoals, 3);
+  assert.equal(publishedMatch.awayGoals, 2);
+  assert.equal(Array.isArray(publishedMatch.liveEvents), false);
 
   const thirdPortal = await apiFetch("/referee-portal/me", { token: thirdToken });
   const crewForThird = thirdPortal.pendingMatches.find((match) => match.id === ids.crewMatch);

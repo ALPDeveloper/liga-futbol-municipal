@@ -709,6 +709,17 @@ function shouldUseMatchReportForDelegate(match, report) {
   return report.status === MATCH_REPORT_STATUSES.PUBLISHED && report.id === match.currentReportId;
 }
 
+function isOfficialMatchResult(match) {
+  return (
+    ["finished", "walkover"].includes(match?.status) ||
+    [
+      MATCH_WORKFLOW_STATUSES.FINALIZED_PENDING_SYNC,
+      MATCH_WORKFLOW_STATUSES.FINALIZED,
+      MATCH_WORKFLOW_STATUSES.PUBLISHED
+    ].includes(match?.workflowStatus)
+  );
+}
+
 function getDelegateEventKey(event, index = 0) {
   return [
     event.localUuid || event.id || "",
@@ -1470,6 +1481,7 @@ async function withPublicLiveSessions(store) {
     leagues: (store.leagues || []).map((league) => ({
       ...league,
       matches: (league.matches || []).map((match) => {
+        if (isOfficialMatchResult(match)) return match;
         const activeSession = sessionByMatchId.get(match.id);
         const clockState = activeSession?.clockState && typeof activeSession.clockState === "object" ? activeSession.clockState : {};
         const liveTimer = clockState.liveTimer && typeof clockState.liveTimer === "object" ? clockState.liveTimer : {};
