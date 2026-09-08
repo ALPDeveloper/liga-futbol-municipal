@@ -34,7 +34,7 @@ function AccessTeamMark({ team, className = "" }) {
       title={label}
     >
       <span>{getTeamInitials(label)}</span>
-      {canShowLogo && <img alt="" loading="eager" src={team.logoUrl} />}
+      {canShowLogo && <img alt="" loading="lazy" src={team.logoUrl} />}
     </span>
   );
 }

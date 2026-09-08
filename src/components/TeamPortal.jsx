@@ -1811,7 +1811,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                 <>
                   <section className="delegate-player-editor-hero">
                     <span className="player-avatar team-portal-avatar">
-                      {selectedEditingPlayer.photoAuthorized && selectedEditingPlayer.photoUrl ? <img alt="" src={selectedEditingPlayer.photoUrl} /> : null}
+                      {selectedEditingPlayer.photoAuthorized && selectedEditingPlayer.photoUrl ? <img alt="" loading="lazy" src={selectedEditingPlayer.photoUrl} /> : null}
                       <span>{getPlayerPhotoInitials(selectedEditingPlayer.name)}</span>
                     </span>
                     <div>

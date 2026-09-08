@@ -17,6 +17,12 @@ export async function fetchStoreFromApi(token = "") {
   return response.json();
 }
 
+export async function fetchPublicLiveState(leagueId) {
+  const response = await fetch(`${API_BASE_URL}/public/leagues/${encodeURIComponent(leagueId)}/live-state`);
+  if (!response.ok) throw new Error(await getApiErrorMessage(response, "No se pudo cargar el estado en vivo"));
+  return response.json();
+}
+
 export async function persistStoreToApi(store, token) {
   const response = await fetch(`${API_BASE_URL}/store`, {
     method: "PUT",

@@ -8,7 +8,7 @@ import { DEFAULT_IDENTITY } from "./data/defaultIdentity.js";
 import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
 import { loadStore, saveStore } from "./lib/storage.js";
 import { clearAuth, isAuthRemembered, loadAuth, saveAuth } from "./lib/authStorage.js";
-import { fetchSessionFromApi, fetchStoreFromApi, loginWithApi, persistStoreToApi } from "./lib/api.js";
+import { fetchPublicLiveState, fetchSessionFromApi, fetchStoreFromApi, loginWithApi, persistStoreToApi } from "./lib/api.js";
 import { IntroAnimation } from "./components/IntroAnimation.jsx";
 import { PublicAccessRequestSheet } from "./components/PublicAccessRequestSheet.jsx";
 import "./styles.css";
@@ -97,6 +97,25 @@ function hasLivePublicMatches(league) {
     match.workflowStatus === "in_progress" ||
     match.liveState?.status === "in_progress"
   )));
+}
+
+function mergePublicLiveMatches(store, leagueId, liveMatches = []) {
+  const liveByMatchId = new Map((liveMatches || []).map((match) => [match.id, match]));
+  return normalizeStore({
+    ...store,
+    currentLeagueId: store.leagues?.some((item) => item.id === leagueId) ? leagueId : store.currentLeagueId,
+    leagues: (store.leagues || []).map((league) => {
+      if (league.id !== leagueId) return league;
+      return {
+        ...league,
+        matches: (league.matches || []).map((match) => (
+          liveByMatchId.has(match.id)
+            ? { ...match, ...liveByMatchId.get(match.id) }
+            : match
+        ))
+      };
+    })
+  });
 }
 
 function canAccessLeague(user, leagueId) {
@@ -1289,6 +1308,7 @@ function App() {
   const lastPublicScrollYRef = useRef(window.scrollY);
   const pendingPersistRef = useRef(null);
   const persistRunningRef = useRef(false);
+  const publicLiveRefreshRunningRef = useRef(false);
   const isAdminRoute = isAdminPath(routePath);
   const isTeamRoute = isTeamPath(routePath);
   const isRefereeRoute = isRefereePath(routePath);
@@ -1500,27 +1520,51 @@ function App() {
   }, [auth.token]);
 
   useEffect(() => {
-    if (isPrivateRoute || !league?.id || !hasLivePublicMatches(league)) return undefined;
+    const shouldRefreshLive = !isPrivateRoute && Boolean(league?.id) && hasLivePublicMatches(league);
+    if (!shouldRefreshLive) return undefined;
     let cancelled = false;
     const refreshPublicLiveStore = async () => {
+      if (publicLiveRefreshRunningRef.current) return;
+      if (document.visibilityState === "hidden") return;
+      publicLiveRefreshRunningRef.current = true;
       try {
-        const apiStore = await fetchStoreFromApi(auth.token);
+        const liveState = await fetchPublicLiveState(league.id);
         if (cancelled) return;
-        const normalized = normalizeStore({
-          ...apiStore,
-          currentLeagueId: apiStore.leagues?.some((item) => item.id === league.id) ? league.id : apiStore.currentLeagueId
+        if (!liveState.matches?.length) {
+          const apiStore = await fetchStoreFromApi(auth.token);
+          if (cancelled) return;
+          const normalizedStore = normalizeStore({
+            ...apiStore,
+            currentLeagueId: apiStore.leagues?.some((item) => item.id === league.id) ? league.id : apiStore.currentLeagueId
+          });
+          setStore(normalizedStore);
+          saveStore(normalizedStore);
+          setApiStatus("connected");
+          return;
+        }
+        setStore((currentStore) => {
+          const normalized = mergePublicLiveMatches(currentStore, league.id, liveState.matches);
+          saveStore(normalized);
+          return normalized;
         });
-        setStore(normalized);
-        saveStore(normalized);
         setApiStatus("connected");
       } catch {
         if (!cancelled) setApiStatus("offline");
+      } finally {
+        publicLiveRefreshRunningRef.current = false;
       }
     };
+    refreshPublicLiveStore();
     const intervalId = window.setInterval(refreshPublicLiveStore, 2500);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refreshPublicLiveStore();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      publicLiveRefreshRunningRef.current = false;
     };
   }, [auth.token, isPrivateRoute, league?.id, league?.matches]);
 

@@ -1525,6 +1525,66 @@ async function withPublicLiveSessions(store) {
   return liveStore;
 }
 
+function buildPublicLiveMatchSnapshot(league, match, activeSession) {
+  if (!league || !match || !activeSession || isOfficialMatchResult(match)) return null;
+  const clockState = activeSession.clockState && typeof activeSession.clockState === "object" ? activeSession.clockState : {};
+  const liveTimer = clockState.liveTimer && typeof clockState.liveTimer === "object" ? clockState.liveTimer : {};
+  const timerStatus = liveTimer.timerStatus || clockState.timerStatus || "";
+  const hasLiveClock = Boolean(clockState.liveStarted && !["finished", "not_started"].includes(timerStatus));
+  const isLive = Boolean(
+    activeSession.status === "in_progress" ||
+    (match.workflowStatus || match.status) === MATCH_WORKFLOW_STATUSES.IN_PROGRESS ||
+    hasLiveClock
+  );
+  if (!isLive) return null;
+
+  const metadata = activeSession.metadata && typeof activeSession.metadata === "object" ? activeSession.metadata : {};
+  const liveEvents = Array.isArray(metadata.events) ? metadata.events : [];
+  const score = getSessionScore(activeSession, match);
+  return {
+    id: match.id,
+    status: "in_progress",
+    workflowStatus: MATCH_WORKFLOW_STATUSES.IN_PROGRESS,
+    publicStatus: match.status,
+    homeGoals: score.homeGoals ?? 0,
+    awayGoals: score.awayGoals ?? 0,
+    liveEvents,
+    liveState: {
+      sessionId: activeSession.id,
+      status: activeSession.status,
+      captureMode: activeSession.captureMode,
+      period: activeSession.period || "",
+      clockState,
+      score,
+      eventCount: liveEvents.length,
+      updatedAt: activeSession.updatedAt || ""
+    }
+  };
+}
+
+async function buildPublicLeagueLiveState(leagueId) {
+  const store = await getStoreData();
+  const league = (store.leagues || []).find((item) => item.id === leagueId);
+  if (!league || league.status === "deleted" || (league.publicVisibility || "visible") === "hidden") {
+    return { leagueId, matches: [], serverTimestamp: new Date().toISOString() };
+  }
+
+  const sessionByMatchId = new Map();
+  for (const session of await listMatchSessionsForLeagueData(league.id)) {
+    if (!session || session.status === "cancelled") continue;
+    const current = sessionByMatchId.get(session.matchId);
+    if (!current || String(session.updatedAt || "").localeCompare(String(current.updatedAt || "")) > 0) {
+      sessionByMatchId.set(session.matchId, session);
+    }
+  }
+
+  const matches = (league.matches || [])
+    .map((match) => buildPublicLiveMatchSnapshot(league, match, sessionByMatchId.get(match.id)))
+    .filter(Boolean);
+
+  return { leagueId: league.id, matches, serverTimestamp: new Date().toISOString() };
+}
+
 async function buildPublicStorePayload(store) {
   return scopeStoreForUser(await withPublicLiveSessions(store), null);
 }
@@ -2228,6 +2288,11 @@ app.get("/api/store", async (request, response) => {
   }
   response.setHeader("Cache-Control", "no-store");
   response.json(scopeStoreForUser(await withPublicLiveSessions(await getStoreData()), user));
+});
+
+app.get("/api/public/leagues/:leagueId/live-state", async (request, response) => {
+  response.setHeader("Cache-Control", "no-store");
+  response.json(await buildPublicLeagueLiveState(String(request.params.leagueId || "")));
 });
 
 app.put("/api/store", requireAuth, async (request, response) => {

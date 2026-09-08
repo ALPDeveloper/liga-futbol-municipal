@@ -285,7 +285,7 @@ function RefereeTinyIcon({ type }) {
 function RefereeTeamMark({ logoUrl = "", name, tone = "home" }) {
   return (
     <span className={`portal-team-badge ${tone}`}>
-      {logoUrl ? <img alt="" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
+      {logoUrl ? <img alt="" loading="lazy" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
     </span>
   );
 }
