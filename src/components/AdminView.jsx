@@ -3,7 +3,7 @@ import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
 import { createBackup, downloadBackup, fetchBackups, verifyBackup } from "../lib/backupApi.js";
 import { calculatePlayerAppearanceEligibility, calculateStandings, calculateSuspensionNotices, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, scopeLeagueToCompetition, upperText } from "../lib/domain.js";
-import { IMAGE_BANNER_MAX_SIZE, IMAGE_LOGO_MAX_SIZE, IMAGE_UPLOAD_ACCEPT, optimizeWebImageFile } from "../lib/imageProcessing.js";
+import { IMAGE_BANNER_MAX_SIZE, IMAGE_BANNER_TARGET_BYTES, IMAGE_LOGO_MAX_SIZE, IMAGE_LOGO_TARGET_BYTES, IMAGE_UPLOAD_ACCEPT, optimizeWebImageFile } from "../lib/imageProcessing.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
@@ -448,10 +448,6 @@ function LeagueAdmin({
   const featuredSections = ["capture", "lists", "sheet", "delegates"]
     .map((sectionId) => visibleSections.find((section) => section.id === sectionId))
     .filter(Boolean);
-
-  useEffect(() => {
-    preloadAdminLeagueImages(league);
-  }, [league]);
 
   useEffect(() => {
     const isHome = activeSection === "home";
@@ -981,7 +977,7 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
                 const file = event.currentTarget.files?.[0];
                 if (!file) return;
                 try {
-                  setLogoPreview(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE }));
+                  setLogoPreview(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE, targetBytes: IMAGE_LOGO_TARGET_BYTES }));
                 } catch (error) {
                   setIdentityNotice(error.message || "No se pudo optimizar el logo.");
                   event.currentTarget.value = "";
@@ -9597,8 +9593,10 @@ function SuperAdminSettingsPanel({ onResetDemo }) {
 
 async function resolveImageUpload(file, { authToken, leagueId, scope } = {}) {
   if (!file) return "";
-  const maxSize = scope === "sponsors" ? IMAGE_BANNER_MAX_SIZE : IMAGE_LOGO_MAX_SIZE;
-  const dataUrl = await optimizeWebImageFile(file, { maxSize });
+  const isLargeMedia = scope === "sponsors" || scope === "league-media";
+  const maxSize = isLargeMedia ? IMAGE_BANNER_MAX_SIZE : IMAGE_LOGO_MAX_SIZE;
+  const targetBytes = isLargeMedia ? IMAGE_BANNER_TARGET_BYTES : IMAGE_LOGO_TARGET_BYTES;
+  const dataUrl = await optimizeWebImageFile(file, { maxSize, targetBytes });
   return resolveImageDataUrlUpload(dataUrl, { authToken, leagueId, scope });
 }
 
@@ -9634,7 +9632,7 @@ function TeamLogoUploader({ existingLogoUrl = "", teamName = "" }) {
     if (!file) return;
 
     try {
-      setLogoDataUrl(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE }));
+      setLogoDataUrl(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE, targetBytes: IMAGE_LOGO_TARGET_BYTES }));
       setRemoved(false);
     } catch (uploadError) {
       event.currentTarget.value = "";
@@ -10685,25 +10683,4 @@ function PlayerPositionSelect({ name, defaultValue = "Delantero", ariaLabel }) {
       {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
     </select>
   );
-}
-
-function preloadAdminImage(src) {
-  if (!src || typeof window === "undefined") return;
-  const image = new window.Image();
-  image.decoding = "async";
-  image.src = src;
-}
-
-function preloadAdminLeagueImages(league) {
-  const urls = new Set([
-    league?.identity?.logoUrl,
-    league?.logoUrl,
-    ...(league?.teams || []).map((team) => team.logoUrl),
-    ...(league?.players || [])
-      .filter((player) => player.photoAuthorized === true)
-      .map((player) => player.photoUrl),
-    ...(league?.sponsors || []).map((sponsor) => sponsor.imageUrl),
-    ...(league?.media || []).map((item) => item.imageUrl)
-  ].filter(Boolean));
-  urls.forEach(preloadAdminImage);
 }

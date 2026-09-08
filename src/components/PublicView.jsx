@@ -272,10 +272,6 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const [, setPublicLiveTick] = useState(0);
 
   useEffect(() => {
-    preloadLeagueImages(league);
-  }, [league]);
-
-  useEffect(() => {
     if (!(league?.matches || []).some(isPublicMatchLive)) return undefined;
     const intervalId = window.setInterval(() => setPublicLiveTick((value) => value + 1), 1000);
     return () => window.clearInterval(intervalId);
@@ -5624,27 +5620,6 @@ function PlayerAvatar({ player, className = "" }) {
   );
 }
 
-function preloadImage(src) {
-  if (!src || typeof window === "undefined") return;
-  const image = new window.Image();
-  image.decoding = "async";
-  image.src = src;
-}
-
-function preloadLeagueImages(league) {
-  const urls = new Set([
-    league?.identity?.logoUrl,
-    league?.logoUrl,
-    ...(league?.teams || []).map((team) => team.logoUrl),
-    ...(league?.players || [])
-      .filter((player) => player.photoAuthorized === true)
-      .map((player) => player.photoUrl),
-    ...(league?.sponsors || []).map((sponsor) => sponsor.imageUrl),
-    ...(league?.media || []).map((item) => item.imageUrl)
-  ].filter(Boolean));
-  urls.forEach(preloadImage);
-}
-
 function LoadableImage({ alt = "", className = "", loading = "eager", src }) {
   const [isLoaded, setIsLoaded] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -5652,7 +5627,6 @@ function LoadableImage({ alt = "", className = "", loading = "eager", src }) {
   useEffect(() => {
     setIsLoaded(true);
     setHasError(false);
-    preloadImage(src);
   }, [src]);
 
   if (!src || hasError) return null;
