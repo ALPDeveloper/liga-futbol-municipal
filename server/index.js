@@ -1744,7 +1744,7 @@ app.post("/api/uploads/images", requireAuth, uploadLimiter, async (request, resp
     return response.status(403).json({ error: "Los delegados solo pueden subir fotos de jugadores o escudo de su equipo." });
   }
 
-  const url = await uploadImageDataUrl({
+  const upload = await uploadImageDataUrl({
     dataUrl: request.body.dataUrl,
     leagueId,
     scope: request.body.scope,
@@ -1756,12 +1756,13 @@ app.post("/api/uploads/images", requireAuth, uploadLimiter, async (request, resp
     leagueId,
     action: "image_upload",
     entityType: "upload",
-    detail: `Subio imagen ${request.body.scope || "general"}`
+    detail: `Subio imagen ${request.body.scope || "general"} (${Math.round((upload.sizeBytes || 0) / 1000)} KB)`
   });
 
   response.status(201).json({
     provider: runtimeConfig.imageStorageProvider,
-    url
+    sizeBytes: upload.sizeBytes,
+    url: upload.url
   });
 });
 

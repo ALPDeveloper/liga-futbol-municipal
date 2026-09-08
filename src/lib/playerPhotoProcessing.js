@@ -1,4 +1,5 @@
-export const PLAYER_PHOTO_OUTPUT_SIZE = 800;
+export const PLAYER_PHOTO_OUTPUT_SIZE = 640;
+export const PLAYER_PHOTO_TARGET_BYTES = 180_000;
 export const PLAYER_PHOTO_QUALITY = 0.78;
 export const PLAYER_PHOTO_MAX_ORIGINAL_BYTES = 15 * 1024 * 1024;
 export const PLAYER_PHOTO_ACCEPT = "image/png,image/jpeg,image/webp";
@@ -54,7 +55,13 @@ export async function optimizePlayerPhoto({ imageUrl, crop, cropSize = 280 }) {
     drawHeight
   );
 
-  return canvasToDataUrl(canvas);
+  let nextQuality = PLAYER_PHOTO_QUALITY;
+  let dataUrl = await canvasToDataUrl(canvas, nextQuality);
+  while (estimateDataUrlBytes(dataUrl) > PLAYER_PHOTO_TARGET_BYTES && nextQuality > 0.58) {
+    nextQuality -= 0.08;
+    dataUrl = await canvasToDataUrl(canvas, nextQuality);
+  }
+  return dataUrl;
 }
 
 function loadImage(src) {
@@ -66,10 +73,10 @@ function loadImage(src) {
   });
 }
 
-function canvasToDataUrl(canvas) {
+function canvasToDataUrl(canvas, quality = PLAYER_PHOTO_QUALITY) {
   return new Promise((resolve, reject) => {
     if (!canvas.toBlob) {
-      resolve(canvas.toDataURL("image/webp", PLAYER_PHOTO_QUALITY));
+      resolve(canvas.toDataURL("image/webp", quality));
       return;
     }
 
@@ -85,9 +92,14 @@ function canvasToDataUrl(canvas) {
         reader.readAsDataURL(blob);
       },
       "image/webp",
-      PLAYER_PHOTO_QUALITY
+      quality
     );
   });
+}
+
+function estimateDataUrlBytes(dataUrl) {
+  const base64 = String(dataUrl || "").split(",")[1] || "";
+  return Math.ceil((base64.length * 3) / 4);
 }
 
 function clamp(value, min, max) {
