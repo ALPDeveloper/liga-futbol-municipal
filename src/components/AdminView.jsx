@@ -6443,7 +6443,9 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   }
 
   function saveEventDraft(draftOverride = null) {
-    const draftToSave = draftOverride || eventDraft;
+    const draftToSave = draftOverride && typeof draftOverride === "object" && "type" in draftOverride
+      ? draftOverride
+      : eventDraft;
     if (!draftToSave) return;
     if (draftToSave.type === "injury_note" || draftToSave.type === "other_note") {
       const team = getTeam(league, draftToSave.teamId);
@@ -6903,7 +6905,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
 
         <div className="admin-sheet-event-composer-actions">
           <button type="button" onClick={() => setEventDraft(null)}>Cancelar</button>
-          <button className="primary" type="button" onClick={saveEventDraft}>Guardar evento</button>
+          <button className="primary" type="button" onClick={() => saveEventDraft()}>Guardar evento</button>
         </div>
       </section>
     );
