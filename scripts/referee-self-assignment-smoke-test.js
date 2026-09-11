@@ -264,6 +264,12 @@ try {
   assert.equal(publicCrewMatch.status, "in_progress");
   assert.equal(publicCrewMatch.homeGoals, 1);
   assert.equal(publicCrewMatch.liveEvents.length, 1);
+  let publicLiveState = await apiFetch(`/public/leagues/${ids.league}/live-state`);
+  let publicLiveCrewMatch = publicLiveState.matches.find((match) => match.id === ids.crewMatch);
+  assert.equal(publicLiveState.matches.length, 1);
+  assert.equal(publicLiveCrewMatch.homeGoals, 1);
+  assert.equal(publicLiveCrewMatch.awayGoals, 0);
+  assert.equal(publicLiveCrewMatch.liveEvents.length, 1);
 
   await apiFetch(`/referee-portal/matches/${ids.crewMatch}/sync`, {
     token: auxiliarToken,
@@ -292,6 +298,11 @@ try {
   assert.equal(publicCrewMatch.homeGoals, 1);
   assert.equal(publicCrewMatch.awayGoals, 1);
   assert.equal(publicCrewMatch.liveEvents.length, 2);
+  publicLiveState = await apiFetch(`/public/leagues/${ids.league}/live-state`);
+  publicLiveCrewMatch = publicLiveState.matches.find((match) => match.id === ids.crewMatch);
+  assert.equal(publicLiveCrewMatch.homeGoals, 1);
+  assert.equal(publicLiveCrewMatch.awayGoals, 1);
+  assert.equal(publicLiveCrewMatch.liveEvents.length, 2);
 
   await apiFetch(`/referee-portal/matches/${ids.crewMatch}/sync`, {
     token: centralToken,
@@ -320,6 +331,11 @@ try {
   assert.equal(publicCrewMatch.homeGoals, 0);
   assert.equal(publicCrewMatch.awayGoals, 1);
   assert.equal(publicCrewMatch.liveEvents.length, 1);
+  publicLiveState = await apiFetch(`/public/leagues/${ids.league}/live-state`);
+  publicLiveCrewMatch = publicLiveState.matches.find((match) => match.id === ids.crewMatch);
+  assert.equal(publicLiveCrewMatch.homeGoals, 0);
+  assert.equal(publicLiveCrewMatch.awayGoals, 1);
+  assert.equal(publicLiveCrewMatch.liveEvents.length, 1);
 
   await upsertMatchSessionData({
     id: "stale-live-session-published-match",
@@ -339,6 +355,8 @@ try {
   assert.equal(publishedMatch.homeGoals, 3);
   assert.equal(publishedMatch.awayGoals, 2);
   assert.equal(Array.isArray(publishedMatch.liveEvents), false);
+  publicLiveState = await apiFetch(`/public/leagues/${ids.league}/live-state`);
+  assert.equal(publicLiveState.matches.some((match) => match.id === ids.publishedMatch), false);
 
   const thirdPortal = await apiFetch("/referee-portal/me", { token: thirdToken });
   const crewForThird = thirdPortal.pendingMatches.find((match) => match.id === ids.crewMatch);

@@ -867,6 +867,9 @@ function LeagueAdmin({
   const moduleSiblingSections = activeSectionMeta
     ? (activeSectionWorkspace?.sections || visibleSections)
     : [];
+  const featuredSections = ["capture", "lists", "sheet", "delegates"]
+    .map((sectionId) => visibleSections.find((section) => section.id === sectionId))
+    .filter(Boolean);
   useEffect(() => {
     const isHome = activeSection === "home";
     const isKnownModule = visibleSections.some((section) => section.id === activeSection);
