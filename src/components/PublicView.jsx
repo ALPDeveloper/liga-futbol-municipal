@@ -4,6 +4,7 @@ import stadiumHero from "../../assets/public-home-stadium.jpg";
 import ligatecLogo from "../../assets/ligatec-logo.png";
 import {
   calculatePlayerStats,
+  calculatePlayerAppearanceEligibility,
   calculateStandings,
   calculateSuspensionNotices,
   calculateYellowCardDiscipline,
@@ -270,10 +271,6 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     typeof window === "undefined" ? "tabla" : getStatsPanelFromHash(window.location.hash)
   ));
   const [, setPublicLiveTick] = useState(0);
-
-  useEffect(() => {
-    preloadLeagueImages(league);
-  }, [league]);
 
   useEffect(() => {
     if (!(league?.matches || []).some(isPublicMatchLive)) return undefined;
@@ -1278,7 +1275,7 @@ function PublicMoreHub({
           <small>{getSeasonValue(activeCompetition, league)}</small>
         </div>
         <span className={`more-hero-logo${leagueLogoUrl ? " has-logo" : ""}`} aria-hidden="true">
-          {leagueLogoUrl ? <img alt="" src={leagueLogoUrl} loading="lazy" /> : getTeamInitials(league.name)}
+          {leagueLogoUrl ? <img alt="" decoding="async" loading="lazy" src={leagueLogoUrl} /> : getTeamInitials(league.name)}
         </span>
         <div className="more-hero-metrics">
           <span><strong>{competitionLeague.teams.length}</strong><small>Equipos</small></span>
@@ -4672,7 +4669,7 @@ function HomeFeaturedMatch({ championHighlight = null, competitionName, currentR
       <article className="home-featured-match is-champion" style={{ "--home-photo": `url(${heroImage})` }}>
         <header className={`home-featured-identity${leagueLogoUrl ? " has-league-logo" : ""}`}>
           <span className={`home-league-mark${leagueLogoUrl ? " has-logo" : ""}`} aria-hidden="true">
-            {leagueLogoUrl ? <img alt="" src={leagueLogoUrl} loading="lazy" /> : getTeamInitials(league.name)}
+            {leagueLogoUrl ? <img alt="" decoding="async" loading="lazy" src={leagueLogoUrl} /> : getTeamInitials(league.name)}
           </span>
           <div>
             <small>{league.name}</small>
@@ -4737,7 +4734,7 @@ function HomeFeaturedMatch({ championHighlight = null, competitionName, currentR
     <article className="home-featured-match" style={{ "--home-photo": `url(${heroImage})` }}>
       <header className={`home-featured-identity${leagueLogoUrl ? " has-league-logo" : ""}`}>
         <span className={`home-league-mark${leagueLogoUrl ? " has-logo" : ""}`} aria-hidden="true">
-          {leagueLogoUrl ? <img alt="" src={leagueLogoUrl} loading="lazy" /> : getTeamInitials(league.name)}
+          {leagueLogoUrl ? <img alt="" decoding="async" loading="lazy" src={leagueLogoUrl} /> : getTeamInitials(league.name)}
         </span>
         <div>
           <small>{league.name}</small>
@@ -5075,6 +5072,7 @@ function TeamRosterScreen({ league, activeLeague, standings, stats, team, onBack
   const groupedPlayers = groupPlayersByPosition(players);
   const standing = getTeamStandingSummary(standings, team);
   const statsByPlayer = new Map((stats || []).map((row) => [row.player.id, row]));
+  const eligibilityByPlayerId = calculatePlayerAppearanceEligibility(activeLeague);
   const staff = [
     team.coach ? { name: team.coach, role: "Entrenador" } : null,
     team.assistantCoach ? { name: team.assistantCoach, role: "Auxiliar" } : null
@@ -5106,6 +5104,7 @@ function TeamRosterScreen({ league, activeLeague, standings, stats, team, onBack
               const playerRow = statsByPlayer.get(player.id) || {};
               const number = getPlayerNumberForTeam(league, player.id, team.id) || player.number || "-";
               const affiliation = getPlayerAffiliationForTeam(league, player.id, team.id);
+              const playoffEligibility = eligibilityByPlayerId.get(player.id);
               return (
                 <button className="public-team-player-row" key={player.id} type="button" onClick={() => onSelectPlayer(player.id, team.id)}>
                   <PlayerAvatar player={player} className="public-team-player-avatar" />
@@ -5116,6 +5115,7 @@ function TeamRosterScreen({ league, activeLeague, standings, stats, team, onBack
                       {normalizePositionLabel(player.position)}
                       {affiliation ? ` · Afiliado de ${getTeam(league, player.teamId)?.name || "origen"}` : ""}
                     </small>
+                    <PublicPlayoffEligibilityBadge eligibility={playoffEligibility} />
                   </span>
                   <span className="public-team-player-stats">
                     <strong>{playerRow.goals || 0}</strong>
@@ -5303,10 +5303,61 @@ function SoccerBallMetricIcon() {
   );
 }
 
+function getPublicPlayoffEligibilityCopy(eligibility) {
+  if (!eligibility?.applies) {
+    return {
+      className: "neutral",
+      label: "Sin regla minima",
+      detail: `${eligibility?.recognizedAppearances || 0} PJ oficial(es) registrados`
+    };
+  }
+  if (eligibility.eligible) {
+    return {
+      className: "eligible",
+      label: "Puede jugar finales",
+      detail: `${eligibility.recognizedAppearances || 0}/${eligibility.required || 0} PJ oficiales`
+    };
+  }
+  return {
+    className: "ineligible",
+    label: "No puede jugar finales",
+    detail: `Faltan ${eligibility.remaining || 0} PJ | ${eligibility.recognizedAppearances || 0}/${eligibility.required || 0}`
+  };
+}
+
+function PublicPlayoffEligibilityBadge({ eligibility }) {
+  const copy = getPublicPlayoffEligibilityCopy(eligibility);
+  return (
+    <span className={`public-playoff-eligibility-badge ${copy.className}`}>
+      <b>{copy.label}</b>
+      <small>{copy.detail}</small>
+    </span>
+  );
+}
+
+function PublicPlayoffEligibilityCard({ eligibility }) {
+  const copy = getPublicPlayoffEligibilityCopy(eligibility);
+  const percentage = Math.max(0, Math.min(100, eligibility?.percentage ?? 100));
+  return (
+    <article className={`public-playoff-eligibility-card ${copy.className}`}>
+      <div>
+        <span>Finales</span>
+        <strong>{copy.label}</strong>
+        <small>{copy.detail}</small>
+      </div>
+      <b>{eligibility?.recognizedAppearances || 0}/{eligibility?.required || 0}</b>
+      <span className="public-playoff-eligibility-track" aria-hidden="true">
+        <i style={{ width: `${percentage}%` }} />
+      </span>
+    </article>
+  );
+}
+
 function PlayerPublicCard({ league, seasonLeague = league, player, stats, onSelectTeam }) {
   if (!player) return <p className="empty empty-polished">Selecciona un jugador desde el buscador, goleadores o perfil de equipo para abrir su ficha deportiva.</p>;
 
   const row = stats.find((item) => item.player.id === player.id) || { goals: 0, yellowCards: 0, redCards: 0 };
+  const playoffEligibility = calculatePlayerAppearanceEligibility(league).get(player.id);
   const seasonBreakdown = getPlayerSeasonBreakdown(seasonLeague, player.id);
   const showAffiliationBreakdown = seasonBreakdown.hasAffiliation && seasonBreakdown.rows.length > 1;
   const displayGoals = showAffiliationBreakdown ? seasonBreakdown.totals.goals : row.goals || 0;
@@ -5327,7 +5378,7 @@ function PlayerPublicCard({ league, seasonLeague = league, player, stats, onSele
   const discipline = getPlayerDisciplineState(league, row);
   const playerBadges = getPlayerBadges({ player, row, teamRanking, discipline });
   const age = getPlayerAge(player.birthDate);
-  const playedMatches = teamMatches.filter((match) => match.status === "finished" || match.status === "walkover").length;
+  const playedMatches = playoffEligibility?.recognizedAppearances ?? 0;
   const playerTeamId = activePlayerTeam?.id || player.teamId;
   const lastGoalMinute = lastGoal?.event?.minute ? `${lastGoal.event.minute}'` : "";
 
@@ -5354,7 +5405,7 @@ function PlayerPublicCard({ league, seasonLeague = league, player, stats, onSele
 
       <div className="player-public-stats">
         <span className="metric-goals"><SoccerBallMetricIcon /><small>Goles</small><strong>{displayGoals}</strong></span>
-        <span className="metric-pj"><small>PJ</small><strong>{playedMatches}</strong></span>
+        <span className="metric-pj"><small>PJ oficiales</small><strong>{playedMatches}</strong></span>
         <span className="metric-yellow"><small>Amarillas</small><strong>{displayYellowCards}</strong></span>
         <span className="metric-red"><small>Rojas</small><strong>{row.redCards || 0}</strong></span>
         {"assists" in row && <span className="metric-assists"><small>Asistencias</small><strong>{row.assists || 0}</strong></span>}
@@ -5393,10 +5444,16 @@ function PlayerPublicCard({ league, seasonLeague = league, player, stats, onSele
           <strong>{player.category || league.season || "Categoria libre"}</strong>
         </span>
         <span>
+          <small>Finales</small>
+          <strong>{getPublicPlayoffEligibilityCopy(playoffEligibility).label}</strong>
+        </span>
+        <span>
           <small>Edad</small>
           <strong>{age ? `${age} anos` : "No registrada"}</strong>
         </span>
       </div>
+
+      <PublicPlayoffEligibilityCard eligibility={playoffEligibility} />
 
       <div className="player-public-matches">
         <article className={`player-discipline-card ${discipline.tone}`}>
@@ -5624,35 +5681,13 @@ function PlayerAvatar({ player, className = "" }) {
   );
 }
 
-function preloadImage(src) {
-  if (!src || typeof window === "undefined") return;
-  const image = new window.Image();
-  image.decoding = "async";
-  image.src = src;
-}
-
-function preloadLeagueImages(league) {
-  const urls = new Set([
-    league?.identity?.logoUrl,
-    league?.logoUrl,
-    ...(league?.teams || []).map((team) => team.logoUrl),
-    ...(league?.players || [])
-      .filter((player) => player.photoAuthorized === true)
-      .map((player) => player.photoUrl),
-    ...(league?.sponsors || []).map((sponsor) => sponsor.imageUrl),
-    ...(league?.media || []).map((item) => item.imageUrl)
-  ].filter(Boolean));
-  urls.forEach(preloadImage);
-}
-
-function LoadableImage({ alt = "", className = "", loading = "eager", src }) {
+function LoadableImage({ alt = "", className = "", loading = "lazy", src }) {
   const [isLoaded, setIsLoaded] = useState(true);
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     setIsLoaded(true);
     setHasError(false);
-    preloadImage(src);
   }, [src]);
 
   if (!src || hasError) return null;
@@ -7256,7 +7291,7 @@ function SponsorBanners({ league, fallback }) {
         const image = (
           <>
             <div className="sponsor-image-frame">
-              <img alt={sponsor.name} src={sponsor.imageUrl} />
+              <img alt={sponsor.name} decoding="async" loading="lazy" src={sponsor.imageUrl} />
             </div>
             <span>{sponsor.name}</span>
           </>

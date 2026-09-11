@@ -476,7 +476,7 @@ function getScheduleChangeText(match) {
 function TeamBadge({ logoUrl, name, tone = "home" }) {
   return (
     <span className={`portal-team-badge ${tone} ${logoUrl ? "has-image" : ""}`}>
-      {logoUrl ? <img alt="" loading="lazy" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
+      {logoUrl ? <img alt="" decoding="async" loading="lazy" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
     </span>
   );
 }
@@ -579,7 +579,8 @@ function getPlayerPositionOptionValue(position) {
 
 function getDelegatePlayerStatus(player) {
   if (player?.suspension) return { className: "blocked", label: "Suspendido" };
-  if (player?.playoffEligibility?.applies && !player.playoffEligibility?.eligible) return { className: "warning", label: "Liguilla" };
+  if (player?.playoffEligibility?.applies && !player.playoffEligibility?.eligible) return { className: "warning", label: "No liguilla" };
+  if (player?.playoffEligibility?.applies && player.playoffEligibility?.eligible) return { className: "available", label: "Liguilla OK" };
   return { className: "available", label: "Disponible" };
 }
 
@@ -637,6 +638,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const [teamLogoResetKey, setTeamLogoResetKey] = useState(0);
   const [activeView, setActiveView] = useState("home");
   const [delegateMatchTab, setDelegateMatchTab] = useState("upcoming");
+  const [lineupPlayerQuery, setLineupPlayerQuery] = useState("");
+  const [lineupPlayerLimit, setLineupPlayerLimit] = useState(18);
   const [actaReturnView, setActaReturnView] = useState("home");
   const [selectedMatchId, setSelectedMatchId] = useState("");
   const [signingMatchId, setSigningMatchId] = useState("");
@@ -1034,12 +1037,23 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     ? rosterDrafts[activeMatch.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" }
     : { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" };
   const activeAvailablePlayers = activeMatch
-    ? eligiblePlayers.filter((player) => {
-        const blockedBySuspension = Boolean(player.suspension);
-        const blockedByPlayoff = activeMatch.isPlayoff && player.playoffEligibility?.applies && !player.playoffEligibility?.eligible;
-        return !blockedBySuspension && !blockedByPlayoff;
-      })
+    ? eligiblePlayers
     : [];
+  const activeLineupPlayers = activeAvailablePlayers.filter((player) => {
+    const tokens = getSearchTokens(lineupPlayerQuery);
+    if (!tokens.length) return true;
+    return searchTokensMatch([
+      player.name,
+      player.number,
+      player.position,
+      getPlayerPositionOptionValue(player.position),
+      player.originTeamName,
+      player.isAffiliate ? "afiliado" : "propio",
+      player.playoffEligibility?.eligible === false ? "liguilla pendiente" : "liguilla ok",
+      player.suspension ? "suspendido sancion" : ""
+    ], tokens);
+  });
+  const visibleActiveLineupPlayers = activeLineupPlayers.slice(0, lineupPlayerLimit);
   const selectedEditingPlayerCanEditFull = Boolean(selectedEditingPlayer && !selectedEditingPlayer.isAffiliate && canManageRoster);
   const navItems = [
     { id: "home", label: "Inicio", icon: "home" },
@@ -1071,6 +1085,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const openMatchWorkflow = (match) => {
     if (!match) return;
     setSelectedMatchId(match.id);
+    setLineupPlayerQuery("");
+    setLineupPlayerLimit(18);
     if (hasDelegateActaAvailable(match)) {
       setActaReturnView(activeView === "matches" ? "matches" : "home");
       setActiveView("acta");
@@ -1086,6 +1102,8 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const openDelegateNextAction = () => {
     if (nextAction.target === "lineup" && nextLineupMatch) {
       setSelectedMatchId(nextLineupMatch.id);
+      setLineupPlayerQuery("");
+      setLineupPlayerLimit(18);
       setActiveView("lineup");
       return;
     }
@@ -1523,7 +1541,11 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                             className={selectedMatchId === match.id ? "active" : ""}
                             key={match.id}
                             type="button"
-                            onClick={() => setSelectedMatchId(match.id)}
+                            onClick={() => {
+                              setSelectedMatchId(match.id);
+                              setLineupPlayerQuery("");
+                              setLineupPlayerLimit(18);
+                            }}
                           >
                             <span>J{match.round || "-"}</span>
                             <strong>{match.opponentName || "Rival"}</strong>
@@ -1555,23 +1577,45 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                     <strong>Jugadores disponibles</strong>
                     <span>{activeDraft.playerIds?.length || 0}/{eligiblePlayers.length}</span>
                   </div>
+                  <div className="delegate-lineup-search">
+                    <div>
+                      <strong>Filtrar plantilla</strong>
+                      <span>{activeLineupPlayers.length} visible(s) · {activeDraft.playerIds?.length || 0} seleccionado(s)</span>
+                    </div>
+                    <div className="delegate-search-input-wrap">
+                      <input
+                        type="search"
+                        value={lineupPlayerQuery}
+                        onChange={(event) => {
+                          setLineupPlayerQuery(event.target.value);
+                          setLineupPlayerLimit(18);
+                        }}
+                        placeholder="Nombre, numero, posicion o aviso"
+                      />
+                      {lineupPlayerQuery && <button type="button" onClick={() => {
+                        setLineupPlayerQuery("");
+                        setLineupPlayerLimit(18);
+                      }} aria-label="Limpiar busqueda">×</button>}
+                    </div>
+                  </div>
                   <div className="team-match-player-grid delegate-player-select">
-                    {eligiblePlayers.map((player) => {
-                      const blockedBySuspension = Boolean(player.suspension);
-                      const blockedByPlayoff = activeMatch.isPlayoff && player.playoffEligibility?.applies && !player.playoffEligibility?.eligible;
-                      const disabled = blockedBySuspension || blockedByPlayoff;
-                      const checked = activeDraft.playerIds.includes(player.id) && !disabled;
+                    {visibleActiveLineupPlayers.map((player) => {
+                      const warnedBySuspension = Boolean(player.suspension);
+                      const warnedByPlayoff = activeMatch.isPlayoff && player.playoffEligibility?.applies && !player.playoffEligibility?.eligible;
+                      const hasWarning = warnedBySuspension || warnedByPlayoff;
+                      const checked = activeDraft.playerIds.includes(player.id);
                       const jerseyNumber = activeDraft.jerseyNumbers?.[player.id] ?? player.number ?? "";
+                      const playoffWarningLabel = `Aviso liguilla: ${player.playoffEligibility?.recognizedAppearances || 0}/${player.playoffEligibility?.required || 0} PJ. Faltan ${player.playoffEligibility?.remaining || 0}.`;
                       const suspensionLabel = player.suspension?.pendingReview
                         ? `Expulsado sujeto a comision: ${player.suspension.reason || "Revision disciplinaria"}`
                         : player.suspension?.indefinite
                         ? `Inhabilitado indefinido: ${player.suspension.reason || player.suspension.type || "Sancion activa"}`
                         : `Suspendido${player.suspension?.remainingMatches ? ` (${player.suspension.remainingMatches} juego(s))` : ""}${player.suspension?.returnRound ? ` | Regresa J${player.suspension.returnRound}` : ""}`;
+                      const warningLabel = warnedBySuspension ? suspensionLabel : playoffWarningLabel;
                       return (
-                        <label className={disabled ? "blocked" : ""} key={player.id}>
+                        <label className={hasWarning ? "warning" : ""} key={player.id}>
                           <input
                             checked={checked}
-                            disabled={disabled}
                             type="checkbox"
                             onChange={(event) => updateRosterDraft(activeMatch.id, (current) => {
                               const nextIds = new Set(current.playerIds || []);
@@ -1597,10 +1641,11 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                           <span>
                             <strong>{player.name}{player.isAffiliate && <em className="delegate-affiliate-pill">Afiliado</em>}</strong>
                             <small>
-                              {disabled
-                                ? suspensionLabel
+                              {hasWarning
+                                ? warningLabel
                                 : `${player.isAffiliate ? `Origen: ${player.originTeamName || "Equipo afiliado"} | ` : ""}No. #${player.number || "-"} | ${player.position || "Jugador"}`}
                             </small>
+                            <PlayoffProgress eligibility={player.playoffEligibility} />
                           </span>
                           {checked && (
                             <div className="delegate-lineup-player-tools">
@@ -1625,6 +1670,12 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                         </label>
                       );
                     })}
+                    {activeLineupPlayers.length > visibleActiveLineupPlayers.length && (
+                      <button className="delegate-lineup-more-button" type="button" onClick={() => setLineupPlayerLimit((current) => current + 18)}>
+                        Ver mas jugadores ({activeLineupPlayers.length - visibleActiveLineupPlayers.length} restantes)
+                      </button>
+                    )}
+                    {!activeLineupPlayers.length && <p className="empty">No hay jugadores con esa busqueda.</p>}
                   </div>
                   <label className="wide-field">Notas del reporte
                     <input
@@ -1647,7 +1698,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
             <div className="delegate-view-stack delegate-roster-screen">
               <section className="delegate-roster-hero">
                 <span className={`delegate-roster-crest ${context.teamLogoUrl ? "has-image" : ""}`}>
-                  {context.teamLogoUrl ? <img alt="" loading="lazy" src={context.teamLogoUrl} /> : <b>{getTeamInitials(context.teamName)}</b>}
+                  {context.teamLogoUrl ? <img alt="" decoding="async" loading="lazy" src={context.teamLogoUrl} /> : <b>{getTeamInitials(context.teamName)}</b>}
                 </span>
                 <div>
                   <span>Plantilla del equipo</span>
@@ -1727,7 +1778,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                       return (
                         <article className={isEditing ? "editing" : ""} key={player.id}>
                           <span className={`player-avatar team-portal-avatar ${player.photoAuthorized && player.photoUrl ? "has-image" : ""}`}>
-                            {player.photoAuthorized && player.photoUrl ? <img alt="" loading="lazy" src={player.photoUrl} /> : null}
+                            {player.photoAuthorized && player.photoUrl ? <img alt="" decoding="async" loading="lazy" src={player.photoUrl} /> : null}
                             <span>{getPlayerPhotoInitials(player.name)}</span>
                           </span>
                           <b className="delegate-player-number">{player.number || "-"}</b>
@@ -1811,7 +1862,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                 <>
                   <section className="delegate-player-editor-hero">
                     <span className="player-avatar team-portal-avatar">
-                      {selectedEditingPlayer.photoAuthorized && selectedEditingPlayer.photoUrl ? <img alt="" src={selectedEditingPlayer.photoUrl} /> : null}
+                      {selectedEditingPlayer.photoAuthorized && selectedEditingPlayer.photoUrl ? <img alt="" decoding="async" loading="lazy" src={selectedEditingPlayer.photoUrl} /> : null}
                       <span>{getPlayerPhotoInitials(selectedEditingPlayer.name)}</span>
                     </span>
                     <div>
@@ -1945,11 +1996,6 @@ function buildRosterDrafts(matches, eligiblePlayers) {
   const drafts = {};
   for (const match of matches || []) {
     const availablePlayerIds = eligiblePlayers
-      .filter((player) => {
-        const blockedBySuspension = Boolean(player.suspension);
-        const blockedByPlayoff = match.isPlayoff && player.playoffEligibility?.applies && !player.playoffEligibility?.eligible;
-        return !blockedBySuspension && !blockedByPlayoff;
-      })
       .map((player) => player.id);
     const participationPlayerIds = (match.participation?.players || [])
       .map((entry) => typeof entry === "string" ? entry : entry.playerId)

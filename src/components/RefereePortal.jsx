@@ -285,7 +285,7 @@ function RefereeTinyIcon({ type }) {
 function RefereeTeamMark({ logoUrl = "", name, tone = "home" }) {
   return (
     <span className={`portal-team-badge ${tone}`}>
-      {logoUrl ? <img alt="" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
+      {logoUrl ? <img alt="" decoding="async" loading="lazy" src={logoUrl} /> : <b>{getTeamInitials(name)}</b>}
     </span>
   );
 }
@@ -1269,6 +1269,53 @@ function getPlayersForEvent(match, event) {
     return eventTeamId === match.homeTeamId ? match.awayPlayers || [] : match.homePlayers || [];
   }
   return eventTeamId === match.homeTeamId ? match.homePlayers || [] : match.awayPlayers || [];
+}
+
+function getRefereePlayerRestrictionWarnings(player, match) {
+  if (!player) return [];
+  const warnings = [];
+  if (player.suspension) {
+    if (player.suspension.pendingReview) {
+      warnings.push({
+        type: "suspension",
+        label: "Roja pendiente",
+        detail: `Expulsado sujeto a comision: ${player.suspension.reason || "Revision disciplinaria"}`
+      });
+    } else if (player.suspension.indefinite) {
+      warnings.push({
+        type: "suspension",
+        label: "Inhabilitado",
+        detail: `Inhabilitado indefinido: ${player.suspension.reason || player.suspension.type || "Sancion activa"}`
+      });
+    } else {
+      warnings.push({
+        type: "suspension",
+        label: "Suspendido",
+        detail: `Suspendido${player.suspension.remainingMatches ? ` (${player.suspension.remainingMatches} juego(s))` : ""}${player.suspension.returnRound ? ` | Regresa J${player.suspension.returnRound}` : ""}`
+      });
+    }
+  }
+  const isPlayoffMatch = match?.isPlayoff || match?.stage === "playoff" || Boolean(match?.playoffRound);
+  const eligibility = player.playoffEligibility;
+  if (isPlayoffMatch && eligibility?.applies && !eligibility.eligible) {
+    warnings.push({
+      type: "playoff",
+      label: "Liguilla",
+      detail: `No cumple liguilla: ${eligibility.recognizedAppearances || 0}/${eligibility.required || 0} PJ`
+    });
+  }
+  return warnings;
+}
+
+function getRefereePlayerRestrictionNotice(player, match) {
+  return getRefereePlayerRestrictionWarnings(player, match).map((warning) => warning.detail).join(" | ");
+}
+
+function getRefereePlayerOptionLabel(player, match) {
+  const warningText = getRefereePlayerRestrictionWarnings(player, match)
+    .map((warning) => warning.label)
+    .join(" / ");
+  return warningText ? ` | AVISO: ${warningText}` : "";
 }
 
 function createEvent(match, type, teamId, minuteInfo = "") {
@@ -2575,6 +2622,8 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
     const nextAwayGoals = shouldAdjustScore && teamId === match.awayTeamId
       ? String(Math.max(0, Number(awayGoals || 0) + 1))
       : awayGoals;
+    const selectedPlayer = getPlayersForEvent(match, { type, teamId }).find((player) => player.id === playerId);
+    const restrictionNotice = getRefereePlayerRestrictionNotice(selectedPlayer, match);
     if (shouldAdjustScore) {
       if (teamId === match.homeTeamId) setHomeGoals(nextHomeGoals);
       if (teamId === match.awayTeamId) setAwayGoals(nextAwayGoals);
@@ -2592,11 +2641,12 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
       queueLiveAutoSync(nextDraft, operation);
       if (type === "red") {
         setPendingRedReasonEventId(nextEvent.id);
-        setMessage("Roja directa registrada. Completa el motivo para que el acta quede lista.");
+        setMessage(`Roja directa registrada. Completa el motivo para que el acta quede lista.${restrictionNotice ? ` Aviso: ${restrictionNotice}.` : ""}`);
       } else {
-        setMessage(createsDoubleYellow
+        const baseMessage = createsDoubleYellow
           ? "Segunda amarilla registrada: se agrego roja por doble amarilla en el mismo minuto."
-          : `${getEventLabel(type)} registrado. Guardado en este dispositivo.`);
+          : `${getEventLabel(type)} registrado. Guardado en este dispositivo.`;
+        setMessage(restrictionNotice ? `${baseMessage} Aviso: ${restrictionNotice}.` : baseMessage);
       }
       return nextEvents;
     });
@@ -3177,8 +3227,13 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
               <button key={player.id} type="button" onClick={() => confirmEventComposer(player)}>
                 <b>{player.number || "-"}</b>
                 <span>{player.name}</span>
-                {player.isCaptain && <small>Capitan</small>}
-                {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
+                <em className="referee-player-flags">
+                  {player.isCaptain && <small>Capitan</small>}
+                  {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
+                  {getRefereePlayerRestrictionWarnings(player, match).map((warning) => (
+                    <small className={`restriction ${warning.type}`} key={`${player.id}-${warning.type}`}>{warning.label}</small>
+                  ))}
+                </em>
               </button>
             ))}
           </div>
@@ -3195,8 +3250,13 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
             <button key={player.id} type="button" onClick={() => confirmEventComposer(player)}>
               <b>{player.number || "-"}</b>
               <span>{player.name}</span>
-              {player.isCaptain && <small>Capitan</small>}
-              {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
+              <em className="referee-player-flags">
+                {player.isCaptain && <small>Capitan</small>}
+                {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
+                {getRefereePlayerRestrictionWarnings(player, match).map((warning) => (
+                  <small className={`restriction ${warning.type}`} key={`${player.id}-${warning.type}`}>{warning.label}</small>
+                ))}
+              </em>
             </button>
           ))}
           {!players.length && <p>No hay jugadores que coincidan con la busqueda.</p>}
@@ -3272,18 +3332,32 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
                 >
                   <b>{player.number || "-"}</b>
                   <span>{player.name}</span>
-                  {player.isCaptain && <small>Capitan</small>}
-                  {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
+                  <em className="referee-player-flags">
+                    {player.isCaptain && <small>Capitan</small>}
+                    {player.isAffiliate && <small>Afiliado: {player.originTeamName || "origen"}</small>}
+                    {getRefereePlayerRestrictionWarnings(player, match).map((warning) => (
+                      <small className={`restriction ${warning.type}`} key={`${player.id}-${warning.type}`}>{warning.label}</small>
+                    ))}
+                  </em>
                 </button>
               ))}
             </div>
           )}
         </label>
         <label>Jugador seleccionado
-          <select value={eventItem.playerId} onChange={(event) => updateEvent(eventItem.id, "playerId", event.target.value)} aria-label="Jugador">
+          <select
+            value={eventItem.playerId}
+            onChange={(event) => {
+              updateEvent(eventItem.id, "playerId", event.target.value);
+              const selectedPlayer = visiblePlayers.find((player) => player.id === event.target.value);
+              const restrictionNotice = getRefereePlayerRestrictionNotice(selectedPlayer, match);
+              if (restrictionNotice) setMessage(`Aviso: ${restrictionNotice}. El evento se puede capturar normalmente.`);
+            }}
+            aria-label="Jugador"
+          >
             <option value="">{filteredPlayers.length ? "Selecciona jugador" : "Sin coincidencias, mostrando plantilla"}</option>
             {visiblePlayers.map((player) => (
-              <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isCaptain ? " | CAPITAN" : ""}{player.isAffiliate ? ` | AFILIADO ${player.originTeamName || ""}` : ""}</option>
+              <option key={player.id} value={player.id}>#{player.number || "-"} {player.name}{player.isCaptain ? " | CAPITAN" : ""}{player.isAffiliate ? ` | AFILIADO ${player.originTeamName || ""}` : ""}{getRefereePlayerOptionLabel(player, match)}</option>
             ))}
           </select>
         </label>

@@ -11,6 +11,14 @@ const MIME_EXTENSIONS = {
 };
 
 const DATA_URL_PATTERN = /^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=\s]+)$/i;
+const DEFAULT_IMAGE_UPLOAD_MAX_BYTES = 650_000;
+const SCOPED_IMAGE_UPLOAD_MAX_BYTES = {
+  "league-logos": 400_000,
+  "player-photos": 400_000,
+  "team-logos": 400_000,
+  "league-media": 900_000,
+  sponsors: 900_000
+};
 
 function hasValidImageSignature(buffer, mimeType) {
   if (mimeType === "image/png") {
@@ -50,7 +58,17 @@ export function getLocalUploadDir() {
   return path.resolve(ROOT_DIR, runtimeConfig.uploadDir);
 }
 
-export function parseImageDataUrl(dataUrl) {
+function getScopedUploadMaxBytes(scope) {
+  const scopedLimit = SCOPED_IMAGE_UPLOAD_MAX_BYTES[cleanSegment(scope, "general")];
+  return Math.min(runtimeConfig.imageUploadMaxBytes, scopedLimit || DEFAULT_IMAGE_UPLOAD_MAX_BYTES);
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1000)} KB`;
+}
+
+export function parseImageDataUrl(dataUrl, { maxBytes = runtimeConfig.imageUploadMaxBytes } = {}) {
   const match = DATA_URL_PATTERN.exec(String(dataUrl || "").trim());
   if (!match) throw new Error("Formato de imagen invalido.");
 
@@ -59,8 +77,8 @@ export function parseImageDataUrl(dataUrl) {
 
   const buffer = Buffer.from(match[2].replace(/\s+/g, ""), "base64");
   if (!buffer.length) throw new Error("Imagen vacia.");
-  if (buffer.length > runtimeConfig.imageUploadMaxBytes) {
-    throw new Error(`La imagen debe pesar menos de ${Math.round(runtimeConfig.imageUploadMaxBytes / 1024 / 1024)} MB.`);
+  if (buffer.length > maxBytes) {
+    throw new Error(`La imagen optimizada debe pesar menos de ${formatBytes(maxBytes)}.`);
   }
   if (!hasValidImageSignature(buffer, mimeType)) {
     throw new Error("El archivo no coincide con un formato de imagen permitido.");
@@ -69,7 +87,8 @@ export function parseImageDataUrl(dataUrl) {
   return {
     buffer,
     extension: MIME_EXTENSIONS[mimeType],
-    mimeType
+    mimeType,
+    sizeBytes: buffer.length
   };
 }
 
@@ -114,12 +133,23 @@ async function uploadToLocalStorage({ buffer, objectPath }) {
 }
 
 export async function uploadImageDataUrl({ dataUrl, leagueId, scope, user }) {
-  const image = parseImageDataUrl(dataUrl);
+  const image = parseImageDataUrl(dataUrl, { maxBytes: getScopedUploadMaxBytes(scope) });
   const objectPath = buildObjectPath({ extension: image.extension, leagueId, scope, user });
+  const uploadMeta = {
+    objectPath,
+    sizeBytes: image.sizeBytes,
+    mimeType: image.mimeType
+  };
 
   if (runtimeConfig.imageStorageProvider === "supabase") {
-    return uploadToSupabaseStorage({ ...image, objectPath });
+    return {
+      ...uploadMeta,
+      url: await uploadToSupabaseStorage({ ...image, objectPath })
+    };
   }
 
-  return uploadToLocalStorage({ ...image, objectPath });
+  return {
+    ...uploadMeta,
+    url: await uploadToLocalStorage({ ...image, objectPath })
+  };
 }

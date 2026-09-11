@@ -1,9 +1,11 @@
 export const IMAGE_UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp";
 export const IMAGE_MAX_ORIGINAL_BYTES = 15 * 1024 * 1024;
-export const IMAGE_TARGET_BYTES = 1_250_000;
-export const IMAGE_DEFAULT_MAX_SIZE = 1400;
-export const IMAGE_LOGO_MAX_SIZE = 900;
-export const IMAGE_BANNER_MAX_SIZE = 1800;
+export const IMAGE_TARGET_BYTES = 650_000;
+export const IMAGE_LOGO_TARGET_BYTES = 260_000;
+export const IMAGE_BANNER_TARGET_BYTES = 700_000;
+export const IMAGE_DEFAULT_MAX_SIZE = 1200;
+export const IMAGE_LOGO_MAX_SIZE = 640;
+export const IMAGE_BANNER_MAX_SIZE = 1400;
 export const IMAGE_WEBP_QUALITY = 0.82;
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -18,7 +20,7 @@ export function validateWebImageFile(file) {
   }
 }
 
-export async function optimizeWebImageFile(file, { maxSize = IMAGE_DEFAULT_MAX_SIZE, quality = IMAGE_WEBP_QUALITY, background = null } = {}) {
+export async function optimizeWebImageFile(file, { maxSize = IMAGE_DEFAULT_MAX_SIZE, quality = IMAGE_WEBP_QUALITY, background = null, targetBytes = IMAGE_TARGET_BYTES } = {}) {
   validateWebImageFile(file);
   const objectUrl = URL.createObjectURL(file);
 
@@ -44,7 +46,7 @@ export async function optimizeWebImageFile(file, { maxSize = IMAGE_DEFAULT_MAX_S
 
     let nextQuality = quality;
     let dataUrl = await canvasToDataUrl(canvas, "image/webp", nextQuality);
-    while (estimateDataUrlBytes(dataUrl) > IMAGE_TARGET_BYTES && nextQuality > 0.58) {
+    while (estimateDataUrlBytes(dataUrl) > targetBytes && nextQuality > 0.58) {
       nextQuality -= 0.08;
       dataUrl = await canvasToDataUrl(canvas, "image/webp", nextQuality);
     }

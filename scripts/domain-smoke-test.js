@@ -26,6 +26,7 @@ import {
   mergeDuplicatePlayer,
   generateSchedule,
   resolveMatchEventDiscipline,
+  saveMatchParticipation,
   saveMatchSheet,
   saveResult,
   updatePlayer,
@@ -1329,6 +1330,43 @@ let participationEligibility = calculatePlayerAppearanceEligibility({
   ]
 }).get("p1");
 assert.equal(participationEligibility.officialAppearances, 1);
+let affiliateParticipationEligibility = calculatePlayerAppearanceEligibility({
+  ...league,
+  teamAffiliations: [
+    ...(league.teamAffiliations || []),
+    {
+      id: "appearance-affiliation-smoke",
+      sourceTeamId: "union",
+      targetTeamId: "halcones",
+      status: "active",
+      playerNumbers: { p3: 21 }
+    }
+  ],
+  matchParticipations: [
+    {
+      id: "participation-affiliate-smoke",
+      matchId: "m1",
+      teamId: "halcones",
+      status: "submitted",
+      active: true,
+      players: [{ playerId: "p3" }]
+    }
+  ]
+}).get("p3");
+assert.equal(affiliateParticipationEligibility.officialAppearances, 1);
+const participationActionStore = saveMatchParticipation(store, league.id, {
+  matchId: "m1",
+  teamId: "halcones",
+  playerIds: ["p1", "p2"],
+  captainPlayerId: "p1",
+  jerseyNumbers: { p1: "9", p2: "5" },
+  reason: "Captura administrativa de participantes"
+});
+const participationActionLeague = getCurrentLeague(participationActionStore);
+const actionParticipation = participationActionLeague.matchParticipations.find((participation) => participation.matchId === "m1" && participation.teamId === "halcones" && participation.active);
+assert.equal(actionParticipation.status, "corrected");
+assert.equal(actionParticipation.players.length, 2);
+assert.equal(actionParticipation.players.find((player) => player.playerId === "p1").playerNumberSnapshot, "9");
 store = addAppearanceAdjustment(store, league.id, { playerId: "p1", value: 2, reason: "Correccion de asistencia" });
 league = getCurrentLeague(store);
 let appearanceEligibility = calculatePlayerAppearanceEligibility(league).get("p1");

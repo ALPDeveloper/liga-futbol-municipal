@@ -23,11 +23,12 @@ export function applySecurityHeaders(request, response, next) {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self'",
+      "script-src 'self' https://accounts.google.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      "connect-src 'self' https://accounts.google.com",
+      "frame-src https://accounts.google.com",
       "media-src 'self' https:",
       "object-src 'none'",
       "base-uri 'none'",
@@ -144,6 +145,28 @@ export function sanitizePublicStore(store, options = {}) {
       membershipNotes: "",
       plan: "",
       matchRosters: [],
+      matchParticipations: (league.matchParticipations || [])
+        .filter((participation) => participation.active !== false)
+        .map((participation) => ({
+          id: participation.id,
+          matchId: participation.matchId,
+          teamId: participation.teamId,
+          status: participation.status,
+          active: participation.active !== false,
+          players: (participation.players || [])
+            .map((entry) => ({
+              playerId: typeof entry === "string" ? entry : entry.playerId
+            }))
+            .filter((entry) => entry.playerId)
+        })),
+      appearanceAdjustments: (league.appearanceAdjustments || [])
+        .filter((adjustment) => adjustment.status !== "revoked")
+        .map((adjustment) => ({
+          id: adjustment.id,
+          playerId: adjustment.playerId,
+          value: adjustment.value,
+          status: adjustment.status
+        })),
       sponsors: (league.sponsors || [])
         .filter((sponsor) => sponsor.status === "active")
         .map((sponsor) => ({

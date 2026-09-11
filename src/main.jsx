@@ -8,7 +8,7 @@ import { DEFAULT_IDENTITY } from "./data/defaultIdentity.js";
 import { getCurrentLeague, normalizeStore } from "./lib/domain.js";
 import { loadStore, saveStore } from "./lib/storage.js";
 import { clearAuth, isAuthRemembered, loadAuth, saveAuth } from "./lib/authStorage.js";
-import { fetchSessionFromApi, fetchStoreFromApi, loginWithApi, persistStoreToApi } from "./lib/api.js";
+import { fetchSessionFromApi, fetchStoreFromApi, loginWithApi, loginWithGoogleApi, persistStoreToApi } from "./lib/api.js";
 import { IntroAnimation } from "./components/IntroAnimation.jsx";
 import { PublicAccessRequestSheet } from "./components/PublicAccessRequestSheet.jsx";
 import "./styles.css";
@@ -336,7 +336,7 @@ function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePa
         </div>
 
         <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
-          <LazyAuthPanel currentUser={currentUser} onLogin={onLogin} onLogout={onLogout} />
+          <LazyAuthPanel currentUser={currentUser} onGoogleLogin={loginWithGoogle} onLogin={onLogin} onLogout={onLogout} />
         </Suspense>
 
         {!currentUser && requestLeague && (
@@ -1605,8 +1605,7 @@ function App() {
     if (!isPrivateRoute && league?.id) saveLastPublicLeagueId(league.id);
   }, [isPrivateRoute, league?.id]);
 
-  async function login(email, password, rememberSession = true) {
-    const nextAuth = await loginWithApi(email, password);
+  async function completeLogin(nextAuth, rememberSession = true) {
     const apiStore = await fetchStoreFromApi(nextAuth.token);
     const preferredLeagueId = nextAuth.user.role === "league_admin" && nextAuth.user.leagueId
       ? nextAuth.user.leagueId
@@ -1625,6 +1624,16 @@ function App() {
     } else {
       navigateTo("/acceso");
     }
+  }
+
+  async function login(email, password, rememberSession = true) {
+    const nextAuth = await loginWithApi(email, password);
+    await completeLogin(nextAuth, rememberSession);
+  }
+
+  async function loginWithGoogle(credential, rememberSession = true) {
+    const nextAuth = await loginWithGoogleApi(credential);
+    await completeLogin(nextAuth, rememberSession);
   }
 
   async function completeDelegateActivation(nextAuth) {

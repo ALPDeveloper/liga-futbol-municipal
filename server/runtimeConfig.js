@@ -50,8 +50,16 @@ export const runtimeConfig = {
   passwordResetMaxRequests: Number(process.env.PASSWORD_RESET_MAX_REQUESTS || 5),
   activationWindowMinutes: Number(process.env.ACTIVATION_WINDOW_MINUTES || 15),
   activationMaxRequests: Number(process.env.ACTIVATION_MAX_REQUESTS || 60),
+  apiMutationWindowSeconds: Number(process.env.API_MUTATION_WINDOW_SECONDS || 60),
+  apiMutationMaxRequests: Number(process.env.API_MUTATION_MAX_REQUESTS || 240),
   uploadWindowMinutes: Number(process.env.UPLOAD_WINDOW_MINUTES || 15),
   uploadMaxRequests: Number(process.env.UPLOAD_MAX_REQUESTS || 30),
+  publicReadWindowSeconds: Number(process.env.PUBLIC_READ_WINDOW_SECONDS || 60),
+  publicReadMaxRequests: Number(process.env.PUBLIC_READ_MAX_REQUESTS || 600),
+  refereeLiveReadWindowSeconds: Number(process.env.REFEREE_LIVE_READ_WINDOW_SECONDS || 60),
+  refereeLiveReadMaxRequests: Number(process.env.REFEREE_LIVE_READ_MAX_REQUESTS || 90),
+  refereeLiveWriteWindowSeconds: Number(process.env.REFEREE_LIVE_WRITE_WINDOW_SECONDS || 60),
+  refereeLiveWriteMaxRequests: Number(process.env.REFEREE_LIVE_WRITE_MAX_REQUESTS || 120),
   delegateActivationHours: Number(process.env.DELEGATE_ACTIVATION_HOURS || 48),
   showRecoveryCodeInResponse: parseBoolean(
     process.env.SHOW_RECOVERY_CODE_IN_RESPONSE,
@@ -61,6 +69,7 @@ export const runtimeConfig = {
   seedDemoUsers: parseBoolean(process.env.SEED_DEMO_USERS, false),
   tokenSecret: process.env.AUTH_SECRET || DEFAULT_DEV_SECRET,
   tokenTtlMs: 1000 * 60 * 60 * Number(process.env.TOKEN_TTL_HOURS || 8760),
+  googleClientId: String(process.env.GOOGLE_CLIENT_ID || "").trim(),
   databaseProvider: process.env.DATABASE_PROVIDER === "postgres" ? "postgres" : "sqlite",
   databaseUrl: process.env.DATABASE_URL || "",
   imageUploadMaxBytes: Number(process.env.IMAGE_UPLOAD_MAX_BYTES || 1_800_000),
@@ -119,11 +128,35 @@ export function validateRuntimeConfig() {
   if (!Number.isFinite(runtimeConfig.activationMaxRequests) || runtimeConfig.activationMaxRequests < 10) {
     problems.push("ACTIVATION_MAX_REQUESTS debe ser al menos 10.");
   }
+  if (!Number.isFinite(runtimeConfig.apiMutationWindowSeconds) || runtimeConfig.apiMutationWindowSeconds <= 0) {
+    problems.push("API_MUTATION_WINDOW_SECONDS debe ser mayor a 0.");
+  }
+  if (!Number.isFinite(runtimeConfig.apiMutationMaxRequests) || runtimeConfig.apiMutationMaxRequests < 30) {
+    problems.push("API_MUTATION_MAX_REQUESTS debe ser al menos 30.");
+  }
   if (!Number.isFinite(runtimeConfig.uploadWindowMinutes) || runtimeConfig.uploadWindowMinutes <= 0) {
     problems.push("UPLOAD_WINDOW_MINUTES debe ser mayor a 0.");
   }
   if (!Number.isFinite(runtimeConfig.uploadMaxRequests) || runtimeConfig.uploadMaxRequests < 5) {
     problems.push("UPLOAD_MAX_REQUESTS debe ser al menos 5.");
+  }
+  if (!Number.isFinite(runtimeConfig.publicReadWindowSeconds) || runtimeConfig.publicReadWindowSeconds <= 0) {
+    problems.push("PUBLIC_READ_WINDOW_SECONDS debe ser mayor a 0.");
+  }
+  if (!Number.isFinite(runtimeConfig.publicReadMaxRequests) || runtimeConfig.publicReadMaxRequests < 60) {
+    problems.push("PUBLIC_READ_MAX_REQUESTS debe ser al menos 60.");
+  }
+  if (!Number.isFinite(runtimeConfig.refereeLiveReadWindowSeconds) || runtimeConfig.refereeLiveReadWindowSeconds <= 0) {
+    problems.push("REFEREE_LIVE_READ_WINDOW_SECONDS debe ser mayor a 0.");
+  }
+  if (!Number.isFinite(runtimeConfig.refereeLiveReadMaxRequests) || runtimeConfig.refereeLiveReadMaxRequests < 30) {
+    problems.push("REFEREE_LIVE_READ_MAX_REQUESTS debe ser al menos 30.");
+  }
+  if (!Number.isFinite(runtimeConfig.refereeLiveWriteWindowSeconds) || runtimeConfig.refereeLiveWriteWindowSeconds <= 0) {
+    problems.push("REFEREE_LIVE_WRITE_WINDOW_SECONDS debe ser mayor a 0.");
+  }
+  if (!Number.isFinite(runtimeConfig.refereeLiveWriteMaxRequests) || runtimeConfig.refereeLiveWriteMaxRequests < 30) {
+    problems.push("REFEREE_LIVE_WRITE_MAX_REQUESTS debe ser al menos 30.");
   }
 
   if (runtimeConfig.emailProvider && runtimeConfig.emailProvider !== "resend") {
@@ -139,6 +172,10 @@ export function validateRuntimeConfig() {
 
   if (runtimeConfig.seedDemoData) {
     problems.push("SEED_DEMO_DATA debe ser false en produccion.");
+  }
+
+  if (runtimeConfig.googleClientId && runtimeConfig.googleClientId.length < 20) {
+    problems.push("GOOGLE_CLIENT_ID no parece valido.");
   }
 
   if (runtimeConfig.databaseProvider === "postgres" && !runtimeConfig.databaseUrl) {

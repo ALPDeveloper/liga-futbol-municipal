@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { GoogleIdentityButton } from "./GoogleIdentityButton.jsx";
 import { requestPasswordReset, resetPassword } from "../lib/userApi.js";
 
 function AuthIcon({ name }) {
@@ -60,7 +61,7 @@ function AuthIcon({ name }) {
   );
 }
 
-export function AuthPanel({ currentUser, onLogin, onLogout }) {
+export function AuthPanel({ currentUser, onGoogleLogin, onLogin, onLogout }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -70,6 +71,7 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
   const [recoveryMessage, setRecoveryMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   if (currentUser) {
     return (
@@ -180,6 +182,26 @@ export function AuthPanel({ currentUser, onLogin, onLogout }) {
         <span>Iniciar sesion</span>
         <AuthIcon name="arrow" />
       </button>
+      {onGoogleLogin && (
+        <div className="auth-google-entry">
+          <span>o entra rapido con una cuenta aprobada</span>
+          <GoogleIdentityButton
+            disabled={googleBusy}
+            label="Iniciar sesion con Google"
+            onCredential={async (credential) => {
+              setError("");
+              setGoogleBusy(true);
+              try {
+                await onGoogleLogin(credential, true);
+              } catch (loginError) {
+                setError(loginError.message);
+              } finally {
+                setGoogleBusy(false);
+              }
+            }}
+          />
+        </div>
+      )}
       {error && <small className="auth-error">{error}</small>}
     </form>
   );

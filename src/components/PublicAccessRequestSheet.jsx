@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getCompetition, getDefaultCompetitionId } from "../lib/domain.js";
 import { submitAccessRequest } from "../lib/accessRequestApi.js";
+import { GoogleIdentityButton, readGoogleCredentialProfile } from "./GoogleIdentityButton.jsx";
 import { getFormPayload } from "./forms.js";
 import { PasswordField } from "./PasswordField.jsx";
 
@@ -48,6 +49,11 @@ export function PublicAccessRequestSheet({ league, onClose }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
+  const [requestName, setRequestName] = useState("");
+  const [requestEmail, setRequestEmail] = useState("");
+  const [requestPhone, setRequestPhone] = useState("");
+  const [googleCredential, setGoogleCredential] = useState("");
+  const [googleProfile, setGoogleProfile] = useState(null);
   const teams = useMemo(
     () => [...(league?.teams || [])]
       .filter((team) => !["deleted", "withdrawn"].includes(team.status))
@@ -130,14 +136,20 @@ export function PublicAccessRequestSheet({ league, onClose }) {
         leagueId: league.id,
         role,
         teamId: role === "team_delegate" ? selectedTeamId : "",
-        name: payload.name,
-        phone: payload.phone,
-        email: payload.email,
+        name: requestName,
+        phone: requestPhone,
+        email: requestEmail,
         password: payload.password,
-        confirmPassword: payload.confirmPassword
+        confirmPassword: payload.confirmPassword,
+        googleCredential
       });
       setNotice(response.message || "Solicitud enviada. Espera la aprobacion del administrador.");
       form.reset();
+      setRequestName("");
+      setRequestEmail("");
+      setRequestPhone("");
+      setGoogleCredential("");
+      setGoogleProfile(null);
       setTeamSearch("");
     } catch (requestError) {
       setError(requestError.message || "No se pudo enviar la solicitud.");
@@ -227,26 +239,102 @@ export function PublicAccessRequestSheet({ league, onClose }) {
             </section>
           )}
 
+          <section className="public-access-google-card">
+            <div>
+              <strong>Registro rapido con Google</strong>
+              <span>Usa tu correo verificado para llenar nombre y email. La aprobacion del administrador sigue siendo obligatoria.</span>
+            </div>
+            <GoogleIdentityButton
+              label="Usar Google para solicitar acceso"
+              onCredential={(credential) => {
+                const profile = readGoogleCredentialProfile(credential);
+                setGoogleCredential(credential);
+                setGoogleProfile(profile);
+                setRequestName(profile?.name || requestName);
+                setRequestEmail(profile?.email || requestEmail);
+                setNotice(profile?.email ? `Google verificado: ${profile.email}. Completa telefono y envia la solicitud.` : "Google verificado. Completa tus datos y envia la solicitud.");
+                setError("");
+              }}
+              text="signup_with"
+            />
+            {googleProfile && (
+              <div className="public-access-google-linked">
+                {googleProfile.picture && <img alt="" src={googleProfile.picture} />}
+                <span>
+                  <strong>{googleProfile.name || "Cuenta de Google"}</strong>
+                  <small>{googleProfile.email}</small>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGoogleCredential("");
+                    setGoogleProfile(null);
+                    setNotice("");
+                  }}
+                >
+                  Cambiar
+                </button>
+              </div>
+            )}
+          </section>
+
           <div className="public-access-fields">
-            <label>Nombre completo<input name="name" required placeholder="Nombre y apellidos" /></label>
-            <label>Telefono<input name="phone" required inputMode="tel" placeholder="Telefono de contacto" /></label>
-            <label>Correo electronico<input name="email" required type="email" placeholder="correo@ejemplo.com" /></label>
-            <PasswordField
-              autoComplete="current-password"
-              label="Contraseña"
-              name="password"
-              placeholder="Nueva o actual si ya tienes cuenta"
-              visible={showPasswords}
-              onToggleVisibility={() => setShowPasswords((value) => !value)}
-            />
-            <PasswordField
-              autoComplete="current-password"
-              label="Confirmar contraseña"
-              name="confirmPassword"
-              placeholder="Repite la contraseña"
-              visible={showPasswords}
-              onToggleVisibility={() => setShowPasswords((value) => !value)}
-            />
+            <label>Nombre completo
+              <input
+                name="name"
+                required
+                readOnly={Boolean(googleCredential)}
+                value={requestName}
+                placeholder="Nombre y apellidos"
+                onChange={(event) => setRequestName(event.target.value)}
+              />
+            </label>
+            <label>Telefono
+              <input
+                name="phone"
+                required
+                inputMode="tel"
+                value={requestPhone}
+                placeholder="Telefono de contacto"
+                onChange={(event) => setRequestPhone(event.target.value)}
+              />
+            </label>
+            <label>Correo electronico
+              <input
+                name="email"
+                required
+                readOnly={Boolean(googleCredential)}
+                type="email"
+                value={requestEmail}
+                placeholder="correo@ejemplo.com"
+                onChange={(event) => setRequestEmail(event.target.value)}
+              />
+            </label>
+            {!googleCredential && (
+              <>
+                <PasswordField
+                  autoComplete="current-password"
+                  label="Contraseña"
+                  name="password"
+                  placeholder="Nueva o actual si ya tienes cuenta"
+                  visible={showPasswords}
+                  onToggleVisibility={() => setShowPasswords((value) => !value)}
+                />
+                <PasswordField
+                  autoComplete="current-password"
+                  label="Confirmar contraseña"
+                  name="confirmPassword"
+                  placeholder="Repite la contraseña"
+                  visible={showPasswords}
+                  onToggleVisibility={() => setShowPasswords((value) => !value)}
+                />
+              </>
+            )}
+            {googleCredential && (
+              <p className="public-access-google-note">
+                Cuando el administrador apruebe la solicitud, podras entrar con este mismo correo de Google. Si despues necesitas contraseña LIGATEC, usa recuperar contraseña.
+              </p>
+            )}
           </div>
 
           {notice && <p className="auth-ok">{notice}</p>}

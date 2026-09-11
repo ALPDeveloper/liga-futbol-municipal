@@ -3,7 +3,7 @@ import { DEFAULT_IDENTITY } from "../data/defaultIdentity.js";
 import { fetchAuditLogs } from "../lib/auditApi.js";
 import { createBackup, downloadBackup, fetchBackups, verifyBackup } from "../lib/backupApi.js";
 import { calculatePlayerAppearanceEligibility, calculateStandings, calculateSuspensionNotices, calculateYellowCardDiscipline, formatDate, getCompetition, getCurrentDisplayRound, getDefaultCompetitionId, getEligiblePlayersForTeam, getPlayer, getPlayerAffiliationForTeam, getPlayerNumberForTeam, getPlayoffPhaseLabel, getTeam, isPlayerEligibleForTeam, isPlayerHistoricalOnly, scopeLeagueToCompetition, upperText } from "../lib/domain.js";
-import { IMAGE_BANNER_MAX_SIZE, IMAGE_LOGO_MAX_SIZE, IMAGE_UPLOAD_ACCEPT, optimizeWebImageFile } from "../lib/imageProcessing.js";
+import { IMAGE_BANNER_MAX_SIZE, IMAGE_BANNER_TARGET_BYTES, IMAGE_LOGO_MAX_SIZE, IMAGE_LOGO_TARGET_BYTES, IMAGE_UPLOAD_ACCEPT, optimizeWebImageFile } from "../lib/imageProcessing.js";
 import { getFormPayload } from "./forms.js";
 import { SectionHeading } from "./SectionHeading.jsx";
 import { PlayerPhotoUploader } from "./PlayerPhotoUploader.jsx";
@@ -56,6 +56,8 @@ function showAdminAlert(message, type = "success") {
   if (!message || typeof window === "undefined") return;
   const prefix = type === "error"
     ? "No se pudo completar el movimiento."
+    : type === "warning"
+    ? "Aviso importante."
     : "Movimiento capturado correctamente.";
   window.alert(`${prefix}\n\n${message}`);
 }
@@ -134,6 +136,418 @@ function getPlayerPositionOptionValue(position) {
   return "Delantero";
 }
 
+function isAdminMatchComplete(match) {
+  return match?.status === "finished" || match?.status === "walkover";
+}
+
+function isAdminMatchLive(match) {
+  return match?.status === "live" || match?.status === "in_progress";
+}
+
+function hasAdminMatchScheduleGap(match) {
+  return !match?.date || !match?.time || !match?.venue;
+}
+
+function createAdminSetupSteps({ activeCompetition, activeMatches, league, pendingSheets }) {
+  const teamCount = league.teams?.length || 0;
+  const playerCount = league.players?.length || 0;
+  const venueCount = league.venues?.length || 0;
+  const hasRules = Boolean(league.rules && Object.keys(league.rules).length);
+  const hasIdentity = Boolean(league.identity?.logoUrl || league.identity?.heroImageUrl || league.identity?.heroTitle);
+  const visibleCompetition = activeCompetition && activeCompetition.status !== "hidden" && activeCompetition.publicVisibility !== "hidden";
+  return [
+    { id: "identity", label: "Identidad publica", detail: hasIdentity ? "Lista para mostrar la liga" : "Falta imagen, textos o marca", complete: hasIdentity, section: "identity" },
+    { id: "tournament", label: "Torneo activo", detail: activeCompetition?.name || "Falta crear torneo", complete: Boolean(activeCompetition), section: "tournaments" },
+    { id: "visibility", label: "Visibilidad del torneo", detail: visibleCompetition ? "Visible para el publico" : "Oculto o pendiente", complete: Boolean(visibleCompetition), section: "tournaments" },
+    { id: "teams", label: "Equipos registrados", detail: `${teamCount} equipo(s)`, complete: teamCount >= 2, section: "capture" },
+    { id: "players", label: "Jugadores cargados", detail: `${playerCount} jugador(es)`, complete: playerCount > 0, section: "capture" },
+    { id: "venues", label: "Canchas registradas", detail: `${venueCount} cancha(s)`, complete: venueCount > 0, section: "venues" },
+    { id: "calendar", label: "Calendario programado", detail: `${activeMatches.length} partido(s)`, complete: activeMatches.length > 0, section: "lists" },
+    { id: "rules", label: "Reglas deportivas", detail: hasRules ? "Configuradas" : "Revisar reglamento", complete: hasRules, section: "rules" },
+    { id: "sheets", label: "Actas al dia", detail: pendingSheets ? `${pendingSheets} pendiente(s)` : "Sin pendientes", complete: pendingSheets === 0, section: "sheet" }
+  ];
+}
+
+function getAdminSetupProgress(steps) {
+  if (!steps.length) return 0;
+  return Math.round((steps.filter((step) => step.complete).length / steps.length) * 100);
+}
+
+function getAdminWorkspaceStatus({ section, setupSteps, taskQueue }) {
+  const task = taskQueue.find((item) => item.section === section.id);
+  const setupStep = setupSteps.find((step) => step.section === section.id);
+  if (task) {
+    return {
+      label: task.title,
+      detail: task.detail,
+      tone: task.tone,
+      value: task.value
+    };
+  }
+  if (setupStep) {
+    return {
+      label: setupStep.complete ? "Listo" : "Pendiente",
+      detail: setupStep.detail,
+      tone: setupStep.complete ? "ready" : "warning",
+      value: setupStep.complete ? "OK" : "!"
+    };
+  }
+  return {
+    label: "Disponible",
+    detail: section.metric,
+    tone: "ready",
+    value: "OK"
+  };
+}
+
+function getAdminWorkspacePriority({ workspace, setupSteps, taskQueue }) {
+  const sectionIds = new Set(workspace.sections.map((section) => section.id));
+  const task = taskQueue.find((item) => sectionIds.has(item.section));
+  if (task) return { kind: "task", ...task };
+  const setupStep = setupSteps.find((step) => sectionIds.has(step.section) && !step.complete);
+  if (setupStep) {
+    return {
+      kind: "setup",
+      id: setupStep.id,
+      tone: "warning",
+      title: setupStep.label,
+      detail: setupStep.detail,
+      section: setupStep.section,
+      value: "!"
+    };
+  }
+  return null;
+}
+
+function createAdminTaskQueue({
+  activeMatches,
+  activeScheduledMatches,
+  hiddenCompetitionCount,
+  league,
+  liveMatches,
+  pendingSheets,
+  scheduleGapMatches,
+  suspensionNotices
+}) {
+  const unassignedMatches = activeScheduledMatches.filter((match) => !match.centralRefereeUserId);
+  const openSanctions = (league.sanctions || []).filter((sanction) => sanction.status !== "completed" && sanction.status !== "served");
+  return [
+    pendingSheets > 0 ? {
+      id: "pending-sheets",
+      tone: "urgent",
+      title: "Actas por publicar",
+      value: pendingSheets,
+      detail: "Resultados terminados pendientes de oficializar",
+      section: "sheet"
+    } : null,
+    liveMatches.length > 0 ? {
+      id: "live-matches",
+      tone: "live",
+      title: "Partidos en vivo",
+      value: liveMatches.length,
+      detail: "Cronometro y eventos activos",
+      section: "lists"
+    } : null,
+    scheduleGapMatches.length > 0 ? {
+      id: "schedule-gaps",
+      tone: "warning",
+      title: "Partidos incompletos",
+      value: scheduleGapMatches.length,
+      detail: "Falta fecha, hora o cancha",
+      section: "lists"
+    } : null,
+    unassignedMatches.length > 0 ? {
+      id: "unassigned-referees",
+      tone: "warning",
+      title: "Sin arbitro central",
+      value: unassignedMatches.length,
+      detail: "Designaciones por completar",
+      section: "referees"
+    } : null,
+    suspensionNotices.length > 0 ? {
+      id: "active-discipline",
+      tone: "danger",
+      title: "Sanciones activas",
+      value: suspensionNotices.length,
+      detail: "Jugadores con castigo o aviso",
+      section: "sanctions"
+    } : null,
+    openSanctions.length > 0 ? {
+      id: "commission-cases",
+      tone: "danger",
+      title: "Casos de comision",
+      value: openSanctions.length,
+      detail: "Resoluciones por revisar",
+      section: "sanctions"
+    } : null,
+    hiddenCompetitionCount > 0 ? {
+      id: "hidden-tournaments",
+      tone: "info",
+      title: "Torneos ocultos",
+      value: hiddenCompetitionCount,
+      detail: "Revisar visibilidad publica",
+      section: "tournaments"
+    } : null,
+    activeMatches.length === 0 ? {
+      id: "empty-calendar",
+      tone: "warning",
+      title: "Sin calendario",
+      value: "0",
+      detail: "Crea partidos para operar la jornada",
+      section: "capture"
+    } : null
+  ].filter(Boolean).slice(0, 6);
+}
+
+function AdminControlCenter({
+  activeCompetition,
+  currentSeason,
+  onNavigate,
+  publicUrl,
+  quickSections,
+  setupProgress,
+  setupSteps,
+  taskQueue
+}) {
+  const completedSteps = setupSteps.filter((step) => step.complete).length;
+  const nextStep = setupSteps.find((step) => !step.complete) || setupSteps[0];
+  return (
+    <section className="admin-control-center" aria-label="Centro de control administrativo">
+      <div className="admin-control-main-card">
+        <div className="admin-control-head">
+          <span>Ruta del torneo</span>
+          <strong>{activeCompetition?.name || "Torneo por configurar"}</strong>
+          <small>{currentSeason || "Temporada pendiente"}</small>
+        </div>
+        <div className="admin-control-progress" style={{ "--admin-control-progress": `${setupProgress}%` }}>
+          <div>
+            <strong>{setupProgress}%</strong>
+            <small>{completedSteps} de {setupSteps.length} listo(s)</small>
+          </div>
+          <span aria-hidden="true"><i /></span>
+        </div>
+        {nextStep && (
+          <button className="admin-next-step-card" type="button" onClick={() => onNavigate(nextStep.section)}>
+            <span>Siguiente paso</span>
+            <strong>{nextStep.complete ? "Operacion diaria" : nextStep.label}</strong>
+            <small>{nextStep.complete ? "El torneo esta preparado para operar" : nextStep.detail}</small>
+          </button>
+        )}
+      </div>
+
+      <div className="admin-control-queue-card">
+        <div className="admin-control-section-head">
+          <span>Pendientes</span>
+          <strong>Atencion operativa</strong>
+        </div>
+        <div className="admin-task-list">
+          {taskQueue.length ? taskQueue.map((task) => (
+            <button className={`admin-task-card tone-${task.tone}`} key={task.id} type="button" onClick={() => onNavigate(task.section)}>
+              <b>{task.value}</b>
+              <span>
+                <strong>{task.title}</strong>
+                <small>{task.detail}</small>
+              </span>
+            </button>
+          )) : (
+            <div className="admin-empty-task-card">
+              <strong>Sin pendientes criticos</strong>
+              <small>La operacion del torneo no tiene alertas inmediatas.</small>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="admin-control-checklist-card">
+        <div className="admin-control-section-head">
+          <span>Preparacion</span>
+          <strong>Checklist del cliente</strong>
+        </div>
+        <div className="admin-setup-list">
+          {setupSteps.map((step) => (
+            <button className={step.complete ? "complete" : ""} key={step.id} type="button" onClick={() => onNavigate(step.section)}>
+              <i aria-hidden="true">{step.complete ? "✓" : "!"}</i>
+              <span>
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="admin-control-actions-card">
+        <div className="admin-control-section-head">
+          <span>Accesos rapidos</span>
+          <strong>Trabajo frecuente</strong>
+        </div>
+        <div className="admin-control-actions">
+          {quickSections.map((section) => (
+            <button key={section.id} type="button" onClick={() => onNavigate(section.id)}>
+              <span><AdminIcon type={section.icon} /></span>
+              <strong>{section.shortLabel}</strong>
+            </button>
+          ))}
+          <button type="button" onClick={() => window.open(publicUrl, "_blank", "noopener,noreferrer")}>
+            <span><AdminIcon type="identity" /></span>
+            <strong>Vista publica</strong>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AdminWorkspaceOverview({ onNavigate, setupSteps, taskQueue, workspace }) {
+  const priority = getAdminWorkspacePriority({ workspace, setupSteps, taskQueue });
+  const primarySection = priority?.section
+    ? workspace.sections.find((section) => section.id === priority.section)
+    : workspace.sections[0];
+  return (
+    <section className={`admin-workspace-screen admin-workspace-overview workspace-${workspace.accent || "green"}`}>
+      <div className="admin-workspace-hero">
+        <span className="admin-workspace-hero-icon"><AdminIcon type={workspace.icon} /></span>
+        <div>
+          <span>Area de trabajo</span>
+          <strong>{workspace.label}</strong>
+          <small>{workspace.description}</small>
+        </div>
+        {primarySection && (
+          <button type="button" onClick={() => onNavigate(primarySection.id)}>
+            Abrir {primarySection.shortLabel}
+          </button>
+        )}
+      </div>
+
+      <div className="admin-workspace-command-grid">
+        <button
+          className={`admin-workspace-priority-card tone-${priority?.tone || "ready"}`}
+          type="button"
+          onClick={() => priority?.section && onNavigate(priority.section)}
+          disabled={!priority}
+        >
+          <span>{priority ? "Prioridad del area" : "Area estable"}</span>
+          <strong>{priority?.title || "Sin pendientes inmediatos"}</strong>
+          <small>{priority?.detail || "Los modulos principales de esta area estan disponibles para operacion."}</small>
+          <b>{priority?.value || "OK"}</b>
+        </button>
+
+        <div className="admin-workspace-route-card">
+          <div className="admin-workspace-route-head">
+            <span>Orden sugerido</span>
+            <strong>{workspace.sections.length} modulo(s)</strong>
+          </div>
+          <div className="admin-workspace-route-list">
+            {workspace.sections.map((section, index) => {
+              const status = getAdminWorkspaceStatus({ section, setupSteps, taskQueue });
+              return (
+                <button className={`tone-${status.tone}`} key={section.id} type="button" onClick={() => onNavigate(section.id)}>
+                  <b>{index + 1}</b>
+                  <span>
+                    <strong>{section.label}</strong>
+                    <small>{section.description}</small>
+                  </span>
+                  <em>{status.label}</em>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="admin-workspace-functions-card">
+        <div className="admin-control-section-head">
+          <span>Funciones</span>
+          <strong>Accesos del area</strong>
+        </div>
+        <div className="admin-function-grid">
+          {workspace.sections.map((section) => {
+            const status = getAdminWorkspaceStatus({ section, setupSteps, taskQueue });
+            return (
+              <button className={`admin-function-card tone-${status.tone}`} key={section.id} type="button" onClick={() => onNavigate(section.id)}>
+                <span><AdminIcon type={section.icon} /></span>
+                <strong>{section.label}</strong>
+                <small>{section.description}</small>
+                <em>{section.metric}</em>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AdminModuleGuide({ parentSectionId, section, siblingSections, onNavigate }) {
+  if (!section) return null;
+  return (
+    <div className="admin-module-guide">
+      <div className="admin-module-guide-main">
+        <span><AdminIcon type={section.icon} /></span>
+        <div>
+          <small>{section.group}</small>
+          <strong>{section.label}</strong>
+          <p>{section.description}</p>
+        </div>
+        <em>{section.metric}</em>
+      </div>
+      <div className="admin-module-guide-actions" aria-label={`Accesos de ${section.group}`}>
+        <button type="button" onClick={() => onNavigate(parentSectionId)}>
+          Ver area
+        </button>
+        {siblingSections
+          .filter((item) => item.id !== section.id)
+          .slice(0, 3)
+          .map((item) => (
+            <button key={item.id} type="button" onClick={() => onNavigate(item.id)}>
+              {item.shortLabel}
+            </button>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminQuickFind({ onChange, onNavigate, sections, value }) {
+  const query = upperText(value).trim();
+  const results = query
+    ? sections.filter((section) => upperText([
+      section.label,
+      section.shortLabel,
+      section.group,
+      section.description,
+      section.metric
+    ].join(" ")).includes(query)).slice(0, 6)
+    : sections.slice(0, 6);
+  return (
+    <section className="admin-quick-find" aria-label="Buscar en panel admin">
+      <label>
+        <span>Buscar modulo</span>
+        <input
+          type="search"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Actas, sanciones, arbitros, equipos..."
+        />
+      </label>
+      <div className="admin-quick-find-results">
+        {results.length ? results.map((section) => (
+          <button key={section.id} type="button" onClick={() => onNavigate(section.id)}>
+            <span><AdminIcon type={section.icon} /></span>
+            <strong>{section.label}</strong>
+            <small>{section.group}</small>
+          </button>
+        )) : (
+          <div className="admin-quick-find-empty">
+            <strong>Sin coincidencias</strong>
+            <small>Prueba con el nombre del modulo o area.</small>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function AdminView({
   adminPanel,
   applyApiStore,
@@ -179,6 +593,7 @@ export function AdminView({
   onResetDemo,
   onResolveMatchDiscipline,
   onSaveIdentity,
+  onSaveMatchParticipation,
   onSaveMatchSheet,
   onSaveRules,
   onSetAdminPanel,
@@ -276,6 +691,7 @@ export function AdminView({
               onGeneratePlayoffBracket={onGeneratePlayoffBracket}
               onResolveMatchDiscipline={onResolveMatchDiscipline}
               onSaveIdentity={onSaveIdentity}
+              onSaveMatchParticipation={onSaveMatchParticipation}
               onSaveMatchSheet={onSaveMatchSheet}
               onSaveRules={onSaveRules}
               onUpdateAnnouncement={onUpdateAnnouncement}
@@ -353,6 +769,7 @@ function LeagueAdmin({
   onGeneratePlayoffBracket,
   onResolveMatchDiscipline,
   onSaveIdentity,
+  onSaveMatchParticipation,
   onSaveMatchSheet,
   onSaveRules,
   onUpdateAnnouncement,
@@ -389,10 +806,11 @@ function LeagueAdmin({
   };
   const [activeSection, setActiveSection] = useState("home");
   const [identityNotice, setIdentityNotice] = useState("");
+  const [adminQuickSearch, setAdminQuickSearch] = useState("");
   const activeRole = selectedAccess?.role || currentUser?.role;
   const accessPermissions = new Set(Array.isArray(selectedAccess?.permissions) ? selectedAccess.permissions : []);
   const hasFullLeagueAccess = ["super_admin", "league_admin"].includes(activeRole);
-  const limitedSectionIds = new Set(["capture", "lists", "delegates", "referees", "rules", "sheet", "sanctions", "media"]);
+  const limitedSectionIds = new Set(["capture", "lists", "delegates", "referees", "rules", "sheet", "participations", "sanctions", "media"]);
   const canUseSection = (requiredPermissions = []) => (
     hasFullLeagueAccess ||
     (activeRole === "admin_limited" &&
@@ -402,6 +820,7 @@ function LeagueAdmin({
     { id: "capture", label: "Captura", shortLabel: "Captura", icon: "capture", group: "Operacion", permissions: ["matches", "teams", "players"], description: "Alta rapida de equipos, jugadores, partidos y calendarios.", metric: `${adminActiveLeague.matches.filter((match) => match.status !== "finished" && match.status !== "walkover").length} activos` },
     { id: "lists", label: "Partidos y datos", shortLabel: "Partidos", icon: "matches", group: "Operacion", permissions: ["matches", "teams", "players", "read_only"], description: "Edita calendario, marcadores, equipos y jugadores existentes.", metric: `${adminActiveLeague.matches.length} partidos` },
     { id: "sheet", label: "Actas", shortLabel: "Actas", icon: "sheet", group: "Operacion", permissions: ["match_sheets"], description: "Captura actas administrativas y publica resultados oficiales.", metric: `${adminActiveLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover").length} capturadas` },
+    { id: "participations", label: "Convocatorias", shortLabel: "Convocatorias", icon: "squads", group: "Operacion", permissions: ["match_sheets", "matches"], description: "Controla participantes enviados y partidos jugados por jugador.", metric: `${league.matchParticipations?.filter((item) => item.active !== false).length || 0} enviadas` },
     { id: "delegates", label: "Delegados", shortLabel: "Delegados", icon: "delegates", group: "Usuarios", permissions: ["delegates"], description: "Gestiona accesos de delegados y permisos de plantilla.", metric: "Equipos" },
     { id: "referees", label: "Arbitros", shortLabel: "Arbitros", icon: "referees", group: "Usuarios", permissions: ["referees"], description: "Crea arbitros, asignaciones y seguimiento de actas digitales.", metric: league.city || "Municipio" },
     { id: "squads", label: "Plantillas", shortLabel: "Plantillas", icon: "squads", group: "Equipos", permissions: ["players", "teams", "read_only"], description: "Consulta plantillas por equipo en una vista limpia.", metric: `${adminActiveLeague.players.length} jugadores` },
@@ -445,14 +864,9 @@ function LeagueAdmin({
   const isModuleScreen = Boolean(activeSectionMeta);
   const activeSectionWorkspace = activeSectionMeta ? visibleWorkspaces.find((workspace) => workspace.group === activeSectionMeta.group) : null;
   const parentSectionId = activeSectionWorkspace ? getWorkspaceScreenId(activeSectionWorkspace.id) : "home";
-  const featuredSections = ["capture", "lists", "sheet", "delegates"]
-    .map((sectionId) => visibleSections.find((section) => section.id === sectionId))
-    .filter(Boolean);
-
-  useEffect(() => {
-    preloadAdminLeagueImages(league);
-  }, [league]);
-
+  const moduleSiblingSections = activeSectionMeta
+    ? (activeSectionWorkspace?.sections || visibleSections)
+    : [];
   useEffect(() => {
     const isHome = activeSection === "home";
     const isKnownModule = visibleSections.some((section) => section.id === activeSection);
@@ -473,12 +887,37 @@ function LeagueAdmin({
   }, [activeSection]);
 
   const activeScheduledMatches = adminActiveLeague.matches.filter((match) => isActiveScheduleStatus(match.status));
-  const finishedMatches = adminActiveLeague.matches.filter((match) => match.status === "finished" || match.status === "walkover");
+  const competitionLeague = currentCompetitionId ? scopeLeagueToCompetition(league, currentCompetitionId) : adminActiveLeague;
+  const currentCompetitionMatches = competitionLeague.matches?.length ? competitionLeague.matches : adminActiveLeague.matches;
+  const liveMatches = currentCompetitionMatches.filter(isAdminMatchLive);
+  const scheduleGapMatches = currentCompetitionMatches.filter((match) => !isAdminMatchComplete(match) && hasAdminMatchScheduleGap(match));
   const pendingSheets = adminActiveLeague.matches.filter((match) => (
     match.status === "finished" || match.status === "walkover"
   ) && !match.sheetPublished).length;
   const hiddenCompetitionCount = (league.competitions || []).filter((competition) => competition.publicVisibility === "hidden" || competition.hidden).length;
-  const activeAnnouncements = (league.announcements || []).filter((announcement) => announcement.status === "active").length;
+  const setupSteps = createAdminSetupSteps({
+    activeCompetition: currentCompetition,
+    activeMatches: currentCompetitionMatches,
+    league: adminActiveLeague,
+    pendingSheets
+  });
+  const setupProgress = getAdminSetupProgress(setupSteps);
+  const suspensionNotices = calculateSuspensionNotices(competitionLeague);
+  const taskQueue = createAdminTaskQueue({
+    activeMatches: currentCompetitionMatches,
+    activeScheduledMatches,
+    hiddenCompetitionCount,
+    league,
+    liveMatches,
+    pendingSheets,
+    scheduleGapMatches,
+    suspensionNotices
+  });
+  const quickSections = ["capture", "lists", "sheet", "participations", "affiliations", "sanctions", "referees"]
+    .map((sectionId) => visibleSections.find((section) => section.id === sectionId))
+    .filter(Boolean);
+  const publicCompetitionQuery = currentCompetitionId ? `?torneo=${encodeURIComponent(currentCompetitionId)}` : "";
+  const publicUrl = `/liga/${league.id}${publicCompetitionQuery}`;
 
   return (
     <section className={`admin-league-app ${activeSection === "lists" ? "operation-data-app-mode" : ""}`}>
@@ -489,8 +928,8 @@ function LeagueAdmin({
             <button className="admin-back-button" type="button" onClick={() => setActiveSection(parentSectionId)} aria-label="Regresar">←</button>
           )}
           <div>
-            <span>{activeSection === "home" ? "Admin de liga" : activeWorkspace?.label || activeSectionMeta?.group || "Modulo"}</span>
-            <h2>{activeSection === "home" ? league.name : activeWorkspace?.shortLabel || activeSectionMeta?.label}</h2>
+            <span>{activeSection === "home" ? "Admin de liga" : activeWorkspace ? "Area admin" : activeSectionMeta?.group || "Modulo"}</span>
+            <h2>{activeSection === "home" ? league.name : activeWorkspace?.label || activeSectionMeta?.label}</h2>
             <small>{activeWorkspace?.description || activeSectionMeta?.description || `${activeCompetitionCount} torneo(s) activo(s) · ${currentCompetition?.season || league.season}`}</small>
           </div>
         </div>
@@ -538,66 +977,23 @@ function LeagueAdmin({
           </div>
         )}
 
-          <article className="admin-operation-card">
-            <img className="admin-operation-watermark" alt="" src={ligatecLogo} aria-hidden="true" />
-            <div className="admin-operation-head">
-              <span>Centro operativo</span>
-              <strong>{league.name}</strong>
-              <small>{activeCompetitionCount} torneo(s) activo(s) · {currentCompetition?.season || league.season}</small>
-            </div>
-            <div className="admin-operation-overview" aria-label="Resumen operativo de la liga">
-              <div>
-                <span><AdminIcon type="teams" /></span>
-                <strong>{adminActiveLeague.teams.length}</strong>
-                <small>Equipos activos</small>
-              </div>
-              <div>
-                <span><AdminIcon type="player" /></span>
-                <strong>{adminActiveLeague.players.length}</strong>
-                <small>Jugadores registrados</small>
-              </div>
-              <div>
-                <span><AdminIcon type="matches" /></span>
-                <strong>{activeScheduledMatches.length}</strong>
-                <small>Partidos programados</small>
-              </div>
-              <div className={pendingSheets ? "needs-attention" : ""}>
-                <span><AdminIcon type="sheet" /></span>
-                <strong>{pendingSheets}</strong>
-                <small>Actas por publicar</small>
-              </div>
-            </div>
-            <div className="admin-operation-insights">
-              <span><AdminIcon type="announcements" /> {activeAnnouncements} aviso(s) activo(s)</span>
-              <span><AdminIcon type="tournaments" /> {(league.competitions || []).length} torneo(s) creados</span>
-              <span><AdminIcon type="identity" /> {hiddenCompetitionCount} oculto(s) al publico</span>
-            </div>
-            <div className="admin-operation-actions">
-              {visibleSections.filter((section) => ["capture", "lists", "sheet"].includes(section.id)).map((section) => (
-                <button key={section.id} type="button" onClick={() => setActiveSection(section.id)}>
-                  <span><AdminIcon type={section.icon} /></span>
-                  {section.shortLabel}
-                </button>
-              ))}
-            </div>
-          </article>
+          <AdminControlCenter
+            activeCompetition={currentCompetition}
+            currentSeason={currentCompetition?.season || league.season}
+            onNavigate={setActiveSection}
+            publicUrl={publicUrl}
+            quickSections={quickSections}
+            setupProgress={setupProgress}
+            setupSteps={setupSteps}
+            taskQueue={taskQueue}
+          />
 
-          <div className="admin-league-summary" aria-label="Resumen administrativo">
-            <article><span>Equipos</span><strong>{adminActiveLeague.teams.length}</strong></article>
-            <article><span>Jugadores</span><strong>{adminActiveLeague.players.length}</strong></article>
-            <article><span>Programados</span><strong>{activeScheduledMatches.length}</strong></article>
-            <article><span>Finalizados</span><strong>{finishedMatches.length}</strong></article>
-          </div>
-
-          <div className="admin-home-action-grid">
-            {featuredSections.map((section) => (
-              <button key={section.id} type="button" onClick={() => setActiveSection(section.id)}>
-                <span><AdminIcon type={section.icon} /></span>
-                <strong>{section.shortLabel}</strong>
-                <small>{section.description}</small>
-              </button>
-            ))}
-          </div>
+          <AdminQuickFind
+            onChange={setAdminQuickSearch}
+            onNavigate={setActiveSection}
+            sections={visibleSections}
+            value={adminQuickSearch}
+          />
 
           <div className="admin-workspace-grid" aria-label="Areas administrativas">
             {visibleWorkspaces.map((workspace) => (
@@ -613,24 +1009,18 @@ function LeagueAdmin({
       )}
 
       {activeWorkspace && (
-        <section className="admin-workspace-screen">
-          <div className="admin-function-grid">
-            {activeWorkspace.sections.map((section) => (
-              <button className="admin-function-card" key={section.id} type="button" onClick={() => setActiveSection(section.id)}>
-                <span><AdminIcon type={section.icon} /></span>
-                <strong>{section.label}</strong>
-                <small>{section.description}</small>
-                <em>{section.metric}</em>
-              </button>
-            ))}
-          </div>
-        </section>
+        <AdminWorkspaceOverview
+          onNavigate={setActiveSection}
+          setupSteps={setupSteps}
+          taskQueue={taskQueue}
+          workspace={activeWorkspace}
+        />
       )}
 
       {isModuleScreen && (
         <section className={`admin-module-screen ${activeSection === "lists" ? "operation-data-module-screen" : ""} ${activeSectionMeta?.group === "Usuarios" ? "users-module-screen" : ""}`}>
           <div className="admin-section-tabs compact" aria-label="Cambiar modulo">
-            {(visibleWorkspaces.find((item) => item.group === activeSectionMeta?.group)?.sections || visibleSections).map((section) => (
+            {moduleSiblingSections.map((section) => (
               <button
                 className={activeSection === section.id ? "active" : ""}
                 key={section.id}
@@ -642,6 +1032,13 @@ function LeagueAdmin({
               </button>
             ))}
           </div>
+
+          <AdminModuleGuide
+            onNavigate={setActiveSection}
+            parentSectionId={parentSectionId}
+            section={activeSectionMeta}
+            siblingSections={moduleSiblingSections}
+          />
 
           <div className="admin-module-content">
             {activeSection === "capture" && (
@@ -737,6 +1134,14 @@ function LeagueAdmin({
               </section>
             )}
 
+            {activeSection === "participations" && (
+              <ParticipationControlPanel
+                league={league}
+                onAddPlayer={onAddPlayer}
+                onSaveMatchParticipation={onSaveMatchParticipation}
+              />
+            )}
+
             {activeSection === "affiliations" && (
               <AffiliationsPanel
                 league={league}
@@ -805,22 +1210,611 @@ function LeagueAdmin({
   );
 }
 
+function isParticipationTrackableMatch(match) {
+  return ["scheduled", "rescheduled", "advanced", "live", "in_progress", "finished", "walkover"].includes(match?.status || "scheduled");
+}
+
+function getParticipationPlayerName(participationPlayer, league) {
+  return participationPlayer.playerNameSnapshot ||
+    participationPlayer.name ||
+    getPlayer(league, participationPlayer.playerId)?.name ||
+    "Jugador";
+}
+
+function getParticipationPlayerNumber(participationPlayer, league, teamId) {
+  return participationPlayer.playerNumberSnapshot ||
+    participationPlayer.number ||
+    getPlayerNumberForTeam(league, participationPlayer.playerId, teamId) ||
+    "";
+}
+
+function buildParticipationControlRows(league, competitionId) {
+  const activeParticipations = (league.matchParticipations || []).filter((participation) => (
+    participation.active !== false &&
+    !["superseded", "revoked", "deleted"].includes(participation.status || "")
+  ));
+  const participationByKey = new Map(activeParticipations.map((participation) => [`${participation.matchId}:${participation.teamId}`, participation]));
+  const matches = (league.matches || [])
+    .filter((match) => (
+      isParticipationTrackableMatch(match) &&
+      (!competitionId || (match.competitionId || getDefaultCompetitionId(league)) === competitionId)
+    ))
+    .sort((a, b) => (
+      String(a.date || "9999-12-31").localeCompare(String(b.date || "9999-12-31")) ||
+      String(a.time || "23:59").localeCompare(String(b.time || "23:59")) ||
+      Number(a.round || 0) - Number(b.round || 0)
+    ));
+
+  return matches.flatMap((match) => {
+    const homeTeam = getTeam(league, match.homeTeamId);
+    const awayTeam = getTeam(league, match.awayTeamId);
+    return [match.homeTeamId, match.awayTeamId].map((teamId) => {
+      const team = teamId === match.homeTeamId ? homeTeam : awayTeam;
+      const opponent = teamId === match.homeTeamId ? awayTeam : homeTeam;
+      const participation = participationByKey.get(`${match.id}:${teamId}`) || null;
+      return {
+        key: `${match.id}:${teamId}`,
+        match,
+        team,
+        teamId,
+        opponent,
+        participation,
+        players: getEligiblePlayersForTeam(league, teamId)
+      };
+    });
+  });
+}
+
+function createParticipationDraftFromRow(row, league) {
+  const participationPlayers = row.participation?.players || [];
+  const playerIds = participationPlayers.map((player) => player.playerId).filter(Boolean);
+  const jerseyNumbers = Object.fromEntries((playerIds.length ? participationPlayers : row.players).map((player) => {
+    const playerId = player.playerId || player.id;
+    return [playerId, getParticipationPlayerNumber(player, league, row.teamId)];
+  }).filter(([playerId]) => playerId));
+  return {
+    playerIds,
+    captainPlayerId: row.participation?.captainPlayerId || "",
+    jerseyNumbers,
+    reason: row.participation ? "Correccion administrativa de participantes" : "Captura administrativa de participantes"
+  };
+}
+
+function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipation }) {
+  const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
+  const defaultCompetitionId = getDefaultCompetitionId(league);
+  const [competitionId, setCompetitionId] = useState(defaultCompetitionId);
+  const [tab, setTab] = useState("pending");
+  const [query, setQuery] = useState("");
+  const [playerPickerQuery, setPlayerPickerQuery] = useState("");
+  const [playerListLimit, setPlayerListLimit] = useState(24);
+  const [activeRowKey, setActiveRowKey] = useState("");
+  const [drafts, setDrafts] = useState({});
+  const [savingRowKey, setSavingRowKey] = useState("");
+  const [quickPlayerRowKey, setQuickPlayerRowKey] = useState("");
+  const [quickPlayerSaving, setQuickPlayerSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [noticeType, setNoticeType] = useState("success");
+  const rows = useMemo(() => buildParticipationControlRows(league, competitionId), [competitionId, league]);
+  const pendingRows = rows.filter((row) => !row.participation);
+  const submittedRows = rows.filter((row) => row.participation);
+  const scopedLeague = useMemo(() => competitionId ? scopeLeagueToCompetition(league, competitionId) : league, [competitionId, league]);
+  const appearanceByPlayerId = useMemo(() => calculatePlayerAppearanceEligibility(scopedLeague), [scopedLeague]);
+  const participationSuspensionByPlayerId = useMemo(() => new Map(
+    calculateSuspensionNotices(scopedLeague)
+      .filter((notice) => notice.status === "active" && notice.player?.id)
+      .map((notice) => [notice.player.id, notice])
+  ), [scopedLeague]);
+  const playerRows = useMemo(() => [...(scopedLeague.players || [])]
+    .map((player) => {
+      const appearance = appearanceByPlayerId.get(player.id) || {
+        officialAppearances: 0,
+        manualAdjustment: 0,
+        recognizedAppearances: 0
+      };
+      return {
+        player,
+        team: getTeam(league, player.teamId),
+        appearance
+      };
+    })
+    .sort((a, b) => (
+      Number(b.appearance.recognizedAppearances || 0) - Number(a.appearance.recognizedAppearances || 0) ||
+      String(a.team?.name || "").localeCompare(String(b.team?.name || "")) ||
+      String(a.player.name || "").localeCompare(String(b.player.name || ""))
+    )), [appearanceByPlayerId, league, scopedLeague.players]);
+  const visibleRows = (tab === "sent" ? submittedRows : pendingRows).filter((row) => {
+    const search = normalizeAdminSearchTerm(query);
+    if (!search) return true;
+    return normalizeAdminSearchTerm([
+      row.team?.name,
+      row.opponent?.name,
+      row.match.round ? `jornada ${row.match.round}` : "",
+      row.match.date,
+      row.match.time,
+      row.match.venue,
+      getMatchStatusLabel(row.match.status)
+    ].filter(Boolean).join(" ")).includes(search);
+  });
+  const visiblePlayerRows = playerRows.filter((row) => {
+    const search = normalizeAdminSearchTerm(query);
+    if (!search) return true;
+    return normalizeAdminSearchTerm(`${row.player.name} ${row.player.number || ""} ${row.team?.name || ""} ${row.player.position || ""}`).includes(search);
+  });
+  const visiblePlayerListRows = visiblePlayerRows.slice(0, playerListLimit);
+
+  useEffect(() => {
+    if (!competitions.some((competition) => competition.id === competitionId)) {
+      setCompetitionId(defaultCompetitionId || competitions[0]?.id || "");
+    }
+  }, [competitionId, competitions, defaultCompetitionId]);
+
+  function getDraft(row) {
+    return drafts[row.key] || createParticipationDraftFromRow(row, league);
+  }
+
+  function updateDraft(row, updater) {
+    setDrafts((current) => ({
+      ...current,
+      [row.key]: updater(current[row.key] || createParticipationDraftFromRow(row, league))
+    }));
+  }
+
+  function togglePlayer(row, player, checked) {
+    updateDraft(row, (draft) => {
+      const nextIds = new Set(draft.playerIds || []);
+      if (checked) nextIds.add(player.id);
+      else nextIds.delete(player.id);
+      const playerIds = [...nextIds];
+      return {
+        ...draft,
+        playerIds,
+        captainPlayerId: playerIds.includes(draft.captainPlayerId) ? draft.captainPlayerId : "",
+        jerseyNumbers: {
+          ...(draft.jerseyNumbers || {}),
+          [player.id]: draft.jerseyNumbers?.[player.id] ?? getPlayerNumberForTeam(league, player.id, row.teamId)
+        }
+      };
+    });
+  }
+
+  function selectAllPlayers(row) {
+    updateDraft(row, (draft) => ({
+      ...draft,
+      playerIds: row.players.map((player) => player.id),
+      captainPlayerId: draft.captainPlayerId && row.players.some((player) => player.id === draft.captainPlayerId)
+        ? draft.captainPlayerId
+        : "",
+      jerseyNumbers: Object.fromEntries(row.players.map((player) => [
+        player.id,
+        draft.jerseyNumbers?.[player.id] ?? getPlayerNumberForTeam(league, player.id, row.teamId)
+      ]))
+    }));
+  }
+
+  function getParticipationPlayerWarnings(row, player) {
+    const warnings = [];
+    const suspension = participationSuspensionByPlayerId.get(player.id);
+    if (suspension) {
+      warnings.push({
+        type: "suspension",
+        label: suspension.pendingReview
+          ? "Roja pendiente"
+          : suspension.indefinite
+          ? "Inhabilitado"
+          : "Suspendido",
+        detail: suspension.pendingReview
+          ? `Expulsado sujeto a comision: ${suspension.reason || "Revision disciplinaria"}`
+          : suspension.indefinite
+          ? `Inhabilitado indefinido: ${suspension.reason || suspension.type || "Sancion activa"}`
+          : `Suspendido${suspension.remainingMatches ? ` (${suspension.remainingMatches} juego(s))` : ""}${suspension.returnRound ? ` | Regresa J${suspension.returnRound}` : ""}`
+      });
+    }
+    const isPlayoffMatch = row.match?.stage === "playoff" || Boolean(row.match?.playoffRound);
+    const eligibility = appearanceByPlayerId.get(player.id);
+    if (isPlayoffMatch && eligibility?.applies && !eligibility.eligible) {
+      warnings.push({
+        type: "playoff",
+        label: "Liguilla",
+        detail: `No cumple liguilla: ${eligibility.recognizedAppearances || 0}/${eligibility.required || 0} PJ`
+      });
+    }
+    return warnings;
+  }
+
+  function findQuickParticipationPlayer(result, payload) {
+    if (result?.player?.id) return result.player;
+    const players = result?.store?.leagues?.find((item) => item.id === league.id)?.players || league.players || [];
+    return [...players].reverse().find((player) => (
+      player.teamId === payload.teamId &&
+      normalizeAdminSearchTerm(player.name) === normalizeAdminSearchTerm(payload.name)
+    )) || null;
+  }
+
+  async function submitQuickParticipationPlayer(event, row) {
+    event.preventDefault();
+    if (!onAddPlayer || quickPlayerSaving) return;
+    const panel = event.currentTarget.closest(".participation-quick-player");
+    const controls = [...(panel?.querySelectorAll("input, select") || [])];
+    const invalid = controls.find((control) => !control.checkValidity());
+    if (invalid) {
+      invalid.reportValidity();
+      return;
+    }
+    const payload = {
+      ...Object.fromEntries(controls.map((control) => [
+        control.name,
+        control.type === "number" ? control.value : String(control.value || "").trim().toLocaleUpperCase("es-MX")
+      ]).filter(([name]) => name)),
+      teamId: row.teamId,
+      competitionId,
+      photoUrl: "",
+      photoAuthorized: false
+    };
+    setQuickPlayerSaving(true);
+    try {
+      const result = await onAddPlayer(payload);
+      if (result === false) return;
+      const createdPlayer = findQuickParticipationPlayer(result, payload);
+      if (!createdPlayer?.id) throw new Error("El jugador se guardo, pero no se pudo agregar a la convocatoria.");
+      updateDraft(row, (draft) => ({
+        ...draft,
+        playerIds: [...new Set([...(draft.playerIds || []), createdPlayer.id])],
+        jerseyNumbers: {
+          ...(draft.jerseyNumbers || {}),
+          [createdPlayer.id]: payload.number || createdPlayer.number || ""
+        }
+      }));
+      const message = `Jugador ${createdPlayer.name || payload.name} registrado y agregado a la convocatoria.`;
+      setNotice(message);
+      setNoticeType("success");
+      showAdminAlert(message);
+      setQuickPlayerRowKey("");
+    } catch (error) {
+      const message = error.message || "No se pudo registrar el jugador.";
+      setNotice(message);
+      setNoticeType("error");
+      showAdminAlert(message, "error");
+    } finally {
+      setQuickPlayerSaving(false);
+    }
+  }
+
+  async function submitParticipation(event, row) {
+    event.preventDefault();
+    if (savingRowKey) return;
+    const draft = getDraft(row);
+    if (!onSaveMatchParticipation) {
+      const message = "No hay accion configurada para guardar participantes.";
+      setNotice(message);
+      setNoticeType("error");
+      showAdminAlert(message, "error");
+      return;
+    }
+    if (!draft.playerIds.length) {
+      const message = "Selecciona al menos un jugador participante.";
+      setNotice(message);
+      setNoticeType("error");
+      showAdminAlert(message, "error");
+      return;
+    }
+    if (draft.playerIds.length > 40) {
+      const message = "La convocatoria no puede exceder 40 jugadores participantes.";
+      setNotice(message);
+      setNoticeType("error");
+      showAdminAlert(message, "error");
+      return;
+    }
+    if (!draft.captainPlayerId || !draft.playerIds.includes(draft.captainPlayerId)) {
+      const message = "Selecciona un capitan dentro de los participantes.";
+      setNotice(message);
+      setNoticeType("error");
+      showAdminAlert(message, "error");
+      return;
+    }
+    const reason = String(draft.reason || "").trim();
+    if (reason.length < 8) {
+      const message = "Indica un motivo claro para guardar o corregir participantes.";
+      setNotice(message);
+      setNoticeType("error");
+      showAdminAlert(message, "error");
+      return;
+    }
+    const actionLabel = row.participation ? "corregir" : "guardar";
+    if (!window.confirm(`¿Confirmas ${actionLabel} participantes de ${row.team?.name || "este equipo"}?\n\nJugadores: ${draft.playerIds.length}\nCapitan: ${getPlayer(league, draft.captainPlayerId)?.name || "Seleccionado"}`)) return;
+
+    setSavingRowKey(row.key);
+    try {
+      await onSaveMatchParticipation({
+        matchId: row.match.id,
+        teamId: row.teamId,
+        playerIds: draft.playerIds,
+        captainPlayerId: draft.captainPlayerId,
+        jerseyNumbers: draft.jerseyNumbers || {},
+        reason
+      });
+      const message = row.participation ? "Convocatoria corregida correctamente." : "Convocatoria guardada correctamente.";
+      setNotice(message);
+      setNoticeType("success");
+      showAdminAlert(message);
+      setActiveRowKey("");
+    } catch (error) {
+      const message = error.message || "No se pudo guardar la convocatoria.";
+      setNotice(message);
+      setNoticeType("error");
+      showAdminAlert(message, "error");
+    } finally {
+      setSavingRowKey("");
+    }
+  }
+
+  function renderParticipationEditor(row) {
+    const draft = getDraft(row);
+    const selectedPlayers = row.players.filter((player) => draft.playerIds.includes(player.id));
+    const playerSearch = normalizeAdminSearchTerm(playerPickerQuery);
+    const filteredRowPlayers = row.players.filter((player) => {
+      if (!playerSearch) return true;
+      return normalizeAdminSearchTerm([
+        player.name,
+        getPlayerNumberForTeam(league, player.id, row.teamId),
+        player.position,
+        getPlayerPositionOptionValue(player.position),
+        getTeam(league, player.teamId)?.name || ""
+      ].filter(Boolean).join(" ")).includes(playerSearch);
+    });
+    const visibleFilteredRowPlayers = filteredRowPlayers.slice(0, playerListLimit);
+    return (
+      <form className="participation-editor" onSubmit={(event) => submitParticipation(event, row)}>
+        <div className="participation-editor-head">
+          <div>
+            <span>{row.participation ? "Correccion admin" : "Captura admin"}</span>
+            <strong>{row.team?.name || "Equipo"}</strong>
+          </div>
+          <div>
+            <button type="button" onClick={() => selectAllPlayers(row)} disabled={!row.players.length || savingRowKey === row.key}>Todos</button>
+            <button type="button" onClick={() => updateDraft(row, (draftItem) => ({ ...draftItem, playerIds: [], captainPlayerId: "" }))} disabled={savingRowKey === row.key}>Limpiar</button>
+            <button type="button" onClick={() => setQuickPlayerRowKey((current) => current === row.key ? "" : row.key)} disabled={!onAddPlayer || quickPlayerSaving}>Agregar jugador</button>
+          </div>
+        </div>
+        {quickPlayerRowKey === row.key && (
+          <div className="participation-quick-player">
+            <div>
+              <span>Alta rapida</span>
+              <strong>{row.team?.name || "Equipo"}</strong>
+            </div>
+            <div className="participation-quick-player-form">
+              <label>Nombre completo
+                <input name="name" required pattern=".*\S+\s+\S+.*" placeholder="Nombre y apellidos" title="Registra nombre(s) y apellido(s)" />
+              </label>
+              <label>Numero
+                <input name="number" type="number" min="0" max="9999" placeholder="10" />
+              </label>
+              <label>Posicion
+                <PlayerPositionSelect name="position" />
+              </label>
+              <div>
+                <button type="button" onClick={() => setQuickPlayerRowKey("")} disabled={quickPlayerSaving}>Cancelar</button>
+                <button className="primary" type="button" onClick={(event) => submitQuickParticipationPlayer(event, row)} disabled={quickPlayerSaving}>{quickPlayerSaving ? "Guardando..." : "Guardar y agregar"}</button>
+              </div>
+            </div>
+          </div>
+        )}
+        <label>Capitan
+          <select value={draft.captainPlayerId} onChange={(event) => updateDraft(row, (draftItem) => ({ ...draftItem, captainPlayerId: event.target.value }))}>
+            <option value="">Selecciona capitan</option>
+            {selectedPlayers.map((player) => (
+              <option key={player.id} value={player.id}>#{getPlayerNumberForTeam(league, player.id, row.teamId) || "-"} {player.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>Motivo
+          <input value={draft.reason} onChange={(event) => updateDraft(row, (draftItem) => ({ ...draftItem, reason: event.target.value }))} placeholder="Ej. Captura administrativa de participantes" />
+        </label>
+        <div className="participation-player-filter">
+          <div>
+            <strong>Plantilla disponible</strong>
+            <span>{filteredRowPlayers.length} de {row.players.length} jugador(es) · {draft.playerIds.length} seleccionado(s)</span>
+          </div>
+          <label>
+            <span className="sr-only">Buscar jugador en convocatoria</span>
+            <div className="admin-search-input-wrap">
+              <input
+                type="search"
+                value={playerPickerQuery}
+                onChange={(event) => {
+                  setPlayerPickerQuery(event.target.value);
+                  setPlayerListLimit(24);
+                }}
+                placeholder="Buscar jugador por nombre, numero o posicion"
+              />
+              {playerPickerQuery && <button type="button" onClick={() => {
+                setPlayerPickerQuery("");
+                setPlayerListLimit(24);
+              }} aria-label="Limpiar jugador">×</button>}
+            </div>
+          </label>
+        </div>
+        <div className="participation-player-picker">
+          {visibleFilteredRowPlayers.map((player) => {
+            const selected = draft.playerIds.includes(player.id);
+            const number = draft.jerseyNumbers?.[player.id] ?? getPlayerNumberForTeam(league, player.id, row.teamId);
+            const warnings = getParticipationPlayerWarnings(row, player);
+            return (
+              <label className={`${selected ? "selected" : ""} ${warnings.length ? "warning" : ""}`} key={player.id}>
+                <input checked={selected} type="checkbox" onChange={(event) => togglePlayer(row, player, event.target.checked)} />
+                <span>
+                  <strong>{player.name}</strong>
+                  <small>#{getPlayerNumberForTeam(league, player.id, row.teamId) || "-"} | {player.position || "Jugador"}</small>
+                  {warnings.map((warning) => (
+                    <small className={`participation-player-warning ${warning.type}`} key={`${player.id}-${warning.type}`}>{warning.detail}</small>
+                  ))}
+                </span>
+                {selected && (
+                  <input
+                    aria-label={`Numero de ${player.name}`}
+                    inputMode="numeric"
+                    value={number}
+                    disabled={savingRowKey === row.key}
+                    onChange={(event) => updateDraft(row, (draftItem) => ({
+                      ...draftItem,
+                      jerseyNumbers: {
+                        ...(draftItem.jerseyNumbers || {}),
+                        [player.id]: event.target.value.replace(/\D/g, "").slice(0, 4)
+                      }
+                    }))}
+                  />
+                )}
+              </label>
+            );
+          })}
+          {filteredRowPlayers.length > visibleFilteredRowPlayers.length && (
+            <button className="participation-more-button" type="button" onClick={() => setPlayerListLimit((current) => current + 24)}>
+              Ver mas jugadores ({filteredRowPlayers.length - visibleFilteredRowPlayers.length} restantes)
+            </button>
+          )}
+          {!filteredRowPlayers.length && <p className="empty">No hay jugadores con esa busqueda.</p>}
+        </div>
+        <div className="participation-editor-actions">
+          <button type="button" onClick={() => setActiveRowKey("")} disabled={savingRowKey === row.key}>Cancelar</button>
+          <button className="primary" type="submit" disabled={!row.players.length || savingRowKey === row.key}>
+            {savingRowKey === row.key ? "Guardando..." : "Guardar convocatoria"}
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  function renderParticipationCard(row) {
+    const matchLabel = row.match.stage === "playoff"
+      ? [getPlayoffPhaseLabel(row.match.playoffRound) || row.match.playoffRound || "Liguilla", row.match.playoffLeg].filter(Boolean).join(" ")
+      : `Jornada ${row.match.round || "-"}`;
+    const participationPlayers = row.participation?.players || [];
+    return (
+      <article className={`participation-card ${row.participation ? "is-sent" : "is-pending"}`} key={row.key}>
+        <div className="participation-card-main">
+          <span>{matchLabel} | {formatDate(row.match.date)} {row.match.time || ""}</span>
+          <strong>{row.team?.name || "Equipo"}</strong>
+          <small>vs {row.opponent?.name || "Rival"} | {row.match.venue || "Cancha por definir"}</small>
+        </div>
+        <div className="participation-card-status">
+          <b>{row.participation ? participationPlayers.length : row.players.length}</b>
+          <span>{row.participation ? "enviados" : "disponibles"}</span>
+          <em>{row.participation ? "Enviada" : "Pendiente"}</em>
+        </div>
+        {row.participation && (
+          <div className="participation-card-players">
+            {participationPlayers.slice(0, 8).map((player) => (
+              <span key={player.playerId}>
+                #{getParticipationPlayerNumber(player, league, row.teamId) || "-"} {getParticipationPlayerName(player, league)}
+              </span>
+            ))}
+            {participationPlayers.length > 8 && <span>+{participationPlayers.length - 8} mas</span>}
+          </div>
+        )}
+        <button type="button" onClick={() => {
+          setPlayerPickerQuery("");
+          setActiveRowKey(activeRowKey === row.key ? "" : row.key);
+        }}>
+          {activeRowKey === row.key ? "Cerrar" : row.participation ? "Corregir" : "Capturar"}
+        </button>
+        {activeRowKey === row.key && renderParticipationEditor(row)}
+      </article>
+    );
+  }
+
+  return (
+    <section className="panel admin-data-panel participation-control-panel">
+      <SectionHeading eyebrow="Operacion" title="Convocatorias y partidos jugados" />
+      {notice && <p className={noticeType === "error" ? "auth-error" : "auth-ok"}>{notice}</p>}
+      <div className="admin-data-hero participation-hero">
+        <div>
+          <span>Control de participantes</span>
+          <strong>{pendingRows.length} pendiente(s)</strong>
+          <small>{submittedRows.length} enviada(s) en el torneo seleccionado.</small>
+        </div>
+        <b>{visiblePlayerRows.reduce((total, row) => total + Number(row.appearance.recognizedAppearances || 0), 0)} jugados</b>
+      </div>
+      <div className="admin-filter-console participation-toolbar">
+        <label>Torneo
+          <select value={competitionId} onChange={(event) => {
+            setCompetitionId(event.target.value);
+            setActiveRowKey("");
+            setPlayerPickerQuery("");
+            setPlayerListLimit(24);
+          }}>
+            {competitions.map((competition) => (
+              <option key={competition.id} value={competition.id}>{competition.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>Buscar
+          <div className="admin-search-input-wrap">
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Equipo, rival, jornada, cancha o jugador" />
+            {query && <button type="button" onClick={() => setQuery("")} aria-label="Limpiar busqueda">×</button>}
+          </div>
+        </label>
+      </div>
+      <div className="participation-tabs" role="tablist" aria-label="Vista de convocatorias">
+        <button className={tab === "pending" ? "active" : ""} type="button" onClick={() => setTab("pending")}>Pendientes <b>{pendingRows.length}</b></button>
+        <button className={tab === "sent" ? "active" : ""} type="button" onClick={() => setTab("sent")}>Enviadas <b>{submittedRows.length}</b></button>
+        <button className={tab === "players" ? "active" : ""} type="button" onClick={() => {
+          setTab("players");
+          setPlayerListLimit(24);
+        }}>Jugadores <b>{visiblePlayerRows.length}</b></button>
+      </div>
+
+      {tab !== "players" && (
+        <div className="participation-card-list">
+          {visibleRows.map(renderParticipationCard)}
+          {!visibleRows.length && <p className="empty">No hay convocatorias en esta vista.</p>}
+        </div>
+      )}
+
+      {tab === "players" && (
+        <div className="appearance-player-list">
+          {visiblePlayerListRows.map(({ player, team, appearance }) => (
+            <article className="appearance-player-card" key={player.id}>
+              <b>#{player.number || "-"}</b>
+              <div>
+                <strong>{player.name}</strong>
+                <span>{team?.name || "Sin equipo"} | {player.position || "Jugador"}</span>
+              </div>
+              <span><small>Oficiales</small><strong>{appearance.officialAppearances || 0}</strong></span>
+              <span><small>Ajuste</small><strong>{appearance.manualAdjustment || 0}</strong></span>
+              <span><small>Total</small><strong>{appearance.recognizedAppearances || 0}</strong></span>
+            </article>
+          ))}
+          {visiblePlayerRows.length > visiblePlayerListRows.length && (
+            <button className="participation-more-button" type="button" onClick={() => setPlayerListLimit((current) => current + 24)}>
+              Ver mas jugadores ({visiblePlayerRows.length - visiblePlayerListRows.length} restantes)
+            </button>
+          )}
+          {!visiblePlayerRows.length && <p className="empty">No hay jugadores con esos filtros.</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
   const activeCompetitions = (league.competitions || []).filter((competition) => competition.status !== "archived");
   const publicCompetitions = (league.competitions || []).filter((competition) => !["archived", "hidden"].includes(competition.status));
   const hiddenCompetitions = (league.competitions || []).filter((competition) => competition.status === "hidden");
   const archivedCompetitions = (league.competitions || []).filter((competition) => competition.status === "archived");
   const [tournamentNotice, setTournamentNotice] = useState("");
+  const [tournamentNoticeType, setTournamentNoticeType] = useState("success");
   const currentCompetition = getCompetition(league, getDefaultCompetitionId(league));
 
   async function updateCompetitionWithNotice(competitionId, payload) {
     try {
       await onUpdateCompetition(competitionId, payload);
       setTournamentNotice("Torneo actualizado correctamente.");
+      setTournamentNoticeType("success");
       showAdminAlert("Torneo actualizado correctamente.");
     } catch (error) {
       const message = error.message || "No se pudo actualizar el torneo.";
       setTournamentNotice(message);
+      setTournamentNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
@@ -828,7 +1822,7 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
   return (
     <section className="panel admin-data-panel config-admin-panel tournaments-admin-panel">
       <SectionHeading eyebrow="Temporadas" title="Torneos de la liga" />
-      {tournamentNotice && <p className="auth-ok">{tournamentNotice}</p>}
+      {tournamentNotice && <p className={tournamentNoticeType === "error" ? "auth-error" : "auth-ok"}>{tournamentNotice}</p>}
       <div className="admin-data-hero config-hero">
         <div>
           <span>Control de categorias</span>
@@ -856,15 +1850,18 @@ function TournamentsPanel({ league, onAddCompetition, onUpdateCompetition }) {
       </div>
       <form className="tournament-form" onSubmit={async (event) => {
         event.preventDefault();
+        const form = event.currentTarget;
         if (!window.confirm("¿Confirmas crear este torneo/categoria?")) return;
         try {
-          await onAddCompetition(getTournamentFormPayload(event.currentTarget));
+          await onAddCompetition(getTournamentFormPayload(form));
           setTournamentNotice("Torneo creado correctamente.");
+          setTournamentNoticeType("success");
           showAdminAlert("Torneo creado correctamente.");
-          event.currentTarget.reset();
+          form.reset();
         } catch (error) {
           const message = error.message || "No se pudo crear el torneo.";
           setTournamentNotice(message);
+          setTournamentNoticeType("error");
           showAdminAlert(message, "error");
         }
       }}>
@@ -948,7 +1945,7 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
           "--identity-secondary": identity.secondaryColor,
           "--identity-accent": identity.accentColor
         }}>
-          {logoPreview && <img className="identity-preview-logo" src={logoPreview} alt="" />}
+          {logoPreview && <img className="identity-preview-logo" src={logoPreview} alt="" decoding="async" loading="lazy" />}
           <span>Vista publica</span>
           <strong>{league.name}</strong>
           <small>{league.city} · {league.season}</small>
@@ -981,7 +1978,7 @@ function IdentityPanel({ identity, league, notice, onSaveIdentity, setIdentityNo
                 const file = event.currentTarget.files?.[0];
                 if (!file) return;
                 try {
-                  setLogoPreview(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE }));
+                  setLogoPreview(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE, targetBytes: IMAGE_LOGO_TARGET_BYTES }));
                 } catch (error) {
                   setIdentityNotice(error.message || "No se pudo optimizar el logo.");
                   event.currentTarget.value = "";
@@ -1146,6 +2143,12 @@ function AccessRequestsInbox({ authToken, league, onResolved, role }) {
   const roleLabel = role === "team_delegate" ? "delegados" : "arbitros";
 
   async function reload() {
+    if (!authToken) {
+      setRequests([]);
+      setError("Vuelve a iniciar sesion para revisar solicitudes pendientes.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       setRequests(await fetchAccessRequests(authToken, { leagueId: league.id, role, status: "pending" }));
@@ -1181,8 +2184,14 @@ function AccessRequestsInbox({ authToken, league, onResolved, role }) {
       setRequests(response.requests || []);
       setError("");
       onResolved?.(response);
+      const message = isApprove
+        ? `Solicitud de ${roleLabel} aprobada correctamente.`
+        : `Solicitud de ${roleLabel} rechazada correctamente.`;
+      showAdminAlert(message);
     } catch (reviewError) {
-      setError(reviewError.message || "No se pudo resolver la solicitud.");
+      const message = reviewError.message || "No se pudo resolver la solicitud.";
+      setError(message);
+      showAdminAlert(message, "error");
     } finally {
       setBusyId("");
     }
@@ -1195,12 +2204,12 @@ function AccessRequestsInbox({ authToken, league, onResolved, role }) {
           <span>Solicitudes</span>
           <strong>{requests.length} pendiente(s) de {roleLabel}</strong>
         </div>
-        <button className="access-refresh-button" type="button" onClick={reload} disabled={loading} aria-label="Actualizar solicitudes">
+        <button className="access-refresh-button" type="button" onClick={reload} disabled={loading || !authToken} aria-label="Actualizar solicitudes">
           <span aria-hidden="true">{loading ? "..." : "↻"}</span>
         </button>
       </div>
       {error && <p className="auth-error">{error}</p>}
-      {!loading && !requests.length && <p className="access-request-empty">No hay solicitudes pendientes.</p>}
+      {!loading && !error && !requests.length && <p className="access-request-empty">No hay solicitudes pendientes.</p>}
       {requests.length > 0 && (
         <div className="access-request-list">
           {requests.map((requestItem) => (
@@ -1308,6 +2317,12 @@ function TeamDelegatesPanel({ authToken, league }) {
   }
 
   async function reload() {
+    if (!authToken) {
+      setDelegates([]);
+      setError("Vuelve a iniciar sesion para gestionar delegados y permisos de plantilla.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       setDelegates(await fetchTeamDelegates(authToken, league.id));
@@ -1341,6 +2356,13 @@ function TeamDelegatesPanel({ authToken, league }) {
 
   async function submitDelegate(event) {
     event.preventDefault();
+    if (!authToken) {
+      const message = "Vuelve a iniciar sesion para crear delegados.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+      return;
+    }
     const form = event.currentTarget;
     const payload = getFormPayload(form);
     if (!window.confirm("¿Crear este usuario delegado y asignarlo al equipo seleccionado?")) return;
@@ -1349,15 +2371,19 @@ function TeamDelegatesPanel({ authToken, league }) {
       const response = await createTeamDelegate(authToken, { ...payload, leagueId: league.id });
       setDelegates(response.delegates || []);
       setLastInvitation(response.invitation || null);
-      setNotice(`Invitacion creada para ${payload.name}. Copia el mensaje y envialo por WhatsApp.`);
+      const message = `Invitacion creada para ${payload.name}. Copia el mensaje y envialo por WhatsApp.`;
+      setNotice(message);
       setError("");
+      showAdminAlert(message);
       form.reset();
       setDelegateTeamSearch("");
       setSelectedDelegateTeamId(createTeamOptions[0]?.id || "");
       setDelegateCreateOpen(false);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo crear el delegado.";
       setNotice("");
-      setError(saveError.message || "No se pudo crear el delegado.");
+      setError(message);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -1375,13 +2401,13 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice(message);
       setCardMessage(delegate.id, message, "ok");
       setError("");
-      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      showAdminAlert(message);
     } catch (saveError) {
       const message = saveError.message || "No se pudo regenerar la invitacion.";
       setNotice("");
       setError(message);
       setCardMessage(delegate.id, message, "error");
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -1406,30 +2432,37 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice(message);
       setCardMessage(actionKey, message, "ok");
       setError("");
-      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      showAdminAlert(message);
     } catch (saveError) {
       const message = saveError.message || "No se pudo actualizar el permiso.";
       setNotice("");
       setError(message);
       setCardMessage(actionKey, message, "error");
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
   }
 
   async function bulkUpdateRosterPermissions(registrationEnabled) {
+    if (!authToken) {
+      const message = "Vuelve a iniciar sesion para modificar permisos de plantilla.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+      return;
+    }
     if (!activeBulkCompetitionId) {
       const message = "Selecciona un torneo o categoria para abrir o cerrar registros.";
       setError(message);
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
       return;
     }
     const scopedTeams = teams.filter((team) => (team.competitionId || getDefaultCompetitionId(league)) === activeBulkCompetitionId);
     if (!scopedTeams.length) {
       const message = "No hay equipos en esa categoria.";
       setError(message);
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
       return;
     }
     const actionLabel = registrationEnabled ? "abrir" : "cerrar";
@@ -1451,12 +2484,12 @@ function TeamDelegatesPanel({ authToken, league }) {
       setDelegates(nextDelegates);
       const message = `Listo: registro ${registrationEnabled ? "abierto" : "cerrado"} para ${scopedTeams.length} equipo(s) de ${activeBulkCompetition?.name || "la categoria"}.`;
       setNotice(message);
-      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      showAdminAlert(message);
     } catch (saveError) {
       const message = saveError.message || "No se pudieron actualizar los registros por categoria.";
       setNotice("");
       setError(message);
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -1477,13 +2510,13 @@ function TeamDelegatesPanel({ authToken, league }) {
       setNotice(message);
       setCardMessage(delegate.id, message, "ok");
       setError("");
-      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      showAdminAlert(message);
     } catch (saveError) {
       const message = saveError.message || "No se pudo actualizar el delegado.";
       setNotice("");
       setError(message);
       setCardMessage(delegate.id, message, "error");
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -1507,13 +2540,13 @@ function TeamDelegatesPanel({ authToken, league }) {
         : "Delegado quitado del equipo correctamente.";
       setNotice(message);
       setError("");
-      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      showAdminAlert(message);
     } catch (saveError) {
       const message = saveError.message || "No se pudo quitar el delegado.";
       setNotice("");
       setError(message);
       setCardMessage(delegate.id, message, "error");
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -1527,9 +2560,11 @@ function TeamDelegatesPanel({ authToken, league }) {
     );
     if (typedEmail === null) return;
     if (typedEmail.trim().toLowerCase() !== String(delegate.userEmail || "").toLowerCase()) {
+      const message = "No se elimino el usuario. El correo escrito no coincide.";
       setNotice("");
-      setError("No se elimino el usuario. El correo escrito no coincide.");
-      setCardMessage(delegate.id, "No se elimino el usuario. El correo escrito no coincide.", "error");
+      setError(message);
+      setCardMessage(delegate.id, message, "error");
+      showAdminAlert(message, "error");
       return;
     }
 
@@ -1544,13 +2579,13 @@ function TeamDelegatesPanel({ authToken, league }) {
         : "Acceso del delegado eliminado.";
       setNotice(message);
       setError("");
-      window.alert(`Movimiento capturado correctamente.\n\n${message}`);
+      showAdminAlert(message);
     } catch (saveError) {
       const message = saveError.message || "No se pudo eliminar definitivamente el usuario.";
       setNotice("");
       setError(message);
       setCardMessage(delegate.id, message, "error");
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -1572,7 +2607,7 @@ function TeamDelegatesPanel({ authToken, league }) {
           <h2>Centro de delegados</h2>
           <p>Gestiona responsables por equipo, invitaciones y control de registro de plantillas.</p>
         </div>
-        <button className="delegate-hero-action" type="button" onClick={() => setDelegateCreateOpen((value) => !value)}>
+        <button className="delegate-hero-action" type="button" disabled={!authToken} onClick={() => setDelegateCreateOpen((value) => !value)}>
           {delegateCreateOpen ? "Cerrar alta" : "Crear delegado"}
         </button>
       </div>
@@ -1670,7 +2705,7 @@ function TeamDelegatesPanel({ authToken, league }) {
           </label>
         </fieldset>
         <p className="delegate-form-note">Se enviara una invitacion con enlace unico para que el delegado active su cuenta.</p>
-        <button className="primary delegate-submit-button" type="submit" disabled={!createTeamOptions.length || busyAction === "create-delegate"}>
+        <button className="primary delegate-submit-button" type="submit" disabled={!authToken || !createTeamOptions.length || busyAction === "create-delegate"}>
           {busyAction === "create-delegate" ? "Creando invitacion..." : "Crear y generar invitacion"}
         </button>
       </form>
@@ -1884,7 +2919,7 @@ function TeamDelegatesPanel({ authToken, league }) {
                 </div>
               </details>
             ))}
-            {!loading && !delegates.length && <p className="empty">Aun no hay delegados asignados.</p>}
+            {!loading && !error && !delegates.length && <p className="empty">Aun no hay delegados asignados.</p>}
             {!loading && delegates.length > 0 && !filteredDelegates.length && <p className="empty">No hay delegados que coincidan con los filtros.</p>}
           </div>
         </div>
@@ -2035,6 +3070,14 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
   }
 
   async function reloadReferees() {
+    if (!authToken) {
+      setReferees([]);
+      setPendingSheets([]);
+      setFinalizedReports([]);
+      setError("Vuelve a iniciar sesion para gestionar arbitros, designaciones y actas.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [nextReferees, nextSheets, nextReports] = await Promise.all([
@@ -2087,11 +3130,15 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       const response = await reviewRefereeMatchSheet(authToken, sheet.id, { action, reviewNote: note });
       setPendingSheets(response.sheets || []);
       if (response.store) applyApiStore?.(response.store);
-      setNotice(action === "approve" ? "Acta aprobada y aplicada al partido oficial." : "Acta rechazada. El arbitro podra enviarla nuevamente.");
+      const message = action === "approve" ? "Acta aprobada y aplicada al partido oficial." : "Acta rechazada. El arbitro podra enviarla nuevamente.";
+      setNotice(message);
       setError("");
+      showAdminAlert(message);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo revisar el acta.";
       setNotice("");
-      setError(saveError.message || "No se pudo revisar el acta.");
+      setError(message);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -2123,11 +3170,15 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       });
       setFinalizedReports((response.reports || []).filter(needsAdminMatchReportAttention));
       if (response.store) applyApiStore?.(response.store);
-      setNotice(publishByException ? "Acta publicada por excepcion administrativa." : "Acta finalizada publicada como resultado oficial.");
+      const message = publishByException ? "Acta publicada por excepcion administrativa." : "Acta finalizada publicada como resultado oficial.";
+      setNotice(message);
       setError("");
+      showAdminAlert(message);
     } catch (publishError) {
+      const message = publishError.message || "No se pudo publicar el acta finalizada.";
       setNotice("");
-      setError(publishError.message || "No se pudo publicar el acta finalizada.");
+      setError(message);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -2135,6 +3186,13 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
 
   async function submitReferee(event) {
     event.preventDefault();
+    if (!authToken) {
+      const message = "Vuelve a iniciar sesion para crear arbitros.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+      return;
+    }
     const form = event.currentTarget;
     const payload = getFormPayload(form);
     if (!window.confirm("¿Crear este arbitro y generar su invitacion de activacion?")) return;
@@ -2143,12 +3201,16 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       const response = await createReferee(authToken, { ...payload, municipality: league.city });
       setReferees(response.referees || []);
       setLastInvitation(response.invitation || null);
-      setNotice(`Invitacion creada para ${payload.name}. Copia el mensaje y envialo por WhatsApp.`);
+      const message = `Invitacion creada para ${payload.name}. Copia el mensaje y envialo por WhatsApp.`;
+      setNotice(message);
       setError("");
+      showAdminAlert(message);
       form.reset();
     } catch (saveError) {
+      const message = saveError.message || "No se pudo crear el arbitro.";
       setNotice("");
-      setError(saveError.message || "No se pudo crear el arbitro.");
+      setError(message);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -2160,15 +3222,19 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     try {
       const nextReferees = await updateReferee(authToken, referee.userId, { status });
       setReferees(nextReferees);
-      setNotice(status === "active"
+      const message = status === "active"
         ? `${referee.name} activado correctamente.`
         : status === "suspended"
         ? `${referee.name} suspendido. No podra iniciar sesion.`
-        : `${referee.name} desactivado. No podra iniciar sesion.`);
+        : `${referee.name} desactivado. No podra iniciar sesion.`;
+      setNotice(message);
       setError("");
+      showAdminAlert(message);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo actualizar el arbitro.";
       setNotice("");
-      setError(saveError.message || "No se pudo actualizar el arbitro.");
+      setError(message);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -2181,11 +3247,15 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       const response = await resendRefereeInvitation(authToken, referee.userId);
       setReferees(response.referees || []);
       setLastInvitation(response.invitation || null);
-      setNotice("Invitacion regenerada. Copia el nuevo mensaje para enviarlo.");
+      const message = "Invitacion regenerada. Copia el nuevo mensaje para enviarlo.";
+      setNotice(message);
       setError("");
+      showAdminAlert(message);
     } catch (saveError) {
+      const message = saveError.message || "No se pudo regenerar la invitacion.";
       setNotice("");
-      setError(saveError.message || "No se pudo regenerar la invitacion.");
+      setError(message);
+      showAdminAlert(message, "error");
     } finally {
       setBusyAction("");
     }
@@ -2199,8 +3269,10 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
     );
     if (typedEmail === null) return;
     if (typedEmail.trim().toLowerCase() !== String(referee.email || "").toLowerCase()) {
+      const message = "No se elimino el arbitro. El correo escrito no coincide.";
       setNotice("");
-      setError("No se elimino el arbitro. El correo escrito no coincide.");
+      setError(message);
+      showAdminAlert(message, "error");
       return;
     }
 
@@ -2212,14 +3284,14 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       const successMessage = response.userDeleted
         ? "Arbitro eliminado definitivamente."
         : "Acceso de arbitro retirado correctamente.";
-      window.alert(successMessage);
       setNotice(successMessage);
       setError("");
+      showAdminAlert(successMessage);
     } catch (saveError) {
       setNotice("");
       const errorMessage = saveError.message || "No se pudo eliminar definitivamente el arbitro.";
-      window.alert(errorMessage);
       setError(errorMessage);
+      showAdminAlert(errorMessage, "error");
     } finally {
       setBusyAction("");
     }
@@ -2227,6 +3299,13 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
 
   async function saveMatchReferees(event, match) {
     event.preventDefault();
+    if (!authToken) {
+      const message = "Vuelve a iniciar sesion para guardar designaciones arbitrales.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+      return;
+    }
     const payload = getFormPayload(event.currentTarget);
     const submitter = event.nativeEvent?.submitter;
     if (submitter?.value === "clear") {
@@ -2244,7 +3323,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           ...current,
           [match.id]: { type: "error", message }
         }));
-        window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+        showAdminAlert(message, "error");
         return;
       }
       const assistantCount = [payload.assistantReferee1UserId, payload.assistantReferee2UserId].filter(Boolean).length;
@@ -2256,7 +3335,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           ...current,
           [match.id]: { type: "error", message }
         }));
-        window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+        showAdminAlert(message, "error");
         return;
       }
     }
@@ -2274,7 +3353,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
         ...current,
         [match.id]: { type: "error", message }
       }));
-      window.alert(`No se pudo completar el movimiento.\n\n${message}`);
+      showAdminAlert(message, "error");
       return;
     }
     const actionKey = `match-referees-${match.id}`;
@@ -2291,7 +3370,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       setNotice(successMessage);
       setError("");
       setSelectedAssignmentMatch(null);
-      window.alert(`Movimiento capturado correctamente.\n\n${successMessage}`);
+      showAdminAlert(successMessage);
     } catch (saveError) {
       const errorMessage = saveError.message || "No se pudo guardar la designacion arbitral.";
       setAssignmentFeedback((current) => ({
@@ -2300,7 +3379,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
       }));
       setNotice("");
       setError(errorMessage);
-      window.alert(`No se pudo completar el movimiento.\n\n${errorMessage}`);
+      showAdminAlert(errorMessage, "error");
     } finally {
       setBusyAction("");
     }
@@ -2406,7 +3485,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
           </div>
 
           <div className="referee-quick-actions">
-            <button className="primary" type="button" onClick={openRefereeCreateScreen}>+ Nuevo arbitro</button>
+            <button className="primary" type="button" disabled={!authToken} onClick={openRefereeCreateScreen}>+ Nuevo arbitro</button>
             <button type="button" onClick={() => setActiveRefereeTask("manage")}>Arbitros</button>
             <button type="button" onClick={() => setActiveRefereeTask("review")}>Actas</button>
             <button type="button" onClick={() => {
@@ -2523,7 +3602,7 @@ function RefereesPanel({ authToken, applyApiStore, league }) {
         <div className="referee-task-panel referee-tab-panel">
           <div className="referee-tab-head">
             <h3>Arbitros registrados</h3>
-            <button className="primary" type="button" onClick={openRefereeCreateScreen}>+ Nuevo arbitro</button>
+            <button className="primary" type="button" disabled={!authToken} onClick={openRefereeCreateScreen}>+ Nuevo arbitro</button>
           </div>
           <div className="referee-metric-grid compact">
             <ArbitrationMetricCard label="Activos" tone="ok" value={activeReferees.length} />
@@ -2901,7 +3980,7 @@ function RefereeTeamBadge({ side = "home", team }) {
   const initials = getTeamAbbreviation(team);
   return (
     <span className={`referee-admin-team-badge ${side} ${team?.logoUrl ? "has-image" : ""}`}>
-      {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{initials}</b>}
+      {team?.logoUrl ? <img alt="" decoding="async" loading="lazy" src={team.logoUrl} /> : <b>{initials}</b>}
     </span>
   );
 }
@@ -3266,6 +4345,7 @@ function AffiliationsPanel({
   const [sourceTeamId, setSourceTeamId] = useState("");
   const [targetTeamId, setTargetTeamId] = useState("");
   const [notice, setNotice] = useState("");
+  const [noticeType, setNoticeType] = useState("success");
   const activeAffiliations = useMemo(
     () => (league.teamAffiliations || []).filter((affiliation) => !affiliation.status || affiliation.status === "active"),
     [league.teamAffiliations]
@@ -3312,18 +4392,21 @@ function AffiliationsPanel({
     setTargetTeamId((current) => targetTeams.some((team) => team.id === current) ? current : targetTeams[0]?.id || "");
   }, [targetTeams]);
 
-  function submitAffiliation(event) {
+  async function submitAffiliation(event) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     if (payload.sourceTeamId === payload.targetTeamId) {
       const message = "El equipo origen y receptor deben ser distintos.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
     if (affiliationAlreadyExists) {
       const message = "Esta afiliacion ya esta activa.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -3331,24 +4414,28 @@ function AffiliationsPanel({
     const target = getTeam(league, payload.targetTeamId);
     if (!window.confirm(`¿Afiliar la plantilla de ${source?.name || "origen"} con ${target?.name || "receptor"}?`)) return;
     try {
-      onAddTeamAffiliation(payload);
+      await onAddTeamAffiliation(payload);
       const message = "Afiliacion guardada. La plantilla origen ya puede capturarse en actas del equipo receptor.";
       setNotice(message);
+      setNoticeType("success");
       showAdminAlert(message);
-      event.currentTarget.reset();
+      form.reset();
     } catch (error) {
       const message = error.message || "No se pudo guardar la afiliacion.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
 
-  function submitMerge(event) {
+  async function submitMerge(event) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     if (payload.targetPlayerId === payload.duplicatePlayerId) {
       const message = "El jugador principal y el duplicado deben ser distintos.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -3357,6 +4444,7 @@ function AffiliationsPanel({
     if (!target || !duplicate) {
       const message = "Selecciona jugador principal y registro duplicado.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -3367,6 +4455,7 @@ function AffiliationsPanel({
     if (targetCompetitionId !== duplicateCompetitionId) {
       const message = "No fusione jugadores de categorias distintas. Usa Vincular misma persona para conservar cada historial en su torneo.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -3376,24 +4465,28 @@ function AffiliationsPanel({
     const affiliationWarning = hasAffiliation ? "" : "\n\nAviso: no encontre una afiliacion del equipo principal hacia el equipo del duplicado. Conviene crearla antes para conservar numero alterno y elegibilidad.";
     if (!window.confirm(`¿Fusionar el duplicado ${duplicate.name} (${duplicateTeam?.name || "sin equipo"}) dentro de ${target.name} (${targetTeam?.name || "sin equipo"})?\n\nSe moveran actas, goles, tarjetas, sanciones y movimientos manuales al jugador principal.${affiliationWarning}`)) return;
     try {
-      onMergeDuplicatePlayer(payload);
+      await onMergeDuplicatePlayer(payload);
       const message = "Jugador duplicado fusionado. Revisa estadisticas y actas del jugador principal.";
       setNotice(message);
+      setNoticeType("success");
       showAdminAlert(message);
-      event.currentTarget.reset();
+      form.reset();
     } catch (error) {
       const message = error.message || "No se pudo fusionar el jugador duplicado.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
 
-  function submitIdentityLink(event) {
+  async function submitIdentityLink(event) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     if (payload.playerId === payload.linkedPlayerId) {
       const message = "Selecciona dos registros distintos de la misma persona.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -3402,6 +4495,7 @@ function AffiliationsPanel({
     if (!player || !linkedPlayer) {
       const message = "Selecciona dos jugadores para vincular.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -3411,6 +4505,7 @@ function AffiliationsPanel({
     if (alreadyLinked) {
       const message = "Estos registros ya estan vinculados.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -3418,18 +4513,20 @@ function AffiliationsPanel({
     const linkedTeam = getTeam(league, linkedPlayer.teamId);
     if (!window.confirm(`¿Vincular ${player.name} (${playerTeam?.name || "sin equipo"}) con ${linkedPlayer.name} (${linkedTeam?.name || "sin equipo"})?\n\nNo se moveran goles, tarjetas, sanciones ni actas. Cada registro conservara su historial en su categoria.`)) return;
     try {
-      onLinkPlayerIdentity({
+      await onLinkPlayerIdentity({
         playerId: player.id,
         linkedPlayerId: linkedPlayer.id,
         notes: payload.notes || "VINCULO DE IDENTIDAD DEPORTIVA"
       });
       const message = "Identidad vinculada. Los historiales por torneo se conservan separados.";
       setNotice(message);
+      setNoticeType("success");
       showAdminAlert(message);
-      event.currentTarget.reset();
+      form.reset();
     } catch (error) {
       const message = error.message || "No se pudo vincular la identidad deportiva.";
       setNotice(message);
+      setNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
@@ -3449,7 +4546,7 @@ function AffiliationsPanel({
           <span><b>{competitions.length}</b> Categorias</span>
         </div>
       </div>
-      {notice && <p className="auth-ok">{notice}</p>}
+      {notice && <p className={noticeType === "error" ? "auth-error" : "auth-ok"}>{notice}</p>}
 
       <div className="affiliation-workspace">
         <form className="affiliation-form affiliation-builder" onSubmit={submitAffiliation}>
@@ -3497,7 +4594,7 @@ function AffiliationsPanel({
           <label className="wide-field">Notas operativas
             <textarea name="notes" placeholder="Ej. Plantilla de segunda afiliada a primera para este torneo." />
           </label>
-          <button className="primary" type="submit" disabled={teams.length < 2 || !sourceTeams.length || !targetTeams.length || affiliationAlreadyExists}>Guardar afiliacion</button>
+          <button className="primary" type="submit" disabled={teams.length < 2 || !sourceTeams.length || !targetTeams.length}>Guardar afiliacion</button>
         </form>
 
         <section className="affiliation-maintenance-card">
@@ -3564,16 +4661,18 @@ function AffiliationsPanel({
                   })}
                 </div>
                 {link.notes && <p>{link.notes}</p>}
-                <button className="danger" type="button" onClick={() => {
+                <button className="danger" type="button" onClick={async () => {
                   if (!window.confirm("¿Quitar este vinculo de identidad? No se modificaran eventos ni jugadores.")) return;
                   try {
-                    onDeletePlayerIdentityLink(link.id);
+                    await onDeletePlayerIdentityLink(link.id);
                     const message = "Vinculo de identidad eliminado.";
                     setNotice(message);
+                    setNoticeType("success");
                     showAdminAlert(message);
                   } catch (error) {
                     const message = error.message || "No se pudo quitar el vinculo de identidad.";
                     setNotice(message);
+                    setNoticeType("error");
                     showAdminAlert(message, "error");
                   }
                 }}>Quitar vinculo</button>
@@ -3611,16 +4710,18 @@ function AffiliationsPanel({
                   <span><small>Estado</small><b>{affiliation.status === "active" ? "Activa" : affiliation.status}</b></span>
                 </div>
                 {affiliation.notes && <p>{affiliation.notes}</p>}
-                <form className="affiliation-number-form" onSubmit={(event) => {
+                <form className="affiliation-number-form" onSubmit={async (event) => {
                   event.preventDefault();
                   try {
-                    onUpdateTeamAffiliationPlayerNumber(affiliation.id, getFormPayload(event.currentTarget));
+                    await onUpdateTeamAffiliationPlayerNumber(affiliation.id, getFormPayload(event.currentTarget));
                     const message = "Numero de afiliado actualizado.";
                     setNotice(message);
+                    setNoticeType("success");
                     showAdminAlert(message);
                   } catch (error) {
                     const message = error.message || "No se pudo actualizar el numero de afiliado.";
                     setNotice(message);
+                    setNoticeType("error");
                     showAdminAlert(message, "error");
                   }
                 }}>
@@ -3634,16 +4735,18 @@ function AffiliationsPanel({
                   <input name="number" type="number" min="0" max="9999" placeholder="No." />
                   <button type="submit" disabled={!sourcePlayers.length}>Guardar</button>
                 </form>
-                <button className="danger" type="button" onClick={() => {
+                <button className="danger" type="button" onClick={async () => {
                   if (!window.confirm("¿Eliminar esta afiliacion? Los jugadores dejaran de estar disponibles en el equipo receptor.")) return;
                   try {
-                    onDeleteTeamAffiliation(affiliation.id);
+                    await onDeleteTeamAffiliation(affiliation.id);
                     const message = "Afiliacion eliminada.";
                     setNotice(message);
+                    setNoticeType("success");
                     showAdminAlert(message);
                   } catch (error) {
                     const message = error.message || "No se pudo eliminar la afiliacion.";
                     setNotice(message);
+                    setNoticeType("error");
                     showAdminAlert(message, "error");
                   }
                 }}>Quitar afiliacion</button>
@@ -3659,28 +4762,58 @@ function AffiliationsPanel({
 
 function VenuesPanel({ league, onAddVenue, onDeleteVenue, onUpdateVenue }) {
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const venues = getSortedVenues(league);
 
-  function submitVenue(event) {
+  async function submitVenue(event) {
     event.preventDefault();
+    const form = event.currentTarget;
     const payload = getFormPayload(event.currentTarget);
     if (!window.confirm(`¿Agregar la cancha ${payload.name || ""} a ${league.name}?`)) return;
-    onAddVenue(payload);
-    setNotice("Cancha agregada correctamente.");
-    event.currentTarget.reset();
+    try {
+      await onAddVenue(payload);
+      setError("");
+      setNotice("Cancha agregada correctamente.");
+      showAdminAlert("Cancha agregada correctamente.");
+      form.reset();
+    } catch (venueError) {
+      const message = venueError.message || "No se pudo agregar la cancha.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+    }
   }
 
-  function updateExistingVenue(event, venue) {
+  async function updateExistingVenue(event, venue) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!window.confirm(`¿Guardar cambios de la cancha ${venue.name}?`)) return;
-    onUpdateVenue(venue.id, getFormPayload(event.currentTarget));
-    setNotice("Cancha actualizada correctamente.");
+    try {
+      await onUpdateVenue(venue.id, getFormPayload(form));
+      setError("");
+      setNotice("Cancha actualizada correctamente.");
+      showAdminAlert("Cancha actualizada correctamente.");
+    } catch (venueError) {
+      const message = venueError.message || "No se pudo actualizar la cancha.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+    }
   }
 
-  function deleteExistingVenue(venue) {
+  async function deleteExistingVenue(venue) {
     if (!window.confirm(`¿Eliminar la cancha ${venue.name}? Los partidos ya programados conservaran su cancha capturada.`)) return;
-    onDeleteVenue(venue.id);
-    setNotice("Cancha eliminada del catalogo correctamente.");
+    try {
+      await onDeleteVenue(venue.id);
+      setError("");
+      setNotice("Cancha eliminada del catalogo correctamente.");
+      showAdminAlert("Cancha eliminada del catalogo correctamente.");
+    } catch (venueError) {
+      const message = venueError.message || "No se pudo eliminar la cancha.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   const activeVenueCount = venues.filter((venue) => (venue.status || "active") === "active").length;
@@ -3697,6 +4830,7 @@ function VenuesPanel({ league, onAddVenue, onDeleteVenue, onUpdateVenue }) {
         <b>{activeVenueCount} activas</b>
       </div>
       {notice && <p className="auth-ok">{notice}</p>}
+      {error && <p className="auth-error">{error}</p>}
 
       <form className="venue-form" onSubmit={submitVenue}>
         <h3>Nueva cancha</h3>
@@ -3753,6 +4887,7 @@ function VenuesPanel({ league, onAddVenue, onDeleteVenue, onUpdateVenue }) {
 
 function AnnouncementsPanel({ league, onAddAnnouncement, onDeleteAnnouncement, onUpdateAnnouncement }) {
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const [createAnnouncementOpen, setCreateAnnouncementOpen] = useState(false);
   const [announcementQuery, setAnnouncementQuery] = useState("");
   const [announcementStatusFilter, setAnnouncementStatusFilter] = useState("all");
@@ -3775,26 +4910,55 @@ function AnnouncementsPanel({ league, onAddAnnouncement, onDeleteAnnouncement, o
   });
   const visibleAnnouncements = filteredAnnouncements.slice(0, visibleAnnouncementLimit);
 
-  function submitAnnouncement(event) {
+  async function submitAnnouncement(event) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!window.confirm("¿Publicar/guardar este aviso para la liga?")) return;
-    onAddAnnouncement(getFormPayload(event.currentTarget));
-    setNotice("Aviso guardado correctamente.");
-    event.currentTarget.reset();
-    setCreateAnnouncementOpen(false);
+    try {
+      await onAddAnnouncement(getFormPayload(form));
+      setError("");
+      setNotice("Aviso guardado correctamente.");
+      showAdminAlert("Aviso guardado correctamente.");
+      form.reset();
+      setCreateAnnouncementOpen(false);
+    } catch (announcementError) {
+      const message = announcementError.message || "No se pudo guardar el aviso.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+    }
   }
 
-  function updateExistingAnnouncement(event, announcementId) {
+  async function updateExistingAnnouncement(event, announcementId) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!window.confirm("¿Guardar cambios de este aviso?")) return;
-    onUpdateAnnouncement(announcementId, getFormPayload(event.currentTarget));
-    setNotice("Aviso actualizado correctamente.");
+    try {
+      await onUpdateAnnouncement(announcementId, getFormPayload(form));
+      setError("");
+      setNotice("Aviso actualizado correctamente.");
+      showAdminAlert("Aviso actualizado correctamente.");
+    } catch (announcementError) {
+      const message = announcementError.message || "No se pudo actualizar el aviso.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+    }
   }
 
-  function deleteExistingAnnouncement(announcement) {
+  async function deleteExistingAnnouncement(announcement) {
     if (!window.confirm(`¿Seguro que quieres eliminar el aviso "${announcement.title}"?`)) return;
-    onDeleteAnnouncement(announcement.id);
-    setNotice("Aviso eliminado correctamente.");
+    try {
+      await onDeleteAnnouncement(announcement.id);
+      setError("");
+      setNotice("Aviso eliminado correctamente.");
+      showAdminAlert("Aviso eliminado correctamente.");
+    } catch (announcementError) {
+      const message = announcementError.message || "No se pudo eliminar el aviso.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   return (
@@ -3819,6 +4983,7 @@ function AnnouncementsPanel({ league, onAddAnnouncement, onDeleteAnnouncement, o
       </div>
       <p className="helper-text">Los avisos activos apareceran en la pagina publica. Usa archivado para conservar historial sin mostrarlo al publico.</p>
       {notice && <p className="auth-ok">{notice}</p>}
+      {error && <p className="auth-error">{error}</p>}
 
       <button className="announcement-create-button" type="button" onClick={() => setCreateAnnouncementOpen(true)}>
           <span><AdminIcon type="announcements" /></span>
@@ -4124,7 +5289,8 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
 
   async function submitCaptureAction(event, action, confirmMessage, successMessage, options = {}) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     if (confirmMessage && !window.confirm(confirmMessage(payload))) return;
     setCaptureNotice("");
     setCaptureError("");
@@ -4133,7 +5299,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
       if (result === false) return;
       const message = successMessage(payload);
       showAdminAlert(message);
-      if (options.reset !== false) event.currentTarget.reset();
+      if (options.reset !== false) form.reset();
     } catch (error) {
       const message = error.message || "No se pudo completar el movimiento.";
       setCaptureError(message);
@@ -4511,7 +5677,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
                   const payload = getFormPayload(event.currentTarget);
                   const phase = PLAYOFF_PHASE_OPTIONS.find((item) => item.value === payload.phase) || PLAYOFF_PHASE_OPTIONS[2];
                   if (playoffStandings.length < phase.teams) {
-                    window.alert(`No hay suficientes equipos con tabla para ${phase.label}. Se requieren ${phase.teams} equipos.`);
+                    showAdminAlert(`No hay suficientes equipos con tabla para ${phase.label}. Se requieren ${phase.teams} equipos.`, "error");
                     return;
                   }
                   const message = `Se generara ${phase.label} con cruces por tabla: 1 vs ${phase.teams}, 2 vs ${phase.teams - 1}, etc. ¿Continuar?`;
@@ -4623,11 +5789,12 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
   const playoffTieBreakerLabel = PLAYOFF_TIE_BREAKER_OPTIONS.find((option) => option.value === playoffTieBreaker)?.label || "Tiempo extra / penales";
   const playoffFinalTieBreakerLabel = PLAYOFF_TIE_BREAKER_OPTIONS.find((option) => option.value === playoffFinalTieBreaker)?.label || "Tiempo extra / penales";
   const [rulesNotice, setRulesNotice] = useState("");
+  const [rulesNoticeType, setRulesNoticeType] = useState("success");
 
   return (
     <section className="panel admin-data-panel config-admin-panel rules-admin-panel">
       <SectionHeading eyebrow="Estatutos" title="Reglas deportivas de la liga" />
-      {rulesNotice && <p className="auth-ok">{rulesNotice}</p>}
+      {rulesNotice && <p className={rulesNoticeType === "error" ? "auth-error" : "auth-ok"}>{rulesNotice}</p>}
       <div className="admin-data-hero config-hero">
         <div>
           <span>Reglamento operativo</span>
@@ -4644,10 +5811,12 @@ function RulesPanel({ league, onAddAppearanceAdjustment, onDeleteAppearanceAdjus
           try {
             await onSaveRules(getFormPayload(event.currentTarget));
             setRulesNotice("Reglas guardadas correctamente.");
+            setRulesNoticeType("success");
             showAdminAlert("Reglas guardadas correctamente.");
           } catch (error) {
             const message = error.message || "No se pudieron guardar las reglas.";
             setRulesNotice(message);
+            setRulesNoticeType("error");
             showAdminAlert(message, "error");
           }
         }}
@@ -4740,6 +5909,9 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
   const eligibilityByPlayerId = useMemo(() => calculatePlayerAppearanceEligibility(league), [league]);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [progressLimit, setProgressLimit] = useState(8);
+  const [historyLimit, setHistoryLimit] = useState(8);
   const history = useMemo(() => (league.appearanceAdjustments || [])
     .filter((adjustment) => {
       if (!query.trim()) return true;
@@ -4749,19 +5921,34 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
         .includes(normalizeAdminSearchTerm(query));
     })
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.id).localeCompare(String(a.id))), [league, query]);
+  const progressPlayers = players.slice(0, progressLimit);
+  const visibleHistory = history.slice(0, historyLimit);
 
   function submitAdjustment(event) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     const player = getPlayer(league, payload.playerId);
     if (!player) {
-      setNotice("Selecciona un jugador valido.");
+      const message = "Selecciona un jugador valido.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
       return;
     }
     if (!window.confirm(`¿Guardar ajuste de partidos jugados para ${player.name}?`)) return;
-    onAddAppearanceAdjustment(payload);
-    event.currentTarget.reset();
-    setNotice("Ajuste de partidos jugados guardado.");
+    try {
+      onAddAppearanceAdjustment(payload);
+      form.reset();
+      setError("");
+      setNotice("Ajuste de partidos jugados guardado.");
+      showAdminAlert("Ajuste de partidos jugados guardado.");
+    } catch (adjustmentError) {
+      const message = adjustmentError.message || "No se pudo guardar el ajuste de partidos jugados.";
+      setNotice("");
+      setError(message);
+      showAdminAlert(message, "error");
+    }
   }
 
   return (
@@ -4773,6 +5960,7 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
         </div>
       </div>
       {notice && <p className="auth-ok">{notice}</p>}
+      {error && <p className="auth-error">{error}</p>}
       <div className="discipline-admin-grid">
         <form className="discipline-admin-form" onSubmit={submitAdjustment}>
           <h3>Ajuste manual</h3>
@@ -4808,7 +5996,7 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
             </div>
           </div>
           <div className="appearance-progress-list">
-            {players.slice(0, 8).map((player) => {
+            {progressPlayers.map((player) => {
               const eligibility = eligibilityByPlayerId.get(player.id);
               const team = getTeam(league, player.teamId);
               return (
@@ -4821,6 +6009,11 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
                 </article>
               );
             })}
+            {players.length > progressPlayers.length && (
+              <button className="appearance-more-button" type="button" onClick={() => setProgressLimit((current) => current + 8)}>
+                Ver mas jugadores ({players.length - progressPlayers.length} restantes)
+              </button>
+            )}
             {!players.length && <p className="empty">No hay jugadores registrados.</p>}
           </div>
         </div>
@@ -4832,9 +6025,12 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
             <h3>Historial de ajustes</h3>
             <span>{history.length} movimiento(s)</span>
           </div>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar jugador o motivo" />
+          <input value={query} onChange={(event) => {
+            setQuery(event.target.value);
+            setHistoryLimit(8);
+          }} placeholder="Buscar jugador o motivo" />
         </div>
-        {history.map((adjustment) => {
+        {visibleHistory.map((adjustment) => {
           const player = getPlayer(league, adjustment.playerId);
           const team = player ? getTeam(league, player.teamId) : null;
           return (
@@ -4849,8 +6045,17 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
                 type="button"
                 onClick={() => {
                   if (!window.confirm("¿Eliminar este ajuste manual de partidos jugados?")) return;
-                  onDeleteAppearanceAdjustment(adjustment.id);
-                  setNotice("Ajuste eliminado.");
+                  try {
+                    onDeleteAppearanceAdjustment(adjustment.id);
+                    setError("");
+                    setNotice("Ajuste eliminado.");
+                    showAdminAlert("Ajuste eliminado.");
+                  } catch (adjustmentError) {
+                    const message = adjustmentError.message || "No se pudo eliminar el ajuste.";
+                    setNotice("");
+                    setError(message);
+                    showAdminAlert(message, "error");
+                  }
                 }}
               >
                 Eliminar
@@ -4858,6 +6063,11 @@ function AppearanceAdjustmentsPanel({ league, onAddAppearanceAdjustment, onDelet
             </article>
           );
         })}
+        {history.length > visibleHistory.length && (
+          <button className="appearance-more-button" type="button" onClick={() => setHistoryLimit((current) => current + 8)}>
+            Ver mas movimientos ({history.length - visibleHistory.length} restantes)
+          </button>
+        )}
         {!history.length && <p className="empty">No hay ajustes manuales registrados.</p>}
       </div>
     </div>
@@ -4868,7 +6078,7 @@ function AdminMatchTeamBadge({ team, side = "home" }) {
   const initials = getInitials(team?.name || (side === "home" ? "L" : "V"));
   return (
     <span className={`admin-match-team-badge ${side} ${team?.logoUrl ? "has-image" : ""}`}>
-      {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{initials}</b>}
+      {team?.logoUrl ? <img alt="" decoding="async" loading="lazy" src={team.logoUrl} /> : <b>{initials}</b>}
     </span>
   );
 }
@@ -5181,8 +6391,10 @@ function PublicMediaPanel({ authToken, league, onAddMediaItem, onDeleteMediaItem
 
   async function updateMedia(event, item) {
     event.preventDefault();
+    const form = event.currentTarget;
     try {
-      const result = await onUpdateMediaItem(item.id, await buildMediaPayload(event.currentTarget, item.imageUrl || ""));
+      const payload = await buildMediaPayload(form, item.imageUrl || "");
+      const result = await onUpdateMediaItem(item.id, payload);
       if (result === false) return;
       showAdminAlert("Foto actualizada correctamente.");
     } catch (error) {
@@ -5255,7 +6467,7 @@ function PublicMediaPanel({ authToken, league, onAddMediaItem, onDeleteMediaItem
         {visibleCompetitionMedia.map((item) => (
           <details className="public-media-card" key={item.id}>
             <summary>
-              <span className="public-media-thumb">{item.imageUrl ? <img alt="" src={item.imageUrl} /> : <b>IMG</b>}</span>
+              <span className="public-media-thumb">{item.imageUrl ? <img alt="" decoding="async" loading="lazy" src={item.imageUrl} /> : <b>IMG</b>}</span>
               <div>
                 <strong>{item.title}</strong>
                 <small>{getPublicMediaTypeLabel(item.type)} · {(item.status || "active") === "active" ? "Publicado" : "Archivado"} · Orden {item.sortOrder || 0}</small>
@@ -5516,7 +6728,7 @@ function ManagementBoard({
   async function handleMatchSave(matchId, form) {
     const payload = getFormPayload(form);
     if (isActiveScheduleStatus(payload.status) && !isValidScheduleDate(payload.date)) {
-      window.alert("Para programar o reprogramar este partido, selecciona una fecha valida.");
+      showAdminAlert("Para programar o reprogramar este partido, selecciona una fecha valida.", "error");
       form.elements.date?.focus();
       return;
     }
@@ -5598,7 +6810,7 @@ function ManagementBoard({
   function renderDataTeamMark(team, side = "home") {
     return (
       <span className={`operation-data-team-mark ${side} ${team?.logoUrl ? "has-image" : ""}`}>
-        {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{getInitials(team?.name || "EQ")}</b>}
+        {team?.logoUrl ? <img alt="" decoding="async" loading="lazy" src={team.logoUrl} /> : <b>{getInitials(team?.name || "EQ")}</b>}
       </span>
     );
   }
@@ -5606,7 +6818,7 @@ function ManagementBoard({
   function renderPlayerAvatar(player) {
     return (
       <span className={`operation-data-player-avatar ${player?.photoUrl ? "has-image" : ""}`}>
-        {player?.photoUrl ? <img alt="" src={player.photoUrl} /> : <b>{getInitials(player?.name || "J")}</b>}
+        {player?.photoUrl ? <img alt="" decoding="async" loading="lazy" src={player.photoUrl} /> : <b>{getInitials(player?.name || "J")}</b>}
       </span>
     );
   }
@@ -5975,13 +7187,20 @@ function ManagementBoard({
                   type="button"
                   onClick={async () => {
                     if (!selectedCompetition?.id) {
-                      window.alert("Selecciona una categoria especifica para eliminar toda su liguilla.");
+                      showAdminAlert("Selecciona una categoria especifica para eliminar toda su liguilla.", "error");
                       return;
                     }
                     if (!window.confirm(`¿Eliminar toda la liguilla de ${selectedCompetition.name || "este torneo"}? Esta accion borrara todos los partidos de fase final de esta categoria.`)) return;
-                    const result = await onDeletePlayoffMatches({ competitionId: selectedCompetition.id });
-                    if (result === false) return;
-                    setListNotice("Liguilla eliminada correctamente.");
+                    try {
+                      const result = await onDeletePlayoffMatches({ competitionId: selectedCompetition.id });
+                      if (result === false) return;
+                      setListNotice("Liguilla eliminada correctamente.");
+                      showAdminAlert("Liguilla eliminada correctamente.");
+                    } catch (error) {
+                      const message = error.message || "No se pudo eliminar la liguilla.";
+                      setListNotice("");
+                      showAdminAlert(message, "error");
+                    }
                   }}
                 >
                   Eliminar liguilla
@@ -6166,6 +7385,66 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   const [quickPlayerOpen, setQuickPlayerOpen] = useState(false);
   const [quickPlayerSaving, setQuickPlayerSaving] = useState(false);
   const eventComposerRef = useRef(null);
+  const suspensionNoticeByPlayerId = useMemo(() => {
+    const notices = calculateSuspensionNotices(competitionLeague);
+    return new Map(
+      notices
+        .filter((notice) => notice.status === "active" && notice.player?.id)
+        .map((notice) => [notice.player.id, notice])
+    );
+  }, [competitionLeague]);
+  const playoffEligibilityByPlayerId = useMemo(
+    () => calculatePlayerAppearanceEligibility(competitionLeague),
+    [competitionLeague]
+  );
+
+  function getAdminPlayerRestrictionWarnings(player) {
+    if (!player) return [];
+    const warnings = [];
+    const suspension = suspensionNoticeByPlayerId.get(player.id);
+    if (suspension) {
+      if (suspension.pendingReview) {
+        warnings.push({
+          type: "suspension",
+          label: "Roja pendiente",
+          detail: `Expulsado sujeto a comision: ${suspension.reason || "Revision disciplinaria"}`
+        });
+      } else if (suspension.indefinite) {
+        warnings.push({
+          type: "suspension",
+          label: "Inhabilitado",
+          detail: `Inhabilitado indefinido: ${suspension.reason || suspension.type || "Sancion activa"}`
+        });
+      } else {
+        warnings.push({
+          type: "suspension",
+          label: "Suspendido",
+          detail: `Suspendido${suspension.remainingMatches ? ` (${suspension.remainingMatches} juego(s))` : ""}${suspension.returnRound ? ` | Regresa J${suspension.returnRound}` : ""}`
+        });
+      }
+    }
+    const isPlayoffMatch = selectedMatch?.stage === "playoff" || Boolean(selectedMatch?.playoffRound);
+    const eligibility = playoffEligibilityByPlayerId.get(player.id);
+    if (isPlayoffMatch && eligibility?.applies && !eligibility.eligible) {
+      warnings.push({
+        type: "playoff",
+        label: "Liguilla",
+        detail: `No cumple liguilla: ${eligibility.recognizedAppearances || 0}/${eligibility.required || 0} PJ`
+      });
+    }
+    return warnings;
+  }
+
+  function getAdminPlayerRestrictionNotice(player) {
+    return getAdminPlayerRestrictionWarnings(player).map((warning) => warning.detail).join(" | ");
+  }
+
+  function getAdminPlayerOptionLabel(player) {
+    const warningText = getAdminPlayerRestrictionWarnings(player)
+      .map((warning) => warning.label)
+      .join(" / ");
+    return warningText ? ` | AVISO: ${warningText}` : "";
+  }
 
   useEffect(() => {
     const defaultCompetitionId = getDefaultCompetitionId(league);
@@ -6447,7 +7726,9 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   }
 
   function saveEventDraft(draftOverride = null) {
-    const draftToSave = draftOverride || eventDraft;
+    const draftToSave = draftOverride && typeof draftOverride === "object" && "type" in draftOverride
+      ? draftOverride
+      : eventDraft;
     if (!draftToSave) return;
     if (draftToSave.type === "injury_note" || draftToSave.type === "other_note") {
       const team = getTeam(league, draftToSave.teamId);
@@ -6473,6 +7754,13 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
     setEventTeamId(savedDraft.teamId || selectedEventTeamId);
     setQuickPlayerOpen(false);
     setEventDraft(null);
+    const playerTeamId = savedDraft.type === "own_goal" ? getOpponentTeamId(savedDraft.teamId) : savedDraft.teamId;
+    const selectedPlayer = getPlayersForEvent(savedDraft.type, savedDraft.teamId).find((player) => player.id === savedDraft.playerId)
+      || getPlayer(league, savedDraft.playerId);
+    const restrictionNotice = getAdminPlayerRestrictionNotice(selectedPlayer, playerTeamId);
+    if (restrictionNotice) {
+      showAdminAlert(`Aviso: ${restrictionNotice}. El evento quedo guardado normalmente.`, "warning");
+    }
   }
 
   function buildMissingGoalEvents(teamId, currentEvents) {
@@ -6717,6 +8005,9 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
           <strong>{getMatchEventLabel(eventItem.type, eventItem)}</strong>
           <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
           <small>{eventTeam?.name || "Equipo"}</small>
+          {getAdminPlayerRestrictionWarnings(player).map((warning) => (
+            <small className={`admin-event-restriction-warning ${warning.type}`} key={`${eventItem.id}-${warning.type}`}>{warning.detail}</small>
+          ))}
         </div>
         <button type="button" onClick={() => openEventModal(eventItem.type, eventTeamId, eventItem)} aria-label={`Editar ${getMatchEventLabel(eventItem.type, eventItem)}`}>Editar</button>
         <button className="danger ghost-danger" type="button" onClick={() => removeEvent(eventItem.id)} aria-label={`Quitar ${getMatchEventLabel(eventItem.type, eventItem)}`}>Quitar</button>
@@ -6740,6 +8031,9 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
         <div>
           <strong>{getMatchEventLabel(eventItem.type, eventItem)}</strong>
           <span>{playerNumber ? `#${playerNumber} ` : ""}{player?.name || "Jugador pendiente"}</span>
+          {getAdminPlayerRestrictionWarnings(player).map((warning) => (
+            <em className={`admin-event-restriction-warning ${warning.type}`} key={`${eventItem.id}-final-${warning.type}`}>{warning.detail}</em>
+          ))}
         </div>
         <small>{getAdminEventMinuteText(eventItem) ? `${getAdminEventMinuteText(eventItem)} · ` : ""}{eventTeam?.name || "Equipo"}</small>
       </article>
@@ -6854,7 +8148,12 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
                 >
                   <b>{number || "-"}</b>
                   <span>{player.name}</span>
-                  {getPlayerAffiliationForTeam(league, player.id, playerTeamId) && <small>{getTeam(league, player.teamId)?.name || "Afiliado"}</small>}
+                  <em className="admin-player-flags">
+                    {getPlayerAffiliationForTeam(league, player.id, playerTeamId) && <small>{getTeam(league, player.teamId)?.name || "Afiliado"}</small>}
+                    {getAdminPlayerRestrictionWarnings(player).map((warning) => (
+                      <small className={`restriction ${warning.type}`} key={`${player.id}-${warning.type}`}>{warning.label}</small>
+                    ))}
+                  </em>
                 </button>
               );
             })}
@@ -6862,11 +8161,19 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
           </div>
 
           <label className="admin-sheet-event-field wide-field sr-only">Seleccionar jugador
-            <select value={eventDraft.playerId || ""} onChange={(event) => updateEventDraft("playerId", event.target.value)}>
+            <select
+              value={eventDraft.playerId || ""}
+              onChange={(event) => {
+                updateEventDraft("playerId", event.target.value);
+                const selectedPlayer = eventPlayers.find((player) => player.id === event.target.value);
+                const restrictionNotice = getAdminPlayerRestrictionNotice(selectedPlayer);
+                if (restrictionNotice) showAdminAlert(`Aviso: ${restrictionNotice}. El evento se puede capturar normalmente.`, "warning");
+              }}
+            >
               <option value="">{eventPlayers.length ? "Selecciona jugador" : "Sin jugadores disponibles"}</option>
               {eventPlayers.map((player) => (
                 <option key={player.id} value={player.id}>
-                  #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}
+                  #{getPlayerNumberForTeam(league, player.id, playerTeamId) || "-"} {player.name}{getPlayerAffiliationForTeam(league, player.id, playerTeamId) ? ` | AFILIADO: ${getTeam(league, player.teamId)?.name || "ORIGEN"}` : ""}{getAdminPlayerOptionLabel(player)}
                 </option>
               ))}
             </select>
@@ -6907,7 +8214,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
 
         <div className="admin-sheet-event-composer-actions">
           <button type="button" onClick={() => setEventDraft(null)}>Cancelar</button>
-          <button className="primary" type="button" onClick={saveEventDraft}>Guardar evento</button>
+          <button className="primary" type="button" onClick={() => saveEventDraft()}>Guardar evento</button>
         </div>
       </section>
     );
@@ -6939,7 +8246,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
       if (homeGoalEvents !== expectedHomeGoals || awayGoalEvents !== expectedAwayGoals) {
         const message = `La cantidad de goles del marcador (${expectedTotal}) no coincide con los goles registrados en eventos (${capturedTotal}).`;
         setValidationMessage(message);
-        window.alert(message);
+        showAdminAlert(message, "error");
         return;
       }
     }
@@ -6964,7 +8271,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
 
     return (
       <span className={`admin-sheet-team-badge ${side}`}>
-        {team?.logoUrl ? <img alt="" src={team.logoUrl} /> : <b>{initials || "EQ"}</b>}
+        {team?.logoUrl ? <img alt="" decoding="async" loading="lazy" src={team.logoUrl} /> : <b>{initials || "EQ"}</b>}
       </span>
     );
   }
@@ -7466,14 +8773,15 @@ function DisciplineControlPanel({
 
   async function submitAdjustment(event) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     if (!window.confirm("¿Guardar este ajuste manual de amarillas?")) return;
     try {
       await onAddDisciplineAdjustment(payload);
       const message = "Ajuste disciplinario guardado.";
       setNotice(message);
       showAdminAlert(message);
-      event.currentTarget.reset();
+      form.reset();
     } catch (error) {
       const message = error.message || "No se pudo guardar el ajuste disciplinario.";
       setNotice(message);
@@ -7483,14 +8791,15 @@ function DisciplineControlPanel({
 
   async function submitReset(event) {
     event.preventDefault();
-    const payload = getFormPayload(event.currentTarget);
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
     if (!window.confirm("¿Marcar sancion cumplida y resetear acumulacion disciplinaria?")) return;
     try {
       await onAddDisciplineReset(payload);
       const message = "Cumplimiento registrado. La acumulacion disciplinaria se reinicia desde esa fecha.";
       setNotice(message);
       showAdminAlert(message);
-      event.currentTarget.reset();
+      form.reset();
     } catch (error) {
       const message = error.message || "No se pudo registrar el cumplimiento disciplinario.";
       setNotice(message);
@@ -8136,6 +9445,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   const clearedSanctions = sanctions.filter((sanction) => sanction.status === "cleared");
   const pendingReviews = getPendingDisciplinaryReviews(activeLeague);
   const [sanctionNotice, setSanctionNotice] = useState("");
+  const [sanctionNoticeType, setSanctionNoticeType] = useState("success");
   const [sanctionIndefinite, setSanctionIndefinite] = useState(false);
   const [pendingResolutionType, setPendingResolutionType] = useState({});
   const [sanctionQuery, setSanctionQuery] = useState("");
@@ -8166,6 +9476,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
     if (!payload.playerId) {
       const message = "Selecciona el jugador sancionado.";
       setSanctionNotice(message);
+      setSanctionNoticeType("error");
       showAdminAlert(message, "error");
       return;
     }
@@ -8174,6 +9485,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
       await onAddPlayerSanction(payload);
       const message = "Sancion agregada correctamente.";
       setSanctionNotice(message);
+      setSanctionNoticeType("success");
       showAdminAlert(message);
       form.reset();
       setSanctionIndefinite(false);
@@ -8184,6 +9496,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
     } catch (error) {
       const message = error.message || "No se pudo agregar la sancion.";
       setSanctionNotice(message);
+      setSanctionNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
@@ -8193,7 +9506,10 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
     const form = event.currentTarget;
     const resolutionType = pendingResolutionType[item.id] || "matches";
     if (!onResolveMatchDiscipline) {
-      setSanctionNotice("No hay accion configurada para resolver expulsiones desde el acta.");
+      const message = "No hay accion configurada para resolver expulsiones desde el acta.";
+      setSanctionNotice(message);
+      setSanctionNoticeType("error");
+      showAdminAlert(message, "error");
       return;
     }
     if (!window.confirm(`¿Confirmas dictamen disciplinario para ${item.player?.name || "este jugador"}?`)) return;
@@ -8215,10 +9531,12 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
         ? "Jugador liberado por comision disciplinaria."
         : "Dictamen disciplinario agregado correctamente.";
       setSanctionNotice(message);
+      setSanctionNoticeType("success");
       showAdminAlert(message);
     } catch (error) {
       const message = error.message || "No se pudo guardar el dictamen disciplinario.";
       setSanctionNotice(message);
+      setSanctionNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
@@ -8226,7 +9544,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   return (
     <section className="panel admin-data-panel commission-panel">
       <SectionHeading eyebrow="Comision disciplinaria" title="Sanciones extraordinarias" />
-      {sanctionNotice && <p className="auth-ok">{sanctionNotice}</p>}
+      {sanctionNotice && <p className={sanctionNoticeType === "error" ? "auth-error" : "auth-ok"}>{sanctionNotice}</p>}
       <form className="sanction-form" onSubmit={submitSanction}>
         <label>Torneo
           <CompetitionSelect
@@ -8382,10 +9700,12 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
                     await onDeletePlayerSanction(sanction.id);
                     const message = "Sancion eliminada correctamente.";
                     setSanctionNotice(message);
+                    setSanctionNoticeType("success");
                     showAdminAlert(message);
                   } catch (error) {
                     const message = error.message || "No se pudo eliminar la sancion.";
                     setSanctionNotice(message);
+                    setSanctionNoticeType("error");
                     showAdminAlert(message, "error");
                   }
                 }}
@@ -8431,6 +9751,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
 function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpdatePlayerInjury }) {
   const activeLeague = scopeLeagueToCompetition(league, getDefaultCompetitionId(league));
   const [injuryNotice, setInjuryNotice] = useState("");
+  const [injuryNoticeType, setInjuryNoticeType] = useState("success");
   const [injuryQuery, setInjuryQuery] = useState("");
   const [injuryStatusFilter, setInjuryStatusFilter] = useState("active");
   const injuries = [...(activeLeague.injuries || [])].sort((a, b) => (
@@ -8450,36 +9771,45 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
 
   async function submitNewInjury(event) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!activeLeague.players.length) {
-      window.alert("Primero registra jugadores para poder agregar lesiones.");
+      const message = "Primero registra jugadores para poder agregar lesiones.";
+      setInjuryNotice(message);
+      setInjuryNoticeType("error");
+      showAdminAlert(message, "error");
       return;
     }
 
     if (!window.confirm("¿Confirmas registrar esta lesion?")) return;
     try {
-      await onAddPlayerInjury(getFormPayload(event.currentTarget));
+      await onAddPlayerInjury(getFormPayload(form));
       const message = "Lesion registrada. Si esta activa, se mostrara en la vista publica.";
       setInjuryNotice(message);
+      setInjuryNoticeType("success");
       showAdminAlert(message);
-      event.currentTarget.reset();
+      form.reset();
     } catch (error) {
       const message = error.message || "No se pudo registrar la lesion.";
       setInjuryNotice(message);
+      setInjuryNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
 
   async function updateInjury(event, injuryId) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!window.confirm("¿Guardar cambios de esta lesion?")) return;
     try {
-      await onUpdatePlayerInjury(injuryId, getFormPayload(event.currentTarget));
+      await onUpdatePlayerInjury(injuryId, getFormPayload(form));
       const message = "Lesion actualizada correctamente.";
       setInjuryNotice(message);
+      setInjuryNoticeType("success");
       showAdminAlert(message);
     } catch (error) {
       const message = error.message || "No se pudo actualizar la lesion.";
       setInjuryNotice(message);
+      setInjuryNoticeType("error");
       showAdminAlert(message, "error");
     }
   }
@@ -8488,7 +9818,7 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
     <section className="panel admin-data-panel commission-panel">
       <SectionHeading eyebrow="Salud y apoyo" title="Lesiones de jugadores" />
       <p className="helper-text">Registra lesiones activas para informar al publico y solicitar apoyo cuando la liga lo autorice. Los recuperados quedan como historial interno.</p>
-      {injuryNotice && <p className="auth-ok">{injuryNotice}</p>}
+      {injuryNotice && <p className={injuryNoticeType === "error" ? "auth-error" : "auth-ok"}>{injuryNotice}</p>}
       <form className="injury-form" onSubmit={submitNewInjury}>
         <label>Torneo
           <CompetitionSelect league={league} name="competitionId" defaultValue={getDefaultCompetitionId(league)} />
@@ -8524,6 +9854,9 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
           <textarea name="notes" placeholder="Seguimiento, alta medica, acuerdo de la liga o contacto responsable." />
         </label>
         <button className="primary" type="submit" disabled={!activeLeague.players.length}>Registrar lesion</button>
+        {!activeLeague.players.length && (
+          <p className="auth-error wide-field">Primero captura jugadores en esta categoria para poder registrar lesiones.</p>
+        )}
       </form>
 
       <div className="admin-filter-console">
@@ -8607,10 +9940,12 @@ function InjuriesPanel({ league, onAddPlayerInjury, onDeletePlayerInjury, onUpda
                         await onDeletePlayerInjury(injury.id);
                         const message = "Lesion eliminada correctamente.";
                         setInjuryNotice(message);
+                        setInjuryNoticeType("success");
                         showAdminAlert(message);
                       } catch (error) {
                         const message = error.message || "No se pudo eliminar la lesion.";
                         setInjuryNotice(message);
+                        setInjuryNoticeType("error");
                         showAdminAlert(message, "error");
                       }
                     }}
@@ -9597,8 +10932,10 @@ function SuperAdminSettingsPanel({ onResetDemo }) {
 
 async function resolveImageUpload(file, { authToken, leagueId, scope } = {}) {
   if (!file) return "";
-  const maxSize = scope === "sponsors" ? IMAGE_BANNER_MAX_SIZE : IMAGE_LOGO_MAX_SIZE;
-  const dataUrl = await optimizeWebImageFile(file, { maxSize });
+  const isLargeMedia = scope === "sponsors" || scope === "league-media";
+  const maxSize = isLargeMedia ? IMAGE_BANNER_MAX_SIZE : IMAGE_LOGO_MAX_SIZE;
+  const targetBytes = isLargeMedia ? IMAGE_BANNER_TARGET_BYTES : IMAGE_LOGO_TARGET_BYTES;
+  const dataUrl = await optimizeWebImageFile(file, { maxSize, targetBytes });
   return resolveImageDataUrlUpload(dataUrl, { authToken, leagueId, scope });
 }
 
@@ -9634,7 +10971,7 @@ function TeamLogoUploader({ existingLogoUrl = "", teamName = "" }) {
     if (!file) return;
 
     try {
-      setLogoDataUrl(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE }));
+      setLogoDataUrl(await optimizeWebImageFile(file, { maxSize: IMAGE_LOGO_MAX_SIZE, targetBytes: IMAGE_LOGO_TARGET_BYTES }));
       setRemoved(false);
     } catch (uploadError) {
       event.currentTarget.value = "";
@@ -9654,7 +10991,7 @@ function TeamLogoUploader({ existingLogoUrl = "", teamName = "" }) {
       <input type="hidden" name="logoDataUrl" value={logoDataUrl} />
       <input type="hidden" name="removeLogo" value={removed ? "on" : ""} />
       <div className="team-logo-preview" aria-label="Vista previa de escudo de equipo">
-        {visibleLogoUrl ? <img alt="" src={visibleLogoUrl} /> : <span>{initials}</span>}
+        {visibleLogoUrl ? <img alt="" decoding="async" loading="lazy" src={visibleLogoUrl} /> : <span>{initials}</span>}
       </div>
       <div className="team-logo-actions">
         <label className="team-logo-file">
@@ -9832,7 +11169,7 @@ function SponsorManagement({ authToken, leagues, onAddSponsor, onDeleteSponsor, 
                 {sponsors.map((sponsor) => (
                   <form className="sponsor-admin-card" key={sponsor.id} onSubmit={(event) => submitSponsorEdit(event, league.id, sponsor)}>
                     <div className="sponsor-preview">
-                      {sponsor.imageUrl ? <img alt={sponsor.name} src={sponsor.imageUrl} /> : <span>Sin imagen</span>}
+                      {sponsor.imageUrl ? <img alt={sponsor.name} decoding="async" loading="lazy" src={sponsor.imageUrl} /> : <span>Sin imagen</span>}
                     </div>
                     <label>Patrocinador<input name="name" defaultValue={sponsor.name} required /></label>
                     <label>Reemplazar imagen<input name="imageFile" type="file" accept={IMAGE_UPLOAD_ACCEPT} /></label>
@@ -10685,25 +12022,4 @@ function PlayerPositionSelect({ name, defaultValue = "Delantero", ariaLabel }) {
       {PLAYER_POSITION_OPTIONS.map((position) => <option key={position} value={position}>{position}</option>)}
     </select>
   );
-}
-
-function preloadAdminImage(src) {
-  if (!src || typeof window === "undefined") return;
-  const image = new window.Image();
-  image.decoding = "async";
-  image.src = src;
-}
-
-function preloadAdminLeagueImages(league) {
-  const urls = new Set([
-    league?.identity?.logoUrl,
-    league?.logoUrl,
-    ...(league?.teams || []).map((team) => team.logoUrl),
-    ...(league?.players || [])
-      .filter((player) => player.photoAuthorized === true)
-      .map((player) => player.photoUrl),
-    ...(league?.sponsors || []).map((sponsor) => sponsor.imageUrl),
-    ...(league?.media || []).map((item) => item.imageUrl)
-  ].filter(Boolean));
-  urls.forEach(preloadAdminImage);
 }

@@ -32,15 +32,18 @@
     "setup:postgres-schema": "node scripts/apply-postgres-schema.js",
     "setup:storage": "node scripts/setup-supabase-storage.js",
     "setup:backup-storage": "node scripts/setup-supabase-backups.js",
+    "optimize:production-images": "node scripts/optimize-production-images.js",
     "prepare:production-users": "node scripts/prepare-production-users.js",
     "check:postgres": "node scripts/check-postgres.js",
     "check:production-config": "NODE_ENV=production node scripts/check-production-config.js",
     "check:capture": "NODE_ENV=production SEED_DEMO_DATA=false SEED_DEMO_USERS=false node scripts/check-capture-readiness.js",
     "check:release-safety": "node scripts/check-release-safety.js",
+    "test:live-load": "node scripts/live-load-smoke-test.js",
+    "test:admin-participations": "node scripts/admin-participation-smoke-test.js",
     "import:postgres": "node scripts/import-postgres-store.js",
     "preview": "vite preview --host 127.0.0.1",
     "preview:lan": "vite preview --host 0.0.0.0",
-    "test": "node scripts/domain-smoke-test.js && node scripts/referee-workflow-smoke-test.js && node scripts/referee-self-assignment-smoke-test.js && node scripts/live-clock-smoke-test.js && node scripts/access-request-role-smoke-test.js"
+    "test": "node scripts/domain-smoke-test.js && node scripts/referee-workflow-smoke-test.js && node scripts/referee-self-assignment-smoke-test.js && node scripts/team-participation-playoff-smoke-test.js && node scripts/admin-participation-smoke-test.js && node scripts/live-clock-smoke-test.js && node scripts/access-request-role-smoke-test.js && node scripts/image-upload-guard-smoke-test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
@@ -52,6 +55,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "sharp": "^0.35.4",
     "vite": "^6.0.7"
   }
 }

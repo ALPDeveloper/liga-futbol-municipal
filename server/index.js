@@ -103,6 +103,7 @@ import {
   updateUserData
 } from "./dataLayer.js";
 import { createPlatformBackup, getBackupDownload, getSafeBackupRecord, verifyBackupIntegrity } from "./backupService.js";
+import { verifyGoogleCredential } from "./googleAuth.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { runtimeConfig, validateRuntimeConfig } from "./runtimeConfig.js";
 import { getLocalUploadDir, uploadImageDataUrl } from "./imageStorage.js";
@@ -220,10 +221,52 @@ const accessRequestLimiter = createRateLimiter({
   keyGenerator: (request) => `access-request:${request.ip}:${String(request.body?.email || "").trim().toLowerCase()}`
 });
 
+const apiMutationLimiter = createRateLimiter({
+  windowMs: runtimeConfig.apiMutationWindowSeconds * 1000,
+  max: runtimeConfig.apiMutationMaxRequests,
+  keyGenerator: (request) => {
+    const authorization = String(request.headers.authorization || "");
+    const sessionKey = authorization.startsWith("Bearer ")
+      ? crypto.createHash("sha256").update(authorization).digest("base64url").slice(0, 24)
+      : "";
+    return `api-mutation:${sessionKey || request.ip}`;
+  }
+});
+
 const uploadLimiter = createRateLimiter({
   windowMs: runtimeConfig.uploadWindowMinutes * 60 * 1000,
   max: runtimeConfig.uploadMaxRequests,
   keyGenerator: (request) => `upload:${request.ip}:${request.user?.id || "anonymous"}`
+});
+
+const publicReadLimiter = createRateLimiter({
+  windowMs: runtimeConfig.publicReadWindowSeconds * 1000,
+  max: runtimeConfig.publicReadMaxRequests,
+  keyGenerator: (request) => `public-read:${request.ip}`
+});
+
+const refereeLiveReadLimiter = createRateLimiter({
+  windowMs: runtimeConfig.refereeLiveReadWindowSeconds * 1000,
+  max: runtimeConfig.refereeLiveReadMaxRequests,
+  keyGenerator: (request) => `referee-live-read:${request.user?.id || request.ip}:${request.params?.matchId || "match"}`
+});
+
+const refereeLiveWriteLimiter = createRateLimiter({
+  windowMs: runtimeConfig.refereeLiveWriteWindowSeconds * 1000,
+  max: runtimeConfig.refereeLiveWriteMaxRequests,
+  keyGenerator: (request) => `referee-live-write:${request.user?.id || request.ip}:${request.params?.matchId || "match"}`
+});
+
+function runRateLimiter(limiter, request, response) {
+  return new Promise((resolve) => {
+    limiter(request, response, () => resolve(true));
+    if (response.headersSent) resolve(false);
+  });
+}
+
+app.use("/api", (request, response, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return next();
+  return apiMutationLimiter(request, response, next);
 });
 
 function canManageLeague(user, leagueId) {
@@ -1327,6 +1370,12 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
   const assignedMatches = [];
   for (const league of store.leagues || []) {
     if (upperText(league.city || "") !== upperText(referee.municipality)) continue;
+    const eligibilityByPlayerId = calculatePlayerAppearanceEligibility({ ...league, matchParticipations });
+    const activeSuspensionByPlayerId = new Map(
+      calculateSuspensionNotices(league)
+        .filter((notice) => notice.status === "active" && notice.player?.id)
+        .map((notice) => [notice.player.id, notice])
+    );
     for (const match of league.matches || []) {
       const refereeRole = match.centralRefereeUserId === userId
         ? "central"
@@ -1355,11 +1404,6 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
       const activeSession = sessionByMatchId.get(match.id);
       const homeEligiblePlayers = getEligiblePlayersForTeam(league, match.homeTeamId);
       const awayEligiblePlayers = getEligiblePlayersForTeam(league, match.awayTeamId);
-      const activeSuspensionByPlayerId = new Set(
-        calculateSuspensionNotices(league)
-          .filter((notice) => notice.status === "active" && notice.player?.id)
-          .map((notice) => notice.player.id)
-      );
       const buildRosterPlayers = (players, roster, teamId, participation) => {
         const rosterEntries = (roster?.players || []).map((entry) => (typeof entry === "string" ? { playerId: entry } : entry));
         const rosterPlayerIds = new Set(rosterEntries.map((entry) => entry.playerId).filter(Boolean));
@@ -1381,8 +1425,19 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
           isGoalkeeper: roster?.goalkeeperPlayerId === player.id,
           rosterRole: starterIds.has(player.id) ? "starter" : substituteIds.has(player.id) ? "substitute" : "",
           isStarter: starterIds.has(player.id),
-          isSubstitute: substituteIds.has(player.id)
-        })).filter((player) => !activeSuspensionByPlayerId.has(player.id));
+          isSubstitute: substituteIds.has(player.id),
+          playoffEligibility: eligibilityByPlayerId.get(player.id) || null,
+          suspension: activeSuspensionByPlayerId.has(player.id)
+            ? {
+              type: activeSuspensionByPlayerId.get(player.id).type,
+              reason: activeSuspensionByPlayerId.get(player.id).reason,
+              pendingReview: Boolean(activeSuspensionByPlayerId.get(player.id).pendingReview),
+              indefinite: Boolean(activeSuspensionByPlayerId.get(player.id).indefinite),
+              remainingMatches: activeSuspensionByPlayerId.get(player.id).remainingMatches,
+              returnRound: activeSuspensionByPlayerId.get(player.id).returnRound
+            }
+            : null
+        }));
       };
       assignedMatches.push({
         id: match.id,
@@ -1402,6 +1457,7 @@ function buildRefereePortalPayload(store, referee, userId, refereeSheets = [], m
         scheduleUpdatedAt: match.scheduleUpdatedAt || "",
         workflowStatus: match.workflowStatus || match.status,
         captureMode: activeSession?.captureMode || match.captureMode || "",
+        isPlayoff: match.stage === "playoff" || Boolean(match.playoffRound),
         session: activeSession || null,
         sessionStatus: activeSession?.status || "",
         homeGoals: reviewSheet ? reviewPayload.homeGoals : match.homeGoals,
@@ -1616,6 +1672,13 @@ app.get("/api/health", (_request, response) => {
   });
 });
 
+app.get("/api/auth/google/config", (_request, response) => {
+  response.json({
+    enabled: Boolean(runtimeConfig.googleClientId),
+    clientId: runtimeConfig.googleClientId || ""
+  });
+});
+
 app.post("/api/auth/login", loginIpLimiter, async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
   const password = String(request.body.password || "");
@@ -1658,6 +1721,48 @@ app.post("/api/auth/login", loginIpLimiter, async (request, response) => {
   });
 });
 
+app.post("/api/auth/google/login", loginIpLimiter, async (request, response) => {
+  let googleProfile = null;
+  try {
+    googleProfile = await verifyGoogleCredential(request.body.credential);
+  } catch (error) {
+    return response.status(401).json({ error: error.message || "No se pudo validar Google." });
+  }
+
+  const user = await getActiveUserByEmail(googleProfile.email);
+  if (user && isUserLocked(user)) {
+    await logAudit({
+      user: toPublicUser(user),
+      leagueId: user.league_id,
+      action: "google_login_blocked",
+      entityType: "user",
+      entityId: user.id,
+      detail: "Intento de acceso con Google durante bloqueo temporal"
+    });
+    return response.status(423).json({ error: lockedMessage(user) });
+  }
+
+  if (!user) {
+    return response.status(403).json({ error: "Tu correo de Google aun no tiene una cuenta aprobada en LIGATEC. Envia una solicitud de acceso y espera la autorizacion del administrador." });
+  }
+
+  await clearLoginLock(user.id);
+
+  await logAudit({
+    user: toPublicUser(user),
+    leagueId: user.league_id,
+    action: "google_login",
+    entityType: "user",
+    entityId: user.id,
+    detail: "Inicio de sesion con Google"
+  });
+
+  response.json({
+    token: createToken(user),
+    user: toPublicUser({ ...user, failed_login_count: 0, locked_until: null })
+  });
+});
+
 app.get("/api/auth/me", async (request, response) => {
   const user = await getAuthUser(request);
   if (!user) return response.status(401).json({ error: "Sesion invalida" });
@@ -1684,7 +1789,7 @@ app.post("/api/uploads/images", requireAuth, uploadLimiter, async (request, resp
     return response.status(403).json({ error: "Los delegados solo pueden subir fotos de jugadores o escudo de su equipo." });
   }
 
-  const url = await uploadImageDataUrl({
+  const uploadedImage = await uploadImageDataUrl({
     dataUrl: request.body.dataUrl,
     leagueId,
     scope: request.body.scope,
@@ -1696,12 +1801,13 @@ app.post("/api/uploads/images", requireAuth, uploadLimiter, async (request, resp
     leagueId,
     action: "image_upload",
     entityType: "upload",
-    detail: `Subio imagen ${request.body.scope || "general"}`
+    detail: `Subio imagen ${request.body.scope || "general"} (${Math.round((uploadedImage.sizeBytes || 0) / 1000)} KB)`
   });
 
   response.status(201).json({
     provider: runtimeConfig.imageStorageProvider,
-    url
+    url: uploadedImage.url,
+    sizeBytes: uploadedImage.sizeBytes
   });
 });
 
@@ -1779,11 +1885,22 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
   const leagueId = String(request.body.leagueId || "").trim();
   const requestedRole = String(request.body.role || request.body.requestedRole || "").trim();
   const teamId = String(request.body.teamId || "").trim();
-  const name = String(request.body.name || "").trim();
-  const email = String(request.body.email || "").trim().toLowerCase();
+  let name = String(request.body.name || "").trim();
+  let email = String(request.body.email || "").trim().toLowerCase();
   const phone = String(request.body.phone || "").trim();
   const password = String(request.body.password || "");
   const confirmPassword = String(request.body.confirmPassword || "");
+  let googleProfile = null;
+
+  if (request.body.googleCredential) {
+    try {
+      googleProfile = await verifyGoogleCredential(request.body.googleCredential);
+      email = googleProfile.email;
+      name = googleProfile.name || name;
+    } catch (error) {
+      return response.status(401).json({ error: error.message || "No se pudo validar Google." });
+    }
+  }
 
   if (!["team_delegate", "referee"].includes(requestedRole)) {
     return response.status(400).json({ error: "Selecciona si deseas registrarte como delegado o arbitro." });
@@ -1792,7 +1909,9 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
     return response.status(400).json({ error: "Nombre, telefono, correo y liga son requeridos." });
   }
   if (!validateEmail(email)) return response.status(400).json({ error: "Correo invalido." });
-  if (password !== confirmPassword) return response.status(400).json({ error: "Las contraseñas no coinciden." });
+  if ((!googleProfile || password || confirmPassword) && password !== confirmPassword) {
+    return response.status(400).json({ error: "Las contraseñas no coinciden." });
+  }
 
   const store = await getStoreData();
   const league = (store.leagues || []).find((item) => item.id === leagueId);
@@ -1814,7 +1933,7 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
     if (!["active", "disabled"].includes(existingUser.status)) {
       return response.status(409).json({ error: "Ese correo ya tiene una cuenta pendiente o suspendida. Solicita al administrador resolver esa cuenta primero." });
     }
-    if (!verifyPassword(password, existingUser.password_hash)) {
+    if (!googleProfile && !verifyPassword(password, existingUser.password_hash)) {
       return response.status(401).json({ error: "Ese correo ya tiene cuenta. Para solicitar otro acceso, escribe la contraseña actual de esa cuenta." });
     }
     if (requestedRole === "team_delegate" && hasExistingDelegateAccess(existingUser, leagueId, teamId)) {
@@ -1824,7 +1943,7 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
       return response.status(409).json({ error: "Ese correo ya tiene acceso de arbitro activo o pendiente." });
     }
   } else {
-    const passwordError = requireStrongPassword(password);
+    const passwordError = password || !googleProfile ? requireStrongPassword(password) : "";
     if (passwordError) return response.status(400).json({ error: passwordError });
   }
 
@@ -1846,7 +1965,9 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
     name,
     email,
     phone,
-    passwordHash: existingUser ? existingUser.password_hash : hashPassword(password)
+    passwordHash: existingUser
+      ? existingUser.password_hash || hashPassword(crypto.randomBytes(32).toString("hex"))
+      : hashPassword(password || crypto.randomBytes(32).toString("hex"))
   });
 
   await logAudit({
@@ -1855,7 +1976,7 @@ app.post("/api/access-requests", accessRequestLimiter, async (request, response)
     action: "access_request_create",
     entityType: "access_request",
     entityId: accessRequest.id,
-    detail: `Solicitud publica de ${getAccessRequestRoleLabel(requestedRole)}${team ? ` para ${team.name}` : ""}`
+    detail: `Solicitud publica de ${getAccessRequestRoleLabel(requestedRole)}${team ? ` para ${team.name}` : ""}${googleProfile ? " con Google" : ""}`
   });
 
   response.status(201).json({
@@ -2223,6 +2344,7 @@ app.post("/api/admin-activations/:token", activationLimiter, async (request, res
 app.get("/api/store", async (request, response) => {
   const user = await getAuthUser(request);
   if (!user) {
+    if (!await runRateLimiter(publicReadLimiter, request, response)) return;
     setPublicCacheHeaders(response);
     return response.json(await getPublicStoreCached());
   }
@@ -2297,6 +2419,7 @@ app.put("/api/store", requireAuth, async (request, response) => {
 app.get("/api/leagues", async (request, response) => {
   const user = await getAuthUser(request);
   if (!user) {
+    if (!await runRateLimiter(publicReadLimiter, request, response)) return;
     setPublicCacheHeaders(response);
     return response.json((await getPublicStoreCached()).leagues);
   }
@@ -2754,6 +2877,7 @@ app.post("/api/leagues/:leagueId/matches/:matchId/participations/:teamId/correct
   const playerById = new Map(eligiblePlayers.map((player) => [player.id, player]));
   const invalidPlayerId = requestedPlayerIds.find((playerId) => !playerById.has(playerId));
   if (invalidPlayerId) return response.status(400).json({ error: "El reporte incluye un jugador que no pertenece a este equipo." });
+  const jerseyNumbers = request.body.jerseyNumbers && typeof request.body.jerseyNumbers === "object" ? request.body.jerseyNumbers : {};
 
   const participationResult = await createMatchParticipationData({
     id: `match-participation-${crypto.randomUUID()}`,
@@ -2764,10 +2888,11 @@ app.post("/api/leagues/:leagueId/matches/:matchId/participations/:teamId/correct
     submittedByUserId: request.user.id,
     players: requestedPlayerIds.map((playerId) => {
       const player = playerById.get(playerId);
+      const playerNumberSnapshot = normalizeJerseyNumber(jerseyNumbers[playerId] ?? getPlayerNumberForTeam(league, playerId, teamId));
       return {
         playerId,
         name: player?.name || "",
-        number: player?.number || "",
+        number: playerNumberSnapshot,
         photoUrl: player?.photoUrl || ""
       };
     }),
@@ -2782,6 +2907,8 @@ app.post("/api/leagues/:leagueId/matches/:matchId/participations/:teamId/correct
     correctedByUserId: request.user.id,
     correctionReason: reason
   });
+  clearPublicCache();
+  const nextStore = await getStoreData();
 
   await logAudit({
     user: request.user,
@@ -2792,7 +2919,7 @@ app.post("/api/leagues/:leagueId/matches/:matchId/participations/:teamId/correct
     detail: `Admin corrigio participantes de equipo ${teamId} en partido ${matchId}: ${reason}`
   });
 
-  response.status(201).json({ participation: participationResult.participation });
+  response.status(201).json({ participation: participationResult.participation, store: nextStore });
 });
 
 app.delete("/api/leagues/:leagueId", requireSuperAdmin, async (request, response) => {
@@ -3828,11 +3955,12 @@ app.post("/api/referee-portal/matches/:matchId/assign", requireAuth, async (requ
   });
 });
 
-app.get("/api/referee-portal/matches/:matchId/live-state", requireAuth, async (request, response) => {
+app.get("/api/referee-portal/matches/:matchId/live-state", requireAuth, refereeLiveReadLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
   const session = getLatestActiveMatchSession(await listMatchSessionsForMatchData(context.match.id));
   const report = await getLatestMatchReportForMatchData(context.match.id);
+  response.setHeader("Cache-Control", "no-store");
   response.json({
     serverTimestamp: new Date().toISOString(),
     matchId: context.match.id,
@@ -3848,7 +3976,7 @@ app.get("/api/referee-portal/matches/:matchId/live-state", requireAuth, async (r
   });
 });
 
-app.post("/api/referee-portal/matches/:matchId/sync", requireAuth, async (request, response) => {
+app.post("/api/referee-portal/matches/:matchId/sync", requireAuth, refereeLiveWriteLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
 
@@ -3901,7 +4029,7 @@ app.post("/api/referee-portal/matches/:matchId/sync", requireAuth, async (reques
   });
 });
 
-app.post("/api/referee-portal/matches/:matchId/start", requireAuth, async (request, response) => {
+app.post("/api/referee-portal/matches/:matchId/start", requireAuth, refereeLiveWriteLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
 
@@ -3952,7 +4080,7 @@ app.post("/api/referee-portal/matches/:matchId/start", requireAuth, async (reque
   });
 });
 
-app.post("/api/referee-portal/matches/:matchId/save", requireAuth, async (request, response) => {
+app.post("/api/referee-portal/matches/:matchId/save", requireAuth, refereeLiveWriteLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
 
@@ -3995,7 +4123,7 @@ app.post("/api/referee-portal/matches/:matchId/save", requireAuth, async (reques
   });
 });
 
-app.post("/api/referee-portal/matches/:matchId/resume", requireAuth, async (request, response) => {
+app.post("/api/referee-portal/matches/:matchId/resume", requireAuth, refereeLiveWriteLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
   const operationId = normalizeOperationId(request.body.operationId);
@@ -4039,7 +4167,7 @@ app.post("/api/referee-portal/matches/:matchId/resume", requireAuth, async (requ
   });
 });
 
-app.post("/api/referee-portal/matches/:matchId/suspend", requireAuth, async (request, response) => {
+app.post("/api/referee-portal/matches/:matchId/suspend", requireAuth, refereeLiveWriteLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
   const operationId = normalizeOperationId(request.body.operationId);
@@ -4094,7 +4222,7 @@ app.post("/api/referee-portal/matches/:matchId/suspend", requireAuth, async (req
   });
 });
 
-app.post("/api/referee-portal/matches/:matchId/cancel-live", requireAuth, async (request, response) => {
+app.post("/api/referee-portal/matches/:matchId/cancel-live", requireAuth, refereeLiveWriteLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
 
@@ -4136,7 +4264,7 @@ app.post("/api/referee-portal/matches/:matchId/cancel-live", requireAuth, async 
   });
 });
 
-app.post("/api/referee-portal/matches/:matchId/finish-match", requireAuth, async (request, response) => {
+app.post("/api/referee-portal/matches/:matchId/finish-match", requireAuth, refereeLiveWriteLimiter, async (request, response) => {
   const context = await getRefereeMatchCaptureContext(request.user, request.params.matchId);
   if (context.error) return response.status(context.error.status).json({ error: context.error.message });
 
@@ -4776,36 +4904,8 @@ app.post("/api/team-portal/matches/:matchId/roster", requireAuth, async (request
   const invalidPlayerId = requestedPlayerIds.find((playerId) => !eligiblePlayerIds.has(playerId));
   if (invalidPlayerId) return response.status(400).json({ error: "La convocatoria incluye un jugador que no pertenece a este equipo." });
 
-  const activeSuspensionByPlayerId = new Map();
-  for (const notice of calculateSuspensionNotices(league)) {
-    if (notice.status === "active" && notice.player?.id) activeSuspensionByPlayerId.set(notice.player.id, notice);
-  }
-  const suspendedPlayerId = requestedPlayerIds.find((playerId) => activeSuspensionByPlayerId.has(playerId));
-  if (suspendedPlayerId) {
-    const player = league.players.find((item) => item.id === suspendedPlayerId);
-    const notice = activeSuspensionByPlayerId.get(suspendedPlayerId);
-    const detail = notice?.pendingReview
-      ? "esta sujeto a revision por comision disciplinaria"
-      : notice?.indefinite
-      ? "esta inhabilitado indefinidamente"
-      : `esta suspendido${notice?.remainingMatches ? ` por ${notice.remainingMatches} juego(s)` : ""}`;
-    return response.status(400).json({ error: `${player?.name || "Un jugador"} ${detail} y no puede ser convocado.` });
-  }
-
   const rosters = await listMatchRostersForLeagueData(league.id);
   const existingRoster = rosters.find((roster) => roster.matchId === match.id && roster.teamId === context.teamId);
-  const eligibilityByPlayerId = calculatePlayerAppearanceEligibility({ ...league, matchRosters: rosters });
-  const isPlayoffMatch = match.stage === "playoff" || Boolean(match.playoffRound);
-  if (isPlayoffMatch) {
-    const ineligiblePlayerId = requestedPlayerIds.find((playerId) => {
-      const eligibility = eligibilityByPlayerId.get(playerId);
-      return eligibility?.applies && !eligibility.eligible;
-    });
-    if (ineligiblePlayerId) {
-      const player = league.players.find((item) => item.id === ineligiblePlayerId);
-      return response.status(400).json({ error: `${player?.name || "Un jugador"} no cumple partidos minimos para liguilla.` });
-    }
-  }
 
   const captainPlayerId = String(request.body.captainPlayerId || "").trim();
   if (!captainPlayerId || !requestedPlayerIds.includes(captainPlayerId)) {

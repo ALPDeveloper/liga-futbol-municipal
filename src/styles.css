@@ -908,6 +908,36 @@ a:hover {
   white-space: pre-line;
 }
 
+.auth-google-entry {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.auth-google-entry > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.google-identity {
+  width: min(100%, 360px);
+  min-height: 42px;
+}
+
+.google-identity-button {
+  min-height: 40px;
+}
+
+.google-identity-error {
+  display: block;
+  margin-top: 5px;
+  color: var(--danger);
+  font-weight: 800;
+}
+
 .inline-feedback {
   margin: 0;
   padding: 8px 10px;
@@ -11464,6 +11494,280 @@ th {
   color: #f7fbff;
 }
 
+.admin-console-page .admin-affiliations-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-console-page .affiliation-hero,
+.admin-console-page .affiliation-maintenance-card,
+.admin-console-page .affiliation-active-section {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(91, 255, 137, 0.07), transparent 30%),
+    rgba(255, 255, 255, 0.05);
+  color: #f7fbff;
+}
+
+.admin-console-page .affiliation-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-console-page .affiliation-hero > div:first-child,
+.admin-console-page .affiliation-maintenance-card > div,
+.admin-console-page .affiliation-section-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.admin-console-page .affiliation-hero span,
+.admin-console-page .affiliation-maintenance-card > div > span,
+.admin-console-page .affiliation-section-head span,
+.admin-console-page .affiliation-builder-head span {
+  color: #9dff75;
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .affiliation-hero strong,
+.admin-console-page .affiliation-maintenance-card strong,
+.admin-console-page .affiliation-section-head strong,
+.admin-console-page .affiliation-builder-head strong {
+  min-width: 0;
+  color: #f7fbff;
+  font-size: 1.18rem;
+  font-weight: 1000;
+  line-height: 1.05;
+}
+
+.admin-console-page .affiliation-hero small,
+.admin-console-page .affiliation-maintenance-card small,
+.admin-console-page .affiliation-builder-head small {
+  min-width: 0;
+  color: rgba(220, 232, 240, 0.68);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.28;
+}
+
+.admin-console-page .affiliation-hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-console-page .affiliation-hero-metrics span {
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid rgba(91, 255, 137, 0.16);
+  border-radius: 12px;
+  background: rgba(2, 10, 17, 0.42);
+  color: rgba(220, 232, 240, 0.68);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.admin-console-page .affiliation-hero-metrics b {
+  color: #9dff75;
+  font-size: 1.1rem;
+}
+
+.admin-console-page .affiliation-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(260px, 0.85fr);
+  gap: 12px;
+}
+
+.admin-console-page .affiliation-form.affiliation-builder,
+.admin-console-page .affiliation-number-form,
+.admin-console-page .duplicate-merge-form {
+  min-width: 0;
+  border-color: rgba(132, 166, 190, 0.14);
+  background: rgba(2, 10, 17, 0.36);
+  color: #f7fbff;
+}
+
+.admin-console-page .affiliation-builder {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin: 0;
+  padding: 14px;
+}
+
+.admin-console-page .affiliation-builder-head {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+
+.admin-console-page .affiliation-builder label,
+.admin-console-page .duplicate-merge-form label,
+.admin-console-page .affiliation-number-form label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.admin-console-page .affiliation-builder label > span {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(91, 255, 137, 0.22);
+  border-radius: 8px;
+  background: rgba(91, 255, 137, 0.1);
+  color: #9dff75;
+  font-size: 0.74rem;
+  font-weight: 1000;
+}
+
+.admin-console-page .affiliation-builder select,
+.admin-console-page .affiliation-builder textarea,
+.admin-console-page .duplicate-merge-form input,
+.admin-console-page .duplicate-merge-form select,
+.admin-console-page .duplicate-merge-form textarea,
+.admin-console-page .affiliation-number-form input,
+.admin-console-page .affiliation-number-form select {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-console-page .affiliation-route-preview,
+.admin-console-page .affiliation-card-route {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(91, 255, 137, 0.16);
+  border-radius: 12px;
+  background: rgba(91, 255, 137, 0.07);
+}
+
+.admin-console-page .affiliation-route-preview {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.admin-console-page .affiliation-route-preview span,
+.admin-console-page .affiliation-card-route span {
+  min-width: 0;
+  color: rgba(220, 232, 240, 0.68);
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.admin-console-page .affiliation-route-preview strong,
+.admin-console-page .affiliation-card-route strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f7fbff;
+  font-size: 0.9rem;
+  font-weight: 1000;
+  line-height: 1.12;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-console-page .affiliation-route-preview b,
+.admin-console-page .affiliation-card-route b {
+  color: #9dff75;
+  font-size: 0.86rem;
+  font-weight: 1000;
+}
+
+.admin-console-page .affiliation-route-preview small {
+  grid-column: 1 / -1;
+  color: #ffd36a;
+}
+
+.admin-console-page .affiliation-builder .wide-field,
+.admin-console-page .affiliation-builder button.primary {
+  grid-column: 1 / -1;
+}
+
+.admin-console-page .affiliation-maintenance-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.admin-console-page .duplicate-merge-form {
+  grid-template-columns: 1fr;
+  padding: 12px;
+}
+
+.admin-console-page .affiliation-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 10px;
+}
+
+.admin-console-page .affiliation-section-head small {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(91, 255, 137, 0.1);
+  color: #9dff75;
+  font-size: 0.74rem;
+  font-weight: 950;
+}
+
+.admin-console-page .affiliation-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
+}
+
+.admin-console-page .affiliation-card {
+  min-width: 0;
+  border-color: rgba(91, 255, 137, 0.18);
+  background: rgba(2, 10, 17, 0.38);
+  color: #f7fbff;
+}
+
+.admin-console-page .affiliation-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-console-page .affiliation-card-metrics span {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.admin-console-page .affiliation-number-form {
+  grid-template-columns: minmax(0, 1fr) 96px auto;
+  border-top-color: rgba(132, 166, 190, 0.14);
+}
+
 .admin-console-page .announcement-command-center span,
 .admin-console-page .announcement-create-drawer summary > span,
 .admin-console-page .announcement-create-button > span {
@@ -12641,6 +12945,62 @@ th {
 }
 
 @media (max-width: 720px) {
+  .admin-console-page .affiliation-hero,
+  .admin-console-page .affiliation-workspace,
+  .admin-console-page .affiliation-builder,
+  .admin-console-page .duplicate-merge-form,
+  .admin-console-page .affiliation-number-form {
+    grid-template-columns: 1fr !important;
+  }
+
+  .admin-console-page .affiliation-hero,
+  .admin-console-page .affiliation-maintenance-card,
+  .admin-console-page .affiliation-active-section,
+  .admin-console-page .affiliation-builder {
+    padding: 12px !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-console-page .affiliation-hero-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .admin-console-page .affiliation-route-preview,
+  .admin-console-page .affiliation-card-route {
+    grid-template-columns: 1fr !important;
+    text-align: left !important;
+  }
+
+  .admin-console-page .affiliation-route-preview strong,
+  .admin-console-page .affiliation-card-route strong {
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .admin-console-page .affiliation-builder .wide-field,
+  .admin-console-page .affiliation-builder button.primary,
+  .admin-console-page .affiliation-number-form > *,
+  .admin-console-page .duplicate-merge-form > * {
+    grid-column: 1 / -1 !important;
+  }
+
+  .admin-console-page .affiliation-builder button,
+  .admin-console-page .affiliation-number-form button,
+  .admin-console-page .duplicate-merge-form button {
+    width: 100% !important;
+  }
+
+  .admin-console-page .commission-panel .admin-filter-console {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .commission-panel .admin-filter-console label,
+  .admin-console-page .commission-panel .admin-filter-console input,
+  .admin-console-page .commission-panel .admin-filter-console select {
+    width: 100%;
+    min-width: 0;
+  }
+
   .admin-console-page .sanction-player-picker-head {
     grid-template-columns: 1fr;
   }
@@ -13039,6 +13399,31 @@ th {
 .admin-console-page .identity-form input[type="color"] {
   min-height: 44px;
   padding: 4px;
+}
+
+.admin-console-page .identity-form input[type="file"],
+.admin-console-page .media-form input[type="file"] {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px;
+  border-radius: 12px;
+  color: rgba(220, 232, 240, 0.7);
+  font-size: 0.76rem;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.admin-console-page .identity-form input[type="file"]::file-selector-button,
+.admin-console-page .media-form input[type="file"]::file-selector-button {
+  max-width: 100%;
+  margin-right: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(140, 247, 76, 0.14);
+  color: #f7fbff;
+  font-weight: 950;
 }
 
 @media (max-width: 980px) {
@@ -33934,6 +34319,37 @@ button.arbitration-metric-card {
   font-weight: 950;
 }
 
+.referee-player-flags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  font-style: normal;
+}
+
+.referee-player-flags small {
+  max-width: 132px;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 224, 122, 0.22);
+  border-radius: 999px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.referee-player-flags small.restriction {
+  border-color: rgba(245, 158, 11, 0.42);
+  color: #ffd27a;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.referee-player-flags small.restriction.suspension {
+  border-color: rgba(255, 96, 120, 0.42);
+  color: #ff9bad;
+  background: rgba(255, 96, 120, 0.1);
+}
+
 .referee-event-composer-list p {
   margin: 0;
   color: var(--ref-muted);
@@ -43534,6 +43950,149 @@ body:has(.public-league-page.public-view-equipos) .public-topbar {
   border-radius: 14px;
 }
 
+.public-playoff-eligibility-badge {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 7px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 5px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+  line-height: 1.1;
+}
+
+.public-playoff-eligibility-badge b,
+.public-playoff-eligibility-badge small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.public-playoff-eligibility-badge b {
+  color: #dbeafe;
+  font-size: 0.58rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.public-playoff-eligibility-badge small {
+  color: rgba(226, 232, 240, 0.58);
+  font-size: 0.55rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.public-playoff-eligibility-badge.eligible {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.public-playoff-eligibility-badge.eligible b {
+  color: #bbf7d0;
+}
+
+.public-playoff-eligibility-badge.ineligible {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.public-playoff-eligibility-badge.ineligible b {
+  color: #fde68a;
+}
+
+.public-playoff-eligibility-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 13px;
+  border: 1px solid rgba(13, 139, 255, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(13, 139, 255, 0.16), transparent 40%),
+    rgba(7, 17, 30, 0.82);
+}
+
+.public-playoff-eligibility-card div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.public-playoff-eligibility-card span {
+  color: #8fc7ff;
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.public-playoff-eligibility-card strong {
+  color: #fff;
+  font-size: 0.96rem;
+  font-weight: 1000;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.public-playoff-eligibility-card small {
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.public-playoff-eligibility-card > b {
+  display: grid;
+  min-width: 54px;
+  min-height: 46px;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  color: #dbeafe;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.86rem;
+  font-weight: 1000;
+}
+
+.public-playoff-eligibility-track {
+  grid-column: 1 / -1;
+  display: block;
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.public-playoff-eligibility-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0f73ff, #16c784);
+}
+
+.public-playoff-eligibility-card.eligible {
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.public-playoff-eligibility-card.eligible > b {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.09);
+}
+
+.public-playoff-eligibility-card.ineligible {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.public-playoff-eligibility-card.ineligible > b {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.09);
+}
+
 @media (max-width: 620px) {
   .public-league-page.public-view-equipos .public-app-workspace {
     padding-inline: 8px;
@@ -43613,6 +44172,19 @@ body:has(.public-league-page.public-view-equipos) .public-topbar {
   .public-team-player-stats strong,
   .public-team-player-stats small {
     display: inline;
+  }
+
+  .public-playoff-eligibility-badge {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .public-playoff-eligibility-card {
+    grid-template-columns: 1fr;
+  }
+
+  .public-playoff-eligibility-card > b {
+    justify-self: stretch;
   }
 }
 
@@ -61989,6 +62561,55 @@ body:has(.league-directory-redesign) {
   font-size: 0.68rem !important;
 }
 
+.admin-console-page .admin-player-flags {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+  font-style: normal !important;
+}
+
+.admin-console-page .admin-player-flags small {
+  max-width: 132px !important;
+  padding: 3px 6px !important;
+  border: 1px solid rgba(245, 158, 11, 0.34) !important;
+  border-radius: 999px !important;
+  color: #ffd27a !important;
+  background: rgba(245, 158, 11, 0.1) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.admin-console-page .admin-player-flags small.restriction.suspension {
+  border-color: rgba(255, 96, 120, 0.42) !important;
+  color: #ff9bad !important;
+  background: rgba(255, 96, 120, 0.1) !important;
+}
+
+.admin-console-page .admin-event-restriction-warning {
+  display: inline-flex !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  margin-top: 3px !important;
+  padding: 3px 7px !important;
+  border: 1px solid rgba(245, 158, 11, 0.36) !important;
+  border-radius: 999px !important;
+  color: #ffd27a !important;
+  background: rgba(245, 158, 11, 0.1) !important;
+  font-size: 0.62rem !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+  overflow-wrap: anywhere !important;
+}
+
+.admin-console-page .admin-event-restriction-warning.suspension {
+  border-color: rgba(255, 96, 120, 0.42) !important;
+  color: #ff9bad !important;
+  background: rgba(255, 96, 120, 0.1) !important;
+}
+
 .admin-console-page .admin-sheet-event-composer-actions {
   display: grid !important;
   grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr) !important;
@@ -64484,11 +65105,21 @@ html.operation-data-active .admin-console-page::after {
 
 .admin-console-page .operation-data-app-mode .admin-round-summary {
   min-height: 72px !important;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) !important;
+  grid-template-columns: minmax(0, 1fr) !important;
   padding: 10px !important;
   border: 1px solid rgba(62, 224, 117, 0.36) !important;
   border-radius: 8px !important;
   background: linear-gradient(135deg, rgba(20, 76, 55, 0.58), rgba(5, 23, 26, 0.72)) !important;
+}
+
+.admin-console-page .operation-data-app-mode .admin-round-summary.static {
+  align-items: stretch !important;
+}
+
+.admin-console-page .operation-data-app-mode .admin-round-summary > div:first-child {
+  min-width: 0 !important;
+  display: grid !important;
+  gap: 3px !important;
 }
 
 .admin-console-page .operation-data-app-mode .admin-round-summary > div:first-child span {
@@ -64522,6 +65153,9 @@ html.operation-data-active .admin-console-page::after {
 
 .admin-console-page .operation-data-app-mode .admin-round-metrics {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  width: 100% !important;
+  padding-top: 8px !important;
+  border-top: 1px solid rgba(224, 236, 240, 0.1) !important;
 }
 
 .admin-console-page .operation-data-app-mode .admin-round-metrics span {
@@ -64533,6 +65167,17 @@ html.operation-data-active .admin-console-page::after {
 
 .admin-console-page .operation-data-app-mode .admin-round-metrics b {
   font-size: 18px !important;
+}
+
+.admin-console-page .operation-data-app-mode .admin-round-delete {
+  width: 100% !important;
+  min-height: 42px !important;
+  margin-top: 4px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 103, 103, 0.34) !important;
+  background: rgba(255, 92, 92, 0.1) !important;
+  color: #ffb6b6 !important;
+  font-weight: 950 !important;
 }
 
 .admin-console-page .operation-data-app-mode .admin-match-compact-card {
@@ -65044,6 +65689,73 @@ html.operation-data-active .admin-console-page::after {
   font-weight: 820;
 }
 
+.public-access-google-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.public-access-google-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.public-access-google-card strong {
+  color: #fff;
+  font-weight: 1000;
+}
+
+.public-access-google-card span,
+.public-access-google-note {
+  margin: 0;
+  color: rgba(226, 241, 244, 0.68);
+  font-size: 0.78rem;
+  font-weight: 820;
+}
+
+.public-access-google-linked {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(42, 231, 188, 0.2);
+  border-radius: 13px;
+  background: rgba(42, 231, 188, 0.08);
+}
+
+.public-access-google-linked img {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.public-access-google-linked span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.public-access-google-linked small {
+  color: rgba(226, 241, 244, 0.68);
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.public-access-google-linked button {
+  min-height: 34px;
+  padding-inline: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-weight: 1000;
+}
+
 .public-access-fields {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -65068,6 +65780,19 @@ html.operation-data-active .admin-console-page::after {
   background: rgba(1, 9, 15, 0.76);
   color: #fff;
   color-scheme: dark;
+}
+
+.public-access-fields input[readonly] {
+  border-color: rgba(42, 231, 188, 0.26);
+  background: rgba(42, 231, 188, 0.08);
+}
+
+.public-access-google-note {
+  grid-column: 1 / -1;
+  padding: 10px;
+  border: 1px solid rgba(42, 231, 188, 0.16);
+  border-radius: 13px;
+  background: rgba(42, 231, 188, 0.07);
 }
 
 .public-access-search-field {
@@ -65209,6 +65934,14 @@ html.operation-data-active .admin-console-page::after {
 
   .access-request-avatar {
     display: none;
+  }
+
+  .public-access-google-linked {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .public-access-google-linked button {
+    grid-column: 1 / -1;
   }
 }
 
@@ -66987,6 +67720,70 @@ main.public-league-page.public-view-calendario .public-match-control-panel.publi
   color: #91ff58;
 }
 
+.team-portal-page.delegate-view-lineup .delegate-lineup-search {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(220px, 1fr);
+  gap: 9px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.team-portal-page.delegate-view-lineup .delegate-lineup-search > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-lineup-search strong {
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 1000;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-lineup-search span {
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-search-input-wrap {
+  position: relative;
+  display: grid;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-search-input-wrap input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding-right: 42px;
+  border: 1px solid rgba(132, 166, 190, 0.18);
+  border-radius: 11px;
+  color: #fff;
+  background: rgba(2, 12, 18, 0.88);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-search-input-wrap button {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid rgba(132, 166, 190, 0.22);
+  border-radius: 999px;
+  color: #eaf4ff;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 1.05rem;
+  font-weight: 1000;
+  transform: translateY(-50%);
+}
+
 .team-portal-page.delegate-view-lineup .delegate-player-select {
   max-height: none;
   display: grid;
@@ -67008,9 +67805,22 @@ main.public-league-page.public-view-calendario .public-match-control-panel.publi
   background: rgba(255, 255, 255, 0.045);
 }
 
-.team-portal-page.delegate-view-lineup .delegate-player-select label.blocked {
-  opacity: 0.58;
-  background: rgba(239, 63, 69, 0.08);
+.team-portal-page.delegate-view-lineup .delegate-lineup-more-button {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(132, 166, 190, 0.16);
+  border-radius: 12px;
+  color: #eaf4ff;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-player-select label.warning {
+  border-color: rgba(245, 158, 11, 0.36);
+  background: rgba(245, 158, 11, 0.09);
 }
 
 .team-portal-page.delegate-view-lineup .delegate-player-select label > span {
@@ -67030,6 +67840,37 @@ main.public-league-page.public-view-calendario .public-match-control-panel.publi
   color: rgba(220, 232, 240, 0.64);
   font-size: 0.64rem;
   font-weight: 850;
+}
+
+.team-portal-page.delegate-view-lineup .team-player-progress,
+.team-portal-page.delegate-view-roster .team-player-progress {
+  width: 100%;
+  margin-top: 6px;
+  color: #fde68a;
+  font-size: 0.62rem;
+  font-weight: 950;
+}
+
+.team-portal-page.delegate-view-lineup .team-player-progress.complete,
+.team-portal-page.delegate-view-roster .team-player-progress.complete {
+  color: #bbf7d0;
+}
+
+.team-portal-page.delegate-view-lineup .team-player-progress-track,
+.team-portal-page.delegate-view-roster .team-player-progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(132, 166, 190, 0.2);
+}
+
+.team-portal-page.delegate-view-lineup .team-player-progress-track span,
+.team-portal-page.delegate-view-roster .team-player-progress-track span {
+  background: linear-gradient(90deg, #f59e0b, #22e0b8);
+}
+
+.team-portal-page.delegate-view-lineup .team-player-progress.complete .team-player-progress-track span,
+.team-portal-page.delegate-view-roster .team-player-progress.complete .team-player-progress-track span {
+  background: linear-gradient(90deg, #22c55e, #91ff58);
 }
 
 .team-portal-page.delegate-view-lineup .delegate-lineup-player-tools {
@@ -67063,6 +67904,12 @@ main.public-league-page.public-view-calendario .public-match-control-panel.publi
   border-radius: 10px;
   color: #fff;
   background: rgba(2, 12, 18, 0.86);
+}
+
+@media (max-width: 620px) {
+  .team-portal-page.delegate-view-lineup .delegate-lineup-search {
+    grid-template-columns: 1fr;
+  }
 }
 
 .team-portal-page.delegate-view-matches .delegate-match-published-summary {
@@ -70089,6 +70936,377 @@ body:has(.public-league-page) {
   min-height: 100svh !important;
 }
 
+/* Admin league control center: first pass for client-ready operation. */
+.admin-console-page .admin-control-center {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.2fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.admin-console-page .admin-control-main-card,
+.admin-console-page .admin-control-queue-card,
+.admin-console-page .admin-control-checklist-card,
+.admin-console-page .admin-control-actions-card {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(91, 255, 137, 0.08), transparent 32%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+  color: #f7fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+.admin-console-page .admin-control-main-card {
+  align-content: start;
+  grid-row: span 2;
+}
+
+.admin-console-page .admin-control-head,
+.admin-console-page .admin-control-section-head {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.admin-console-page .admin-control-head span,
+.admin-console-page .admin-control-section-head span,
+.admin-console-page .admin-next-step-card span {
+  color: #8cff5a;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-control-head strong,
+.admin-console-page .admin-control-section-head strong {
+  min-width: 0;
+  color: #fff;
+  font-size: clamp(1rem, 2.3vw, 1.34rem);
+  line-height: 1.02;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-control-head small {
+  color: rgba(220, 232, 240, 0.68);
+  font-weight: 850;
+}
+
+.admin-console-page .admin-control-progress {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(140, 247, 76, 0.18);
+  border-radius: 16px;
+  background: rgba(2, 10, 17, 0.46);
+}
+
+.admin-console-page .admin-control-progress div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+}
+
+.admin-console-page .admin-control-progress strong {
+  color: #8cff5a;
+  font-size: clamp(2rem, 7vw, 3.4rem);
+  line-height: 0.9;
+}
+
+.admin-console-page .admin-control-progress small {
+  color: rgba(220, 232, 240, 0.68);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-control-progress > span {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(132, 166, 190, 0.18);
+}
+
+.admin-console-page .admin-control-progress > span i {
+  display: block;
+  width: var(--admin-control-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22d847, #20e7c5 60%, #23b4ff);
+  box-shadow: 0 0 18px rgba(35, 216, 71, 0.28);
+}
+
+.admin-console-page .admin-next-step-card {
+  min-width: 0;
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-height: 108px;
+  padding: 13px;
+  border: 1px solid rgba(255, 214, 53, 0.22);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 100% 10%, rgba(255, 214, 53, 0.16), transparent 34%),
+    rgba(255, 255, 255, 0.055);
+  color: #f7fbff;
+  text-align: left;
+}
+
+.admin-console-page .admin-next-step-card strong {
+  max-width: 100%;
+  color: #fff;
+  font-size: 1.05rem;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-next-step-card small {
+  max-width: 100%;
+  color: rgba(220, 232, 240, 0.72);
+  font-weight: 850;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-task-list,
+.admin-console-page .admin-setup-list,
+.admin-console-page .admin-control-actions {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.admin-console-page .admin-task-list {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.admin-console-page .admin-task-card,
+.admin-console-page .admin-empty-task-card {
+  min-width: 0;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(132, 166, 190, 0.16);
+  border-radius: 14px;
+  background: rgba(2, 10, 17, 0.42);
+  color: #f7fbff;
+  text-align: left;
+}
+
+.admin-console-page .admin-empty-task-card {
+  grid-template-columns: 1fr;
+  align-content: center;
+}
+
+.admin-console-page .admin-task-card b {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(140, 247, 76, 0.11);
+  color: #8cff5a;
+  font-size: 1.28rem;
+  line-height: 1;
+}
+
+.admin-console-page .admin-task-card span,
+.admin-console-page .admin-task-card strong,
+.admin-console-page .admin-task-card small,
+.admin-console-page .admin-empty-task-card strong,
+.admin-console-page .admin-empty-task-card small {
+  min-width: 0;
+  display: block;
+}
+
+.admin-console-page .admin-task-card strong,
+.admin-console-page .admin-empty-task-card strong {
+  color: #fff;
+  font-size: 0.9rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-task-card small,
+.admin-console-page .admin-empty-task-card small {
+  margin-top: 2px;
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.72rem;
+  font-weight: 820;
+  line-height: 1.2;
+}
+
+.admin-console-page .admin-task-card.tone-urgent b,
+.admin-console-page .admin-task-card.tone-warning b {
+  background: rgba(255, 214, 53, 0.12);
+  color: #ffe27a;
+}
+
+.admin-console-page .admin-task-card.tone-danger b {
+  background: rgba(255, 91, 91, 0.13);
+  color: #ff9b9b;
+}
+
+.admin-console-page .admin-task-card.tone-live b,
+.admin-console-page .admin-task-card.tone-info b {
+  background: rgba(35, 180, 255, 0.13);
+  color: #8ed0ff;
+}
+
+.admin-console-page .admin-setup-list {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.admin-console-page .admin-setup-list button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 58px;
+  padding: 9px;
+  border: 1px solid rgba(255, 214, 53, 0.18);
+  border-radius: 13px;
+  background: rgba(255, 214, 53, 0.055);
+  color: #f7fbff;
+  text-align: left;
+}
+
+.admin-console-page .admin-setup-list button.complete {
+  border-color: rgba(140, 247, 76, 0.16);
+  background: rgba(140, 247, 76, 0.06);
+}
+
+.admin-console-page .admin-setup-list i {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(255, 214, 53, 0.14);
+  color: #ffe27a;
+  font-style: normal;
+  font-weight: 1000;
+}
+
+.admin-console-page .admin-setup-list button.complete i {
+  background: rgba(140, 247, 76, 0.12);
+  color: #8cff5a;
+}
+
+.admin-console-page .admin-setup-list strong,
+.admin-console-page .admin-setup-list small {
+  min-width: 0;
+  display: block;
+}
+
+.admin-console-page .admin-setup-list strong {
+  color: #f7fbff;
+  font-size: 0.82rem;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-setup-list small {
+  margin-top: 2px;
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.68rem;
+  font-weight: 820;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-control-actions {
+  grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
+}
+
+.admin-console-page .admin-control-actions button {
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid rgba(140, 247, 76, 0.18);
+  border-radius: 13px;
+  background: rgba(140, 247, 76, 0.08);
+  color: #f7fbff;
+  text-align: left;
+}
+
+.admin-console-page .admin-control-actions button span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(140, 247, 76, 0.11);
+  color: #8cff5a;
+}
+
+.admin-console-page .admin-control-actions button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.admin-console-page .admin-control-actions button strong {
+  min-width: 0;
+  color: #fff;
+  font-size: 0.82rem;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .admin-console-page .admin-control-center {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .admin-control-main-card {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 620px) {
+  .admin-console-page .admin-control-main-card,
+  .admin-console-page .admin-control-queue-card,
+  .admin-console-page .admin-control-checklist-card,
+  .admin-console-page .admin-control-actions-card {
+    padding: 11px;
+    border-radius: 15px;
+  }
+
+  .admin-console-page .admin-task-list,
+  .admin-console-page .admin-setup-list {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .admin-control-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-console-page .admin-control-progress div {
+    align-items: start;
+  }
+
+  .admin-console-page .admin-control-progress small {
+    max-width: 12ch;
+  }
+}
+
 /* Public More width restore: keep overscroll fix without compacting the hub. */
 .public-league-page.public-view-mas {
   width: 100% !important;
@@ -70124,4 +71342,1900 @@ body:has(.public-league-page) {
   justify-self: center !important;
   margin-inline: auto !important;
   text-align: center !important;
+}
+
+/* Admin workspace overview: clearer operation routes inside each admin area. */
+.admin-console-page .admin-workspace-overview {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.admin-console-page .admin-workspace-hero,
+.admin-console-page .admin-workspace-priority-card,
+.admin-console-page .admin-workspace-route-card,
+.admin-console-page .admin-workspace-functions-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(91, 255, 137, 0.08), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+  color: #f7fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+.admin-console-page .admin-workspace-hero {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+}
+
+.admin-console-page .admin-workspace-hero-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(140, 247, 76, 0.22);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 35% 20%, rgba(255, 255, 255, 0.2), transparent 34%),
+    linear-gradient(135deg, rgba(34, 216, 71, 0.22), rgba(32, 231, 197, 0.12));
+  color: #9dff75;
+}
+
+.admin-console-page .admin-workspace-hero-icon svg {
+  width: 25px;
+  height: 25px;
+}
+
+.admin-console-page .admin-workspace-hero div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.admin-console-page .admin-workspace-hero span:not(.admin-workspace-hero-icon),
+.admin-console-page .admin-workspace-priority-card > span,
+.admin-console-page .admin-workspace-route-head span {
+  color: #8cff5a;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-workspace-hero strong {
+  min-width: 0;
+  color: #fff;
+  font-size: clamp(1.08rem, 2.5vw, 1.55rem);
+  line-height: 1.02;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-workspace-hero small,
+.admin-console-page .admin-workspace-priority-card small,
+.admin-console-page .admin-workspace-route-list small {
+  min-width: 0;
+  color: rgba(220, 232, 240, 0.68);
+  font-weight: 830;
+  line-height: 1.24;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-workspace-hero > button {
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid rgba(140, 247, 76, 0.22);
+  border-radius: 13px;
+  background: rgba(140, 247, 76, 0.1);
+  color: #9dff75;
+  font-size: 0.76rem;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.admin-console-page .admin-workspace-command-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(250px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 10px;
+}
+
+.admin-console-page .admin-workspace-priority-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 176px;
+  padding: 14px;
+  text-align: left;
+}
+
+.admin-console-page .admin-workspace-priority-card:disabled {
+  cursor: default;
+}
+
+.admin-console-page .admin-workspace-priority-card strong {
+  max-width: calc(100% - 58px);
+  color: #fff;
+  font-size: clamp(1.05rem, 2.4vw, 1.45rem);
+  line-height: 1.02;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-workspace-priority-card b {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  min-width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding-inline: 8px;
+  border-radius: 14px;
+  background: rgba(140, 247, 76, 0.12);
+  color: #8cff5a;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.admin-console-page .admin-workspace-priority-card.tone-warning b,
+.admin-console-page .admin-workspace-priority-card.tone-urgent b {
+  background: rgba(255, 214, 53, 0.13);
+  color: #ffe27a;
+}
+
+.admin-console-page .admin-workspace-priority-card.tone-danger b {
+  background: rgba(255, 91, 91, 0.13);
+  color: #ff9b9b;
+}
+
+.admin-console-page .admin-workspace-priority-card.tone-live b,
+.admin-console-page .admin-workspace-priority-card.tone-info b {
+  background: rgba(35, 180, 255, 0.13);
+  color: #8ed0ff;
+}
+
+.admin-console-page .admin-workspace-route-card,
+.admin-console-page .admin-workspace-functions-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.admin-console-page .admin-workspace-route-head {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-console-page .admin-workspace-route-head strong {
+  color: rgba(247, 251, 255, 0.9);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.admin-console-page .admin-workspace-route-list {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.admin-console-page .admin-workspace-route-list button {
+  min-width: 0;
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 14px;
+  background: rgba(2, 10, 17, 0.36);
+  color: #f7fbff;
+  text-align: left;
+}
+
+.admin-console-page .admin-workspace-route-list b {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(140, 247, 76, 0.1);
+  color: #8cff5a;
+  line-height: 1;
+}
+
+.admin-console-page .admin-workspace-route-list span,
+.admin-console-page .admin-workspace-route-list strong,
+.admin-console-page .admin-workspace-route-list small {
+  min-width: 0;
+  display: block;
+}
+
+.admin-console-page .admin-workspace-route-list strong {
+  color: #fff;
+  font-size: 0.9rem;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-workspace-route-list em {
+  max-width: 112px;
+  padding: 5px 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(140, 247, 76, 0.1);
+  color: #9dff75;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 1000;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-console-page .admin-workspace-route-list .tone-warning em,
+.admin-console-page .admin-workspace-route-list .tone-urgent em {
+  background: rgba(255, 214, 53, 0.13);
+  color: #ffe27a;
+}
+
+.admin-console-page .admin-workspace-route-list .tone-danger em {
+  background: rgba(255, 91, 91, 0.13);
+  color: #ff9b9b;
+}
+
+.admin-console-page .admin-workspace-route-list .tone-live em,
+.admin-console-page .admin-workspace-route-list .tone-info em {
+  background: rgba(35, 180, 255, 0.13);
+  color: #8ed0ff;
+}
+
+.admin-console-page .admin-workspace-functions-card .admin-function-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.admin-console-page .admin-workspace-functions-card .admin-function-card {
+  min-height: 112px;
+}
+
+.admin-console-page .admin-workspace-functions-card .admin-function-card::after {
+  display: none;
+}
+
+.admin-console-page .admin-module-guide {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(91, 255, 137, 0.08), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+  color: #f7fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+.admin-console-page .admin-module-guide-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-console-page .admin-module-guide-main > span {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(140, 247, 76, 0.22);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 35% 20%, rgba(255, 255, 255, 0.2), transparent 34%),
+    linear-gradient(135deg, rgba(34, 216, 71, 0.22), rgba(32, 231, 197, 0.12));
+  color: #9dff75;
+}
+
+.admin-console-page .admin-module-guide-main svg {
+  width: 20px;
+  height: 20px;
+}
+
+.admin-console-page .admin-module-guide-main div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.admin-console-page .admin-module-guide-main small {
+  color: #8cff5a;
+  font-size: 0.68rem;
+  font-weight: 1000;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-module-guide-main strong {
+  min-width: 0;
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-module-guide-main p {
+  min-width: 0;
+  margin: 0;
+  color: rgba(220, 232, 240, 0.66);
+  font-size: 0.78rem;
+  font-weight: 830;
+  line-height: 1.24;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .admin-module-guide-main em {
+  max-width: 138px;
+  padding: 6px 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(140, 247, 76, 0.1);
+  color: #9dff75;
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 1000;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-console-page .admin-module-guide-actions {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.admin-console-page .admin-module-guide-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(140, 247, 76, 0.18);
+  border-radius: 11px;
+  background: rgba(140, 247, 76, 0.08);
+  color: #f7fbff;
+  font-size: 0.7rem;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.admin-console-page .admin-quick-find {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  overflow: hidden;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(35, 180, 255, 0.09), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+  color: #f7fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+.admin-console-page .admin-quick-find label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.admin-console-page .admin-quick-find label span {
+  color: #8cff5a;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .admin-quick-find input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid rgba(140, 247, 76, 0.18);
+  border-radius: 14px;
+  background: rgba(2, 10, 17, 0.5);
+  color: #f7fbff;
+  font-size: 0.92rem;
+  font-weight: 850;
+  outline: none;
+}
+
+.admin-console-page .admin-quick-find input:focus {
+  border-color: rgba(140, 247, 76, 0.45);
+  box-shadow: 0 0 0 3px rgba(140, 247, 76, 0.12);
+}
+
+.admin-console-page .admin-quick-find input::placeholder {
+  color: rgba(220, 232, 240, 0.48);
+}
+
+.admin-console-page .admin-quick-find-results {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.admin-console-page .admin-quick-find-results button,
+.admin-console-page .admin-quick-find-empty {
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 13px;
+  background: rgba(2, 10, 17, 0.36);
+  color: #f7fbff;
+  text-align: left;
+}
+
+.admin-console-page .admin-quick-find-empty {
+  grid-template-columns: 1fr;
+}
+
+.admin-console-page .admin-quick-find-results button > span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(140, 247, 76, 0.11);
+  color: #8cff5a;
+}
+
+.admin-console-page .admin-quick-find-results svg {
+  width: 16px;
+  height: 16px;
+}
+
+.admin-console-page .admin-quick-find-results strong,
+.admin-console-page .admin-quick-find-results small,
+.admin-console-page .admin-quick-find-empty strong,
+.admin-console-page .admin-quick-find-empty small {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-console-page .admin-quick-find-results strong,
+.admin-console-page .admin-quick-find-empty strong {
+  color: #fff;
+  font-size: 0.82rem;
+  line-height: 1.08;
+}
+
+.admin-console-page .admin-quick-find-results small,
+.admin-console-page .admin-quick-find-empty small {
+  margin-top: 2px;
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+@media (max-width: 620px) {
+  .admin-console-page {
+    padding-bottom: calc(128px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .admin-console-page .admin-workspace-nav {
+    left: max(7px, env(safe-area-inset-left)) !important;
+    right: max(7px, env(safe-area-inset-right)) !important;
+    bottom: max(7px, env(safe-area-inset-bottom)) !important;
+    width: auto !important;
+    max-width: none !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-auto-flow: row !important;
+    grid-auto-columns: unset !important;
+    gap: 4px !important;
+    padding: 6px !important;
+    overflow: visible !important;
+    transform: none !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button {
+    min-width: 0 !important;
+    width: 100% !important;
+    min-height: 46px !important;
+    padding: 5px 2px 4px !important;
+    gap: 3px !important;
+    font-size: 0.5rem !important;
+    line-height: 1 !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button span {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button span svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .admin-console-page .admin-workspace-command-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .admin-console-page .admin-workspace-hero {
+    grid-template-columns: 46px minmax(0, 1fr);
+    align-items: start;
+    padding: 12px;
+  }
+
+  .admin-console-page .admin-workspace-hero-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 14px;
+  }
+
+  .admin-console-page .admin-workspace-hero > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .admin-console-page .admin-workspace-priority-card,
+  .admin-console-page .admin-workspace-route-card,
+  .admin-console-page .admin-workspace-functions-card {
+    padding: 12px;
+    border-radius: 15px;
+  }
+
+  .admin-console-page .admin-workspace-priority-card {
+    min-height: 150px;
+  }
+
+  .admin-console-page .admin-workspace-route-list button {
+    grid-template-columns: 30px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .admin-console-page .admin-workspace-route-list em {
+    grid-column: 2;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .admin-console-page .admin-workspace-functions-card .admin-function-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .admin-module-guide {
+    grid-template-columns: 1fr;
+    align-items: start;
+    padding: 11px;
+  }
+
+  .admin-console-page .admin-module-guide-main {
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .admin-console-page .admin-module-guide-main > span {
+    width: 38px;
+    height: 38px;
+    border-radius: 13px;
+  }
+
+  .admin-console-page .admin-module-guide-main em {
+    grid-column: 2;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .admin-console-page .admin-module-guide-actions {
+    justify-content: stretch;
+  }
+
+  .admin-console-page .admin-module-guide-actions button {
+    flex: 1 1 96px;
+    min-width: 0;
+  }
+
+  .admin-console-page .admin-quick-find {
+    padding: 11px;
+    border-radius: 15px;
+  }
+
+  .admin-console-page .admin-quick-find-results {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Admin panel mobile navigation lock: keep all client areas visible without a horizontal carousel. */
+@media (max-width: 920px) {
+  .admin-console-page {
+    padding-bottom: calc(132px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .admin-console-page .admin-workspace-nav {
+    left: max(7px, env(safe-area-inset-left)) !important;
+    right: max(7px, env(safe-area-inset-right)) !important;
+    bottom: max(7px, env(safe-area-inset-bottom)) !important;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-auto-flow: row !important;
+    grid-auto-columns: unset !important;
+    gap: 4px !important;
+    padding: 6px !important;
+    overflow: visible !important;
+    transform: none !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    min-height: 46px !important;
+    flex: initial !important;
+    padding: 5px 2px 4px !important;
+    gap: 3px !important;
+    font-size: 0.54rem !important;
+    line-height: 1 !important;
+    scroll-snap-align: initial !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button span {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+  }
+
+  .admin-console-page .admin-workspace-nav button span svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .admin-console-page .admin-workspace-nav button {
+    font-size: 0.5rem !important;
+  }
+}
+
+/* Admin quick search polish: module results should wrap cleanly instead of truncating labels. */
+.admin-console-page .admin-quick-find-results button {
+  align-content: center !important;
+}
+
+.admin-console-page .admin-quick-find-results strong,
+.admin-console-page .admin-quick-find-results small,
+.admin-console-page .admin-quick-find-empty strong,
+.admin-console-page .admin-quick-find-empty small {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+@media (max-width: 620px) {
+  .admin-console-page .admin-quick-find-results button,
+  .admin-console-page .admin-quick-find-empty {
+    min-height: 64px !important;
+  }
+}
+
+/* Admin capture mobile polish: forms must be readable before they are compact. */
+@media (max-width: 620px) {
+  .admin-console-page .capture-fields.two-cols,
+  .admin-console-page .capture-fields.three-cols,
+  .admin-console-page .capture-fields.schedule-fields,
+  .admin-console-page .match-capture-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .admin-console-page .capture-form label {
+    min-width: 0 !important;
+  }
+
+  .admin-console-page .capture-form input,
+  .admin-console-page .capture-form select,
+  .admin-console-page .capture-form textarea {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .admin-console-page .capture-form input[type="file"] {
+    min-height: 42px !important;
+    padding: 7px !important;
+    font-size: 0.74rem !important;
+    line-height: 1.1 !important;
+  }
+
+  .admin-console-page .capture-form input[type="file"]::file-selector-button {
+    max-width: 100% !important;
+    margin-right: 8px !important;
+    padding: 7px 10px !important;
+    border: 0 !important;
+    border-radius: 9px !important;
+    background: rgba(140, 247, 76, 0.14) !important;
+    color: #f7fbff !important;
+    font-weight: 900 !important;
+  }
+}
+
+/* Admin users session-state polish: keep errors readable on narrow screens. */
+.admin-console-page .referee-action-toast {
+  min-width: 0 !important;
+  display: grid !important;
+  gap: 4px !important;
+  padding: 10px 8px !important;
+  border-top: 1px solid rgba(132, 166, 190, 0.12) !important;
+  border-bottom: 1px solid rgba(132, 166, 190, 0.12) !important;
+  background: transparent !important;
+}
+
+.admin-console-page .referee-action-toast strong,
+.admin-console-page .referee-action-toast span {
+  min-width: 0 !important;
+  display: block !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  text-align: left !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+.admin-console-page .referee-action-toast strong {
+  color: #f7fbff !important;
+  font-size: 0.9rem !important;
+}
+
+.admin-console-page .referee-action-toast span {
+  color: rgba(220, 232, 240, 0.76) !important;
+  font-size: 0.82rem !important;
+  line-height: 1.28 !important;
+}
+
+.admin-console-page .referee-action-toast.is-error strong,
+.admin-console-page .referee-action-toast.is-error span {
+  color: #ff9b9b !important;
+}
+
+.admin-console-page .access-request-inbox > .auth-error {
+  margin: 0 !important;
+  padding-inline: 8px !important;
+  width: 100% !important;
+}
+
+.admin-console-page .delegate-hero-action:disabled,
+.admin-console-page .delegate-submit-button:disabled,
+.admin-console-page .referee-quick-actions button:disabled,
+.admin-console-page .access-refresh-button:disabled {
+  cursor: not-allowed !important;
+  border-color: rgba(132, 166, 190, 0.16) !important;
+  background: rgba(132, 166, 190, 0.09) !important;
+  color: rgba(220, 232, 240, 0.5) !important;
+  box-shadow: none !important;
+  opacity: 0.72 !important;
+}
+
+@media (max-width: 620px) {
+  .admin-console-page .access-request-inbox,
+  .admin-console-page .access-request-inbox.is-empty {
+    align-items: stretch !important;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .admin-console-page .access-request-inbox-head,
+  .admin-console-page .access-request-inbox.is-empty .access-request-inbox-head {
+    grid-template-columns: minmax(0, 1fr) 34px !important;
+    text-align: left !important;
+  }
+
+  .admin-console-page .access-request-inbox-head > div,
+  .admin-console-page .access-request-inbox.is-empty .access-request-inbox-head > div {
+    justify-items: start !important;
+    text-align: left !important;
+  }
+
+  .admin-console-page .access-request-inbox-head strong,
+  .admin-console-page .users-module-screen .access-request-inbox-head strong {
+    overflow: visible !important;
+    text-align: left !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+  }
+}
+
+/* Admin participations: shared convocatoria control and PJ review. */
+.admin-console-page .participation-control-panel {
+  gap: 14px;
+}
+
+.admin-console-page .participation-hero {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.admin-console-page .participation-hero b {
+  display: grid;
+  min-width: 124px;
+  min-height: 58px;
+  place-items: center;
+  padding: 10px 14px;
+  border: 1px solid rgba(145, 255, 88, 0.24);
+  border-radius: 14px;
+  color: #91ff58;
+  background: rgba(145, 255, 88, 0.09);
+  font-size: 0.88rem;
+  font-weight: 1000;
+  text-align: center;
+}
+
+.admin-console-page .participation-toolbar {
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+}
+
+.admin-console-page .participation-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-console-page .participation-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid rgba(132, 166, 190, 0.16);
+  border-radius: 12px;
+  color: rgba(220, 232, 240, 0.76);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 0.76rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-tabs button.active {
+  border-color: rgba(145, 255, 88, 0.36);
+  color: #f7fbff;
+  background: rgba(145, 255, 88, 0.12);
+}
+
+.admin-console-page .participation-tabs b {
+  display: grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  color: #07130d;
+  background: #91ff58;
+  font-size: 0.68rem;
+  font-weight: 1000;
+}
+
+.admin-console-page .participation-card-list,
+.admin-console-page .appearance-player-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-console-page .participation-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px 118px;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.03)),
+    rgba(4, 18, 25, 0.74);
+}
+
+.admin-console-page .participation-card.is-pending {
+  border-color: rgba(255, 214, 53, 0.24);
+}
+
+.admin-console-page .participation-card.is-sent {
+  border-color: rgba(145, 255, 88, 0.2);
+}
+
+.admin-console-page .participation-card-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-console-page .participation-card-main span,
+.admin-console-page .participation-card-main small {
+  min-width: 0;
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1.24;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .participation-card-main span {
+  color: #78baff;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-card-main strong {
+  min-width: 0;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 1000;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-card-status {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(132, 166, 190, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: center;
+}
+
+.admin-console-page .participation-card-status b {
+  color: #91ff58;
+  font-size: 1.18rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.admin-console-page .participation-card-status span,
+.admin-console-page .participation-card-status em {
+  color: rgba(220, 232, 240, 0.64);
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-card-status em {
+  color: #ffd635;
+}
+
+.admin-console-page .participation-card.is-sent .participation-card-status em {
+  color: #91ff58;
+}
+
+.admin-console-page .participation-card > button {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid rgba(145, 255, 88, 0.22);
+  border-radius: 11px;
+  color: #f7fbff;
+  background: rgba(145, 255, 88, 0.1);
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-card-players {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-console-page .participation-card-players span {
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid rgba(132, 166, 190, 0.12);
+  border-radius: 999px;
+  color: rgba(220, 232, 240, 0.72);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 0.66rem;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .participation-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(120, 186, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(2, 12, 18, 0.82);
+}
+
+.admin-console-page .participation-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-console-page .participation-editor-head > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-console-page .participation-editor-head span {
+  color: #78baff;
+  font-size: 0.66rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-editor-head strong {
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 1000;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .participation-editor-head > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.admin-console-page .participation-editor-head button,
+.admin-console-page .participation-editor-actions button {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid rgba(132, 166, 190, 0.18);
+  border-radius: 10px;
+  color: #eef7ff;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-player-filter {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid rgba(132, 166, 190, 0.12);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.admin-console-page .participation-player-filter > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-console-page .participation-player-filter strong {
+  color: #f7fbff;
+  font-size: 0.8rem;
+  font-weight: 1000;
+}
+
+.admin-console-page .participation-player-filter span {
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+
+.admin-console-page .participation-quick-player {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid rgba(145, 255, 88, 0.18);
+  border-radius: 13px;
+  background: rgba(145, 255, 88, 0.055);
+}
+
+.admin-console-page .participation-quick-player > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-console-page .participation-quick-player > div:first-child span {
+  color: #91ff58;
+  font-size: 0.64rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-quick-player > div:first-child strong {
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 1000;
+}
+
+.admin-console-page .participation-quick-player-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(92px, 0.55fr) minmax(150px, 1fr) auto;
+  gap: 9px;
+  align-items: end;
+}
+
+.admin-console-page .participation-quick-player-form > div {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.admin-console-page .participation-quick-player-form button {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid rgba(132, 166, 190, 0.18);
+  border-radius: 10px;
+  color: #eef7ff;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-quick-player-form button.primary {
+  border-color: rgba(145, 255, 88, 0.4);
+  color: #06170a;
+  background: linear-gradient(135deg, #91ff58, #22e0b8);
+}
+
+.admin-console-page .participation-editor label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: rgba(220, 232, 240, 0.74);
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-editor select,
+.admin-console-page .participation-editor input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border-color: rgba(132, 166, 190, 0.18);
+  border-radius: 11px;
+  color: #fff;
+  background: rgba(4, 18, 25, 0.92);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.admin-console-page .participation-player-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: min(54vh, 520px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.admin-console-page .participation-player-picker label {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 64px;
+  gap: 8px;
+  align-items: center;
+  min-height: 56px;
+  padding: 9px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  text-transform: none;
+}
+
+.admin-console-page .participation-player-picker label.selected {
+  border-color: rgba(145, 255, 88, 0.3);
+  background: rgba(145, 255, 88, 0.08);
+}
+
+.admin-console-page .participation-player-picker label.warning {
+  border-color: rgba(245, 158, 11, 0.26);
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.075), rgba(255, 255, 255, 0.035)),
+    rgba(255, 255, 255, 0.035);
+}
+
+.admin-console-page .participation-player-picker label.selected.warning {
+  border-color: rgba(245, 158, 11, 0.38);
+  background:
+    linear-gradient(135deg, rgba(145, 255, 88, 0.08), rgba(245, 158, 11, 0.075)),
+    rgba(255, 255, 255, 0.035);
+}
+
+.admin-console-page .participation-player-picker label > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-console-page .participation-player-picker strong {
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 1000;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .participation-player-picker small {
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.62rem;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.admin-console-page .participation-player-picker .participation-player-warning {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 3px 7px;
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: 999px;
+  color: #ffd27a;
+  background: rgba(245, 158, 11, 0.1);
+  font-size: 0.58rem;
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .participation-player-picker .participation-player-warning.suspension {
+  border-color: rgba(255, 96, 120, 0.42);
+  color: #ff9bad;
+  background: rgba(255, 96, 120, 0.1);
+}
+
+.admin-console-page .participation-player-picker input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+}
+
+.admin-console-page .participation-player-picker label > input:not([type="checkbox"]) {
+  min-height: 34px;
+  padding: 6px;
+  text-align: center;
+}
+
+.admin-console-page .participation-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.admin-console-page .participation-editor-actions .primary {
+  border-color: rgba(145, 255, 88, 0.4);
+  color: #06170a;
+  background: linear-gradient(135deg, #91ff58, #22e0b8);
+}
+
+.admin-console-page .participation-more-button,
+.admin-console-page .appearance-more-button {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(132, 166, 190, 0.16);
+  border-radius: 12px;
+  color: #eaf4ff;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .appearance-admin-panel {
+  border-top-color: rgba(132, 166, 190, 0.18);
+}
+
+.admin-console-page .appearance-admin-panel .discipline-admin-form,
+.admin-console-page .appearance-admin-panel .discipline-admin-list {
+  border-color: rgba(132, 166, 190, 0.14);
+  border-radius: 16px;
+}
+
+.admin-console-page .appearance-admin-panel .discipline-admin-list.compact {
+  padding: 12px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.admin-console-page .appearance-admin-panel .discipline-list-head h3 {
+  color: #f7fbff;
+}
+
+.admin-console-page .appearance-admin-panel .discipline-list-head .helper-text,
+.admin-console-page .appearance-admin-panel .discipline-list-head span {
+  color: rgba(220, 232, 240, 0.66);
+}
+
+.admin-console-page .appearance-progress-list article {
+  border-color: rgba(132, 166, 190, 0.14);
+  border-radius: 12px;
+  background:
+    linear-gradient(90deg, rgba(120, 186, 255, 0.075), transparent 48%),
+    rgba(255, 255, 255, 0.045);
+}
+
+.admin-console-page .appearance-progress-list strong {
+  color: #f7fbff;
+}
+
+.admin-console-page .appearance-progress-list span {
+  color: rgba(220, 232, 240, 0.7);
+}
+
+.admin-console-page .appearance-progress-list b.ready {
+  color: #0a2e15;
+  background: #91ff58;
+}
+
+.admin-console-page .appearance-progress-list b.pending {
+  color: #351706;
+  background: #ffd27a;
+}
+
+.admin-console-page .appearance-admin-panel .searchable-select select,
+.admin-console-page .appearance-admin-panel .searchable-select option,
+.admin-console-page .appearance-admin-panel input,
+.admin-console-page .appearance-admin-panel select {
+  color: #f7fbff;
+  background: rgba(2, 12, 18, 0.92);
+  color-scheme: dark;
+}
+
+.admin-console-page .appearance-admin-panel .searchable-select small {
+  color: rgba(220, 232, 240, 0.7);
+}
+
+.admin-console-page .appearance-player-card {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) repeat(3, minmax(72px, 0.18fr));
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+@media (max-width: 760px) {
+  .admin-console-page .participation-player-filter,
+  .admin-console-page .participation-quick-player-form {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .participation-quick-player-form > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.admin-console-page .appearance-player-card > b {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid rgba(145, 255, 88, 0.2);
+  border-radius: 14px;
+  color: #91ff58;
+  background: rgba(145, 255, 88, 0.08);
+  font-size: 0.8rem;
+  font-weight: 1000;
+}
+
+.admin-console-page .appearance-player-card > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-console-page .appearance-player-card > div strong {
+  min-width: 0;
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 1000;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.admin-console-page .appearance-player-card > div span {
+  min-width: 0;
+  color: rgba(220, 232, 240, 0.62);
+  font-size: 0.66rem;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .appearance-player-card > span {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(132, 166, 190, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.035);
+  text-align: center;
+}
+
+.admin-console-page .appearance-player-card small {
+  color: rgba(220, 232, 240, 0.58);
+  font-size: 0.58rem;
+  font-weight: 1000;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.admin-console-page .appearance-player-card span strong {
+  color: #91ff58;
+  font-size: 1rem;
+  font-weight: 1000;
+}
+
+@media (max-width: 820px) {
+  .admin-console-page .participation-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .participation-card {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+
+  .admin-console-page .participation-card > button {
+    grid-column: 1 / -1;
+  }
+
+  .admin-console-page .participation-player-picker {
+    grid-template-columns: 1fr;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .admin-console-page .appearance-player-card {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .admin-console-page .appearance-player-card > span {
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-items: stretch;
+    text-align: left;
+  }
+}
+
+@media (max-width: 560px) {
+  .admin-console-page .participation-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .participation-hero b {
+    width: 100%;
+  }
+
+  .admin-console-page .participation-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .participation-card {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .participation-card-status {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .admin-console-page .participation-card-status b {
+    font-size: 1rem;
+  }
+
+  .admin-console-page .participation-editor-head,
+  .admin-console-page .participation-editor-actions {
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .admin-console-page .participation-editor-head > div:last-child,
+  .admin-console-page .participation-editor-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-console-page .participation-editor-actions .primary {
+    grid-column: 1 / -1;
+  }
+
+  .admin-console-page .participation-player-picker label {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .admin-console-page .participation-player-picker label > input:not([type="checkbox"]) {
+    grid-column: 2;
+  }
+}
+
+/* Delegate portal fluid layout: use the available viewport without losing the mobile app feel. */
+.admin-route-shell .team-portal-page.portal-board-shell:not(.delegate-acta-exclusive-page),
+.team-portal-page.portal-board-shell:not(.delegate-acta-exclusive-page) {
+  width: 100%;
+  max-width: none;
+  min-height: 100svh;
+  margin: 0;
+  padding: clamp(12px, 2vw, 22px) clamp(10px, 2vw, 24px) calc(100px + env(safe-area-inset-bottom));
+}
+
+.team-portal-page:not(.delegate-acta-exclusive-page) .portal-board-layout,
+.team-portal-page:not(.delegate-acta-exclusive-page) .delegate-board {
+  width: 100%;
+  max-width: min(1380px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.team-portal-page:not(.delegate-acta-exclusive-page) .delegate-phone-frame {
+  width: 100%;
+  max-width: none;
+  min-height: calc(100svh - 130px);
+  margin: 0;
+  padding: clamp(12px, 1.5vw, 18px);
+  padding-bottom: clamp(18px, 2vw, 26px);
+  overflow: visible;
+  border-radius: clamp(16px, 1.7vw, 24px);
+}
+
+.team-portal-page:not(.delegate-acta-exclusive-page) .delegate-view-stack {
+  width: 100%;
+}
+
+.team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-screen {
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  align-items: start;
+}
+
+.team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-match-card {
+  grid-row: span 3;
+  min-height: 100%;
+}
+
+.team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-state-card,
+.team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-summary,
+.team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-flow {
+  min-width: 0;
+}
+
+.team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-flow {
+  align-self: stretch;
+}
+
+.team-portal-page.delegate-view-matches:not(.delegate-acta-exclusive-page) .delegate-match-board-list,
+.team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-roster-list.team-portal-player-list,
+.team-portal-page.delegate-view-lineup:not(.delegate-acta-exclusive-page) .delegate-player-select {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+}
+
+.team-portal-page.delegate-view-matches:not(.delegate-acta-exclusive-page) .delegate-match-day-group,
+.team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-roster-position-group {
+  min-width: 0;
+}
+
+.team-portal-page.delegate-view-matches:not(.delegate-acta-exclusive-page) .delegate-match-card-app {
+  height: 100%;
+}
+
+.team-portal-page.delegate-view-lineup:not(.delegate-acta-exclusive-page) .delegate-lineup-form {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.team-portal-page.delegate-view-lineup:not(.delegate-acta-exclusive-page) .delegate-lineup-form > .delegate-player-select,
+.team-portal-page.delegate-view-lineup:not(.delegate-acta-exclusive-page) .delegate-lineup-form > .wide-field,
+.team-portal-page.delegate-view-lineup:not(.delegate-acta-exclusive-page) .delegate-lineup-form > .portal-primary-action {
+  grid-column: 1 / -1;
+}
+
+.team-portal-page.delegate-view-lineup:not(.delegate-acta-exclusive-page) .delegate-lineup-search {
+  grid-column: 1 / -1;
+}
+
+.team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-roster-hero {
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+}
+
+.team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-roster-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-roster-tools {
+  max-width: none;
+}
+
+.team-portal-page.delegate-view-tools:not(.delegate-acta-exclusive-page) .delegate-view-stack,
+.team-portal-page.delegate-view-player:not(.delegate-acta-exclusive-page) .delegate-view-stack,
+.team-portal-page.delegate-view-newPlayer:not(.delegate-acta-exclusive-page) .delegate-view-stack {
+  max-width: min(860px, 100%);
+  margin-inline: auto;
+}
+
+.team-portal-page:not(.delegate-acta-exclusive-page) .portal-bottom-nav {
+  width: min(100% - 24px, 920px);
+  max-width: calc(100% - 24px);
+  border-radius: 18px;
+}
+
+@media (min-width: 900px) {
+  .team-portal-page:not(.delegate-acta-exclusive-page) .delegate-app-header {
+    position: relative;
+    top: auto;
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    gap: 14px;
+    min-height: 92px;
+    padding: 14px;
+    border: 1px solid rgba(132, 166, 190, 0.12);
+    border-radius: 18px;
+    background:
+      radial-gradient(circle at 10% 10%, rgba(29, 126, 255, 0.14), transparent 36%),
+      linear-gradient(145deg, rgba(9, 25, 37, 0.98), rgba(4, 15, 24, 0.98));
+  }
+
+  .team-portal-page:not(.delegate-acta-exclusive-page) .delegate-app-logo,
+  .team-portal-page:not(.delegate-acta-exclusive-page) .delegate-app-logo img {
+    width: 64px;
+    height: 64px;
+  }
+
+  .team-portal-page:not(.delegate-acta-exclusive-page) .delegate-app-header strong {
+    font-size: clamp(1.2rem, 2.2vw, 1.7rem);
+  }
+}
+
+@media (max-width: 980px) {
+  .team-portal-page.delegate-view-home:not(.delegate-acta-exclusive-page) .delegate-home-screen,
+  .team-portal-page.delegate-view-lineup:not(.delegate-acta-exclusive-page) .delegate-lineup-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-route-shell .team-portal-page.portal-board-shell:not(.delegate-acta-exclusive-page),
+  .team-portal-page.portal-board-shell:not(.delegate-acta-exclusive-page) {
+    width: 100%;
+    padding: 8px 8px calc(92px + env(safe-area-inset-bottom));
+  }
+
+  .team-portal-page:not(.delegate-acta-exclusive-page) .delegate-phone-frame {
+    min-height: calc(100svh - 104px);
+    padding: 12px 10px 14px;
+    border-radius: 18px;
+  }
+
+  .team-portal-page:not(.delegate-acta-exclusive-page) .portal-bottom-nav {
+    width: calc(100% - 12px);
+    max-width: calc(100% - 12px);
+    bottom: max(6px, env(safe-area-inset-bottom));
+    border-radius: 16px;
+  }
+
+  .team-portal-page.delegate-view-roster:not(.delegate-acta-exclusive-page) .delegate-roster-hero {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+}
+
+/* Admin league calmer polish: clearer hierarchy, less visual weight, steadier spacing. */
+.admin-console-page {
+  --admin-panel-bg: rgba(7, 18, 28, 0.92);
+  --admin-panel-soft: rgba(255, 255, 255, 0.045);
+  --admin-panel-border: rgba(154, 177, 196, 0.14);
+  --admin-panel-border-strong: rgba(154, 177, 196, 0.2);
+  --admin-card-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
+  letter-spacing: 0;
+}
+
+.admin-console-page .admin-league-app,
+.admin-console-page .admin-content-grid,
+.admin-console-page .admin-main-grid,
+.admin-console-page .admin-section-stack,
+.admin-console-page .admin-panel-stack {
+  gap: clamp(14px, 1.8vw, 22px);
+}
+
+.admin-console-page .panel,
+.admin-console-page .admin-league-top,
+.admin-console-page .admin-workspace-card,
+.admin-console-page .admin-function-card,
+.admin-console-page .admin-module-card,
+.admin-console-page .admin-config-card,
+.admin-console-page .admin-data-card,
+.admin-console-page .admin-report-card,
+.admin-console-page .admin-detail-card,
+.admin-console-page .discipline-admin-form,
+.admin-console-page .discipline-admin-list,
+.admin-console-page .participation-panel,
+.admin-console-page .appearance-admin-panel,
+.admin-console-page .sponsor-admin-card {
+  border-color: var(--admin-panel-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+    var(--admin-panel-bg);
+  box-shadow: var(--admin-card-shadow);
+}
+
+.admin-console-page .admin-workspace-card,
+.admin-console-page .admin-function-card,
+.admin-console-page .admin-module-card,
+.admin-console-page .admin-config-card,
+.admin-console-page .admin-data-card,
+.admin-console-page .admin-report-card,
+.admin-console-page .admin-detail-card,
+.admin-console-page .participation-card,
+.admin-console-page .appearance-player-card {
+  padding: clamp(12px, 1.4vw, 18px);
+}
+
+.admin-console-page .panel {
+  padding: clamp(16px, 2vw, 24px);
+}
+
+.admin-console-page .admin-workspace-grid,
+.admin-console-page .admin-function-grid,
+.admin-console-page .admin-module-grid,
+.admin-console-page .admin-metrics-grid,
+.admin-console-page .stats-grid,
+.admin-console-page .form-grid,
+.admin-console-page .teams-grid,
+.admin-console-page .players-grid {
+  gap: clamp(10px, 1.35vw, 16px);
+}
+
+.admin-console-page .admin-league-top,
+.admin-console-page .admin-toolbar,
+.admin-console-page .admin-section-header,
+.admin-console-page .panel-header,
+.admin-console-page .discipline-list-head,
+.admin-console-page .participation-toolbar {
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-console-page .admin-control-center {
+  align-items: start;
+}
+
+.admin-console-page .admin-control-main-card {
+  grid-row: auto;
+}
+
+.admin-console-page .admin-league-nav,
+.admin-console-page .admin-tabs,
+.admin-console-page .segmented-control,
+.admin-console-page .participation-tabs {
+  gap: 6px;
+  padding: 6px;
+  border-color: rgba(154, 177, 196, 0.12);
+  background: rgba(3, 13, 22, 0.52);
+}
+
+.admin-console-page button,
+.admin-console-page .button,
+.admin-console-page input,
+.admin-console-page select,
+.admin-console-page textarea {
+  letter-spacing: 0;
+}
+
+.admin-console-page input,
+.admin-console-page select,
+.admin-console-page textarea {
+  border-color: rgba(154, 177, 196, 0.18);
+  background: rgba(2, 12, 18, 0.78);
+}
+
+.admin-console-page .helper-text,
+.admin-console-page .muted,
+.admin-console-page small {
+  color: rgba(221, 232, 241, 0.68);
+}
+
+.admin-console-page .admin-card-decoration,
+.admin-console-page .admin-league-alp-watermark,
+.admin-console-page .super-admin-alp-watermark {
+  opacity: 0.08;
+}
+
+.admin-console-page .participation-player-picker,
+.admin-console-page .appearance-progress-list,
+.admin-console-page .discipline-admin-list.compact,
+.admin-console-page .sponsor-card-grid {
+  gap: 9px;
+}
+
+.admin-console-page .participation-player-picker label,
+.admin-console-page .appearance-player-card,
+.admin-console-page .appearance-progress-list article,
+.admin-console-page .participation-card {
+  border-color: rgba(154, 177, 196, 0.14);
+  background: var(--admin-panel-soft);
+  box-shadow: none;
+}
+
+@media (min-width: 1024px) {
+  .admin-console-page .admin-league-app,
+  .admin-console-page .admin-shell,
+  .admin-console-page .admin-dashboard-shell {
+    width: min(100%, 1480px);
+    margin-inline: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-console-page .admin-league-app,
+  .admin-console-page .admin-content-grid,
+  .admin-console-page .admin-main-grid {
+    gap: 12px;
+  }
+
+  .admin-console-page .panel {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .admin-console-page .admin-league-top,
+  .admin-console-page .admin-toolbar,
+  .admin-console-page .admin-section-header,
+  .admin-console-page .panel-header {
+    align-items: stretch;
+  }
 }

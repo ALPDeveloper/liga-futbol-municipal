@@ -42,6 +42,23 @@ export async function loginWithApi(email, password) {
   return response.json();
 }
 
+export async function fetchGoogleAuthConfig() {
+  const response = await fetch(`${API_BASE_URL}/auth/google/config`);
+  if (!response.ok) return { enabled: false, clientId: "" };
+  return response.json();
+}
+
+export async function loginWithGoogleApi(credential) {
+  const response = await fetch(`${API_BASE_URL}/auth/google/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential })
+  });
+
+  if (!response.ok) throw new Error(await getApiErrorMessage(response, "No se pudo iniciar sesion con Google"));
+  return response.json();
+}
+
 export async function fetchSessionFromApi(token) {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` }

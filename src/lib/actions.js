@@ -421,6 +421,70 @@ export function deleteAppearanceAdjustment(store, leagueId, adjustmentId) {
   }));
 }
 
+export function saveMatchParticipation(store, leagueId, payload) {
+  return updateLeague(store, leagueId, (league) => {
+    const match = (league.matches || []).find((item) => item.id === payload.matchId);
+    if (!match) throw new Error("Partido no encontrado.");
+    const teamId = String(payload.teamId || "").trim();
+    if (![match.homeTeamId, match.awayTeamId].includes(teamId)) throw new Error("Equipo invalido para este partido.");
+    const requestedPlayerIds = [...new Set((payload.playerIds || []).map((playerId) => String(playerId || "").trim()).filter(Boolean))];
+    if (!requestedPlayerIds.length) throw new Error("Selecciona al menos un jugador participante.");
+    const eligiblePlayers = getEligiblePlayersForTeam(league, teamId);
+    const playerById = new Map(eligiblePlayers.map((player) => [player.id, player]));
+    const invalidPlayerId = requestedPlayerIds.find((playerId) => !playerById.has(playerId));
+    if (invalidPlayerId) throw new Error("El reporte incluye un jugador que no pertenece a este equipo.");
+    const captainPlayerId = String(payload.captainPlayerId || "").trim();
+    if (!captainPlayerId || !requestedPlayerIds.includes(captainPlayerId)) {
+      throw new Error("Selecciona un capitan dentro de los participantes.");
+    }
+    const now = new Date().toISOString();
+    const jerseyNumbers = payload.jerseyNumbers && typeof payload.jerseyNumbers === "object" ? payload.jerseyNumbers : {};
+    const nextParticipation = {
+      id: makeId("match-participation"),
+      leagueId,
+      matchId: match.id,
+      teamId,
+      status: "corrected",
+      captainPlayerId,
+      submittedByUserId: payload.submittedByUserId || "",
+      submittedAt: now,
+      lockedAt: now,
+      correctedByUserId: payload.correctedByUserId || payload.submittedByUserId || "",
+      correctedAt: now,
+      correctionReason: upperText(payload.reason || payload.correctionReason || "Captura administrativa de participantes"),
+      source: payload.source || "admin_correction",
+      metadata: {
+        competitionId: match.competitionId || "",
+        round: match.round || "",
+        matchDate: match.date || "",
+        matchTime: match.time || ""
+      },
+      active: true,
+      version: 1,
+      players: requestedPlayerIds.map((playerId) => {
+        const player = playerById.get(playerId);
+        return {
+          playerId,
+          playerNameSnapshot: player?.name || "",
+          playerNumberSnapshot: jerseyNumbers[playerId] ?? getPlayerNumberForTeam(league, playerId, teamId),
+          playerPhotoSnapshot: player?.photoUrl || ""
+        };
+      })
+    };
+    return {
+      ...league,
+      matchParticipations: [
+        ...(league.matchParticipations || []).map((participation) => (
+          participation.matchId === match.id && participation.teamId === teamId && participation.active !== false
+            ? { ...participation, active: false, status: "superseded", updatedAt: now }
+            : participation
+        )),
+        nextParticipation
+      ]
+    };
+  });
+}
+
 export function addDisciplineReset(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => ({
     ...league,

@@ -810,7 +810,7 @@ export function calculatePlayerAppearanceEligibility(league) {
       const player = getPlayer(league, playerId);
       const row = rows.get(playerId);
       if (!player || !row) continue;
-      if (player.teamId !== participationTeamId) continue;
+      if (!isPlayerEligibleForTeam(league, player.id, participationTeamId)) continue;
       row.officialAppearances += 1;
     }
   }

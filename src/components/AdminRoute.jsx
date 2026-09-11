@@ -37,6 +37,7 @@ import {
   mergeDuplicatePlayer,
   resolveMatchEventDiscipline,
   saveIdentity,
+  saveMatchParticipation,
   saveMatchSheet,
   saveResult,
   toggleLeagueStatus,
@@ -55,7 +56,7 @@ import {
 } from "../lib/actions.js";
 import { createUser } from "../lib/userApi.js";
 import { deleteLeagueFromApi } from "../lib/leagueApi.js";
-import { advancePlayoffPhaseInApi, createMatchInApi, deleteMatchInApi, deletePlayoffMatchesInApi, generatePlayoffBracketInApi, resolveMatchDisciplineInApi, saveMatchResultInApi, saveMatchSheetInApi, updateMatchInApi } from "../lib/matchApi.js";
+import { advancePlayoffPhaseInApi, createMatchInApi, deleteMatchInApi, deletePlayoffMatchesInApi, generatePlayoffBracketInApi, resolveMatchDisciplineInApi, saveAdminMatchParticipationInApi, saveMatchResultInApi, saveMatchSheetInApi, updateMatchInApi } from "../lib/matchApi.js";
 import { createPlayerInApi, deletePlayerInApi, updatePlayerInApi } from "../lib/playerApi.js";
 import { updateLeagueRulesInApi } from "../lib/rulesApi.js";
 import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../lib/playerValidation.js";
@@ -360,6 +361,25 @@ export function AdminRoute({
     }
   }
 
+  async function saveMatchParticipationFromPanel(payload) {
+    if (!authToken) {
+      commit(saveMatchParticipation(store, league.id, {
+        ...payload,
+        submittedByUserId: currentUser?.id || "",
+        correctedByUserId: currentUser?.id || ""
+      }));
+      return true;
+    }
+    try {
+      const response = await saveAdminMatchParticipationInApi(authToken, league.id, payload.matchId, payload.teamId, payload);
+      if (response.store) applyApiStore(response.store);
+      setApiStatus("connected");
+      return true;
+    } catch (participationError) {
+      throw new Error(participationError.message || "No se pudo guardar la convocatoria.");
+    }
+  }
+
   async function resolveMatchDisciplineFromPanel(payload) {
     if (!authToken) {
       commit(resolveMatchEventDiscipline(store, league.id, payload));
@@ -426,6 +446,7 @@ export function AdminRoute({
       onGeneratePlayoffBracket={generatePlayoffBracketFromPanel}
       onAdvancePlayoffPhase={advancePlayoffPhaseFromPanel}
       onSaveIdentity={(payload) => commit(saveIdentity(store, league.id, payload))}
+      onSaveMatchParticipation={saveMatchParticipationFromPanel}
       onSaveMatchSheet={saveMatchSheetFromPanel}
       onSaveRules={saveRules}
       onSaveResult={saveResultFromPanel}

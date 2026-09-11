@@ -3,6 +3,7 @@ import {
   addDisciplineAdjustment,
   addDisciplineReset,
   addTeamAffiliation,
+  linkPlayerIdentity,
   mergeDuplicatePlayer,
   saveMatchSheet,
   updateLeagueRules,
@@ -70,7 +71,8 @@ function buildTestLeague() {
     ],
     players: [
       { id: "jose-naranja-test", competitionId: "segunda-test", teamId: "naranja-test", name: "Martinez Jose L", number: 9, position: "Delantero" },
-      { id: "jose-vasco-duplicate-test", competitionId: "primera-test", teamId: "vasco-test", name: "#15 Martinez Jose L", number: 15, position: "Delantero" },
+      { id: "jose-vasco-primary-test", competitionId: "primera-test", teamId: "vasco-test", name: "Martinez Jose L", number: 15, position: "Delantero" },
+      { id: "jose-vasco-duplicate-test", competitionId: "primera-test", teamId: "vasco-test", name: "#15 Martinez Jose L", number: 16, position: "Delantero" },
       { id: "star-vasco-test", competitionId: "primera-test", teamId: "vasco-test", name: "Goleador Vasco", number: 10, position: "Delantero" },
       { id: "rival-primera-test", competitionId: "primera-test", teamId: "primera-rival-test", name: "Defensa Rival", number: 4, position: "Defensor" },
       { id: "rival-segunda-test", competitionId: "segunda-test", teamId: "segunda-rival-test", name: "Defensa Segunda", number: 5, position: "Defensor" }
@@ -199,22 +201,32 @@ async function main() {
       { type: "goal", playerId: "jose-vasco-duplicate-test", teamId: "vasco-test", minute: 20 },
       { type: "goal", playerId: "jose-vasco-duplicate-test", teamId: "vasco-test", minute: 62 },
       { type: "yellow", playerId: "jose-vasco-duplicate-test", teamId: "vasco-test", minute: 50 },
-      { type: "yellow", playerId: "jose-vasco-duplicate-test", teamId: "vasco-test", minute: 80 }
+      { type: "yellow", playerId: "jose-vasco-duplicate-test", teamId: "vasco-test", minute: 80 },
+      { type: "yellow", playerId: "jose-vasco-duplicate-test", teamId: "vasco-test", minute: 82 }
     ]
   });
 
-  store = mergeDuplicatePlayer(store, TEST_LEAGUE_ID, { targetPlayerId: "jose-naranja-test", duplicatePlayerId: "jose-vasco-duplicate-test" });
+  store = linkPlayerIdentity(store, TEST_LEAGUE_ID, {
+    playerId: "jose-naranja-test",
+    linkedPlayerId: "jose-vasco-primary-test",
+    notes: "Misma persona en categorias distintas"
+  });
+  store = mergeDuplicatePlayer(store, TEST_LEAGUE_ID, { targetPlayerId: "jose-vasco-primary-test", duplicatePlayerId: "jose-vasco-duplicate-test" });
   league = store.leagues.find((item) => item.id === TEST_LEAGUE_ID);
   assert.equal(league.players.some((player) => player.id === "jose-vasco-duplicate-test"), false);
+  assert.ok((league.disciplineLinks || []).some((link) => (
+    link.playerIds.includes("jose-naranja-test") &&
+    link.playerIds.includes("jose-vasco-primary-test")
+  )));
   assert.equal(getPlayerNumberForTeam(league, "jose-naranja-test", "vasco-test"), 15);
   assert.equal(getEligiblePlayersForTeam(league, "vasco-test").some((player) => player.id === "jose-naranja-test"), true);
 
   let discipline = calculateYellowCardDiscipline(league);
-  let joseDiscipline = discipline.find((row) => row.player.id === "jose-naranja-test");
+  let joseDiscipline = discipline.find((row) => row.player.id === "jose-vasco-primary-test");
   assert.equal(joseDiscipline.status, "suspended");
   assert.equal(joseDiscipline.yellowCards, 3);
   let notices = calculateSuspensionNotices(league);
-  assert.ok(notices.some((notice) => notice.player.id === "jose-naranja-test" && notice.type === "Acumulacion" && notice.status === "active"));
+  assert.ok(notices.some((notice) => notice.player.id === "jose-vasco-primary-test" && notice.type === "Acumulacion" && notice.status === "active"));
 
   store = addDisciplineReset(store, TEST_LEAGUE_ID, { playerId: "jose-naranja-test", date: "2026-06-09", reason: "Cumplio sancion de prueba" });
 
@@ -234,26 +246,33 @@ async function main() {
 
   league = store.leagues.find((item) => item.id === TEST_LEAGUE_ID);
   const breakdown = getPlayerSeasonBreakdown(league, "jose-naranja-test");
-  assert.equal(breakdown.totals.goals, 3);
+  assert.equal(breakdown.totals.goals, 1);
   assert.equal(breakdown.rows.find((row) => row.team.id === "naranja-test").goals, 1);
-  assert.equal(breakdown.rows.find((row) => row.team.id === "vasco-test").goals, 2);
+  assert.equal(breakdown.rows.find((row) => row.team.id === "vasco-test").goals, 0);
+  const mergedBreakdown = getPlayerSeasonBreakdown(league, "jose-vasco-primary-test");
+  assert.equal(mergedBreakdown.totals.goals, 2);
+  assert.equal(mergedBreakdown.rows.find((row) => row.team.id === "vasco-test").goals, 2);
 
   const primeraStats = calculatePlayerStats(scopeLeagueToCompetition(league, "primera-test"));
   const josePrimera = primeraStats.find((row) => row.player.id === "jose-naranja-test");
+  const joseVascoPrimera = primeraStats.find((row) => row.player.id === "jose-vasco-primary-test");
   const starPrimera = primeraStats.find((row) => row.player.id === "star-vasco-test");
-  assert.equal(josePrimera.goals, 2);
+  assert.equal(josePrimera.goals, 0);
   assert.equal(josePrimera.team.id, "vasco-test");
+  assert.equal(joseVascoPrimera.goals, 2);
+  assert.equal(joseVascoPrimera.team.id, "vasco-test");
   assert.equal(starPrimera.goals, 3);
   const vascoRanking = primeraStats
     .filter((row) => getEligiblePlayersForTeam(league, "vasco-test").some((player) => player.id === row.player.id))
     .sort((a, b) => b.goals - a.goals || a.player.name.localeCompare(b.player.name));
-  assert.equal(vascoRanking.findIndex((row) => row.player.id === "jose-naranja-test") + 1, 2);
+  assert.equal(vascoRanking.findIndex((row) => row.player.id === "jose-vasco-primary-test") + 1, 2);
 
   discipline = calculateYellowCardDiscipline(league);
   assert.equal(discipline.some((row) => row.player.id === "jose-naranja-test"), false);
   notices = calculateSuspensionNotices(league);
   assert.ok(notices.some((notice) => notice.player.id === "jose-naranja-test" && notice.type === "Expulsion" && notice.status === "active"));
-  assert.equal(getPlayerSeasonBreakdown(league, "jose-naranja-test").totals.goals, 3);
+  assert.equal(getPlayerSeasonBreakdown(league, "jose-naranja-test").totals.goals, 1);
+  assert.equal(getPlayerSeasonBreakdown(league, "jose-vasco-primary-test").totals.goals, 2);
 
   await request("/store", {
     method: "PUT",
@@ -267,13 +286,15 @@ async function main() {
   assert.equal(getPlayerNumberForTeam(persistedLeague, "jose-naranja-test", "vasco-test"), 15);
   assert.equal(persistedLeague.disciplineAdjustments.length, 2);
   assert.equal(persistedLeague.disciplineResets.length, 1);
-  assert.equal(getPlayerSeasonBreakdown(persistedLeague, "jose-naranja-test").totals.goals, 3);
+  assert.equal(getPlayerSeasonBreakdown(persistedLeague, "jose-naranja-test").totals.goals, 1);
+  assert.equal(getPlayerSeasonBreakdown(persistedLeague, "jose-vasco-primary-test").totals.goals, 2);
 
   console.log("Prueba local de afiliaciones OK");
   console.log("- Afiliacion Naranja -> Vasco Jr sin duplicar jugador");
-  console.log("- Fusion de duplicado conserva historial y numero alterno");
-  console.log("- Goles por equipo: Naranja 1, Vasco Jr 2, total 3");
-  console.log("- Ranking Vasco Jr usa 2 goles del equipo receptor");
+  console.log("- Identidad vinculada conserva disciplina entre categorias sin mezclar goleo");
+  console.log("- Fusion de duplicado dentro de categoria conserva historial y numero alterno");
+  console.log("- Goles por jugador: Naranja 1, Vasco Jr 2");
+  console.log("- Ranking Vasco Jr usa 2 goles del registro fusionado");
   console.log("- Amarillas compartidas suspenden con 3 y reset limpia disciplina vigente");
   console.log("- Roja genera suspension activa");
   console.log("- Persistencia API SQLite conserva afiliacion, reglas, ajustes y reset");
