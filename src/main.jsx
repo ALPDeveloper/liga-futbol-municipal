@@ -27,9 +27,25 @@ function registerPwaServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js").catch(() => {
-      // La app sigue funcionando como web normal si el navegador bloquea el registro.
-    });
+    navigator.serviceWorker.register("/service-worker.js")
+      .then((registration) => {
+        registration.update().catch(() => {});
+        if (registration.waiting) {
+          registration.waiting.postMessage({ type: "SKIP_WAITING" });
+        }
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          if (!worker) return;
+          worker.addEventListener("statechange", () => {
+            if (worker.state === "installed" && navigator.serviceWorker.controller) {
+              worker.postMessage({ type: "SKIP_WAITING" });
+            }
+          });
+        });
+      })
+      .catch(() => {
+        // La app sigue funcionando como web normal si el navegador bloquea el registro.
+      });
   });
 }
 

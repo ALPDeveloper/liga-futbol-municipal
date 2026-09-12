@@ -1,8 +1,7 @@
-const CACHE_VERSION = "ligatec-pwa-v1";
+const CACHE_VERSION = "ligatec-pwa-v2";
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const PRECACHE_URLS = [
-  "/",
   "/ligatec-icon.png",
   "/site.webmanifest"
 ];
@@ -15,8 +14,14 @@ function isApiRequest(url) {
   return url.pathname.startsWith("/api/");
 }
 
-function isAdminRequest(url) {
-  return url.pathname.startsWith("/admin");
+function isPrivateNavigation(url) {
+  return (
+    url.pathname.startsWith("/admin") ||
+    url.pathname.startsWith("/panel") ||
+    url.pathname.startsWith("/acceso") ||
+    url.pathname.startsWith("/seleccionar-acceso") ||
+    url.pathname.startsWith("/activar-")
+  );
 }
 
 function isStaticAsset(url) {
@@ -31,6 +36,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(APP_SHELL_CACHE)
       .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -42,7 +48,14 @@ self.addEventListener("activate", (event) => {
           .filter((key) => ![APP_SHELL_CACHE, RUNTIME_CACHE].includes(key))
           .map((key) => caches.delete(key))
       ))
+      .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("fetch", (event) => {
@@ -53,7 +66,7 @@ self.addEventListener("fetch", (event) => {
   if (!isSameOrigin(url) || isApiRequest(url)) return;
 
   if (request.mode === "navigate") {
-    if (isAdminRequest(url)) return;
+    if (isPrivateNavigation(url)) return;
     event.respondWith(networkFirstNavigation(request));
     return;
   }
