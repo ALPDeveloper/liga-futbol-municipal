@@ -92,7 +92,7 @@ export function GoogleIdentityButton({
           size: "large",
           text,
           theme: "outline",
-          width: Math.min(360, Math.max(220, buttonRef.current.clientWidth || 280))
+          width: Math.min(400, Math.max(240, buttonRef.current.clientWidth || 320))
         });
       })
       .catch((loadError) => {

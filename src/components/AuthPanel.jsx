@@ -187,6 +187,7 @@ export function AuthPanel({ currentUser, onGoogleLogin, onLogin, onLogout }) {
           className="auth-google-entry"
           disabled={googleBusy}
           label="Iniciar sesion con Google"
+          text="signin_with"
           onCredential={async (credential) => {
             setError("");
             setGoogleBusy(true);
