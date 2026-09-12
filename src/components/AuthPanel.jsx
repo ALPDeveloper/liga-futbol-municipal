@@ -183,24 +183,24 @@ export function AuthPanel({ currentUser, onGoogleLogin, onLogin, onLogout }) {
         <AuthIcon name="arrow" />
       </button>
       {onGoogleLogin && (
-        <div className="auth-google-entry">
+        <GoogleIdentityButton
+          className="auth-google-entry"
+          disabled={googleBusy}
+          label="Iniciar sesion con Google"
+          onCredential={async (credential) => {
+            setError("");
+            setGoogleBusy(true);
+            try {
+              await onGoogleLogin(credential, true);
+            } catch (loginError) {
+              setError(loginError.message);
+            } finally {
+              setGoogleBusy(false);
+            }
+          }}
+        >
           <span>o entra rapido con una cuenta aprobada</span>
-          <GoogleIdentityButton
-            disabled={googleBusy}
-            label="Iniciar sesion con Google"
-            onCredential={async (credential) => {
-              setError("");
-              setGoogleBusy(true);
-              try {
-                await onGoogleLogin(credential, true);
-              } catch (loginError) {
-                setError(loginError.message);
-              } finally {
-                setGoogleBusy(false);
-              }
-            }}
-          />
-        </div>
+        </GoogleIdentityButton>
       )}
       {error && <small className="auth-error">{error}</small>}
     </form>

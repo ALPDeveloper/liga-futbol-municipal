@@ -46,6 +46,7 @@ export function readGoogleCredentialProfile(credential) {
 }
 
 export function GoogleIdentityButton({
+  children = null,
   className = "",
   disabled = false,
   label = "Continuar con Google",
@@ -105,7 +106,8 @@ export function GoogleIdentityButton({
   if (config.loading || !config.enabled) return null;
 
   return (
-    <div className={`google-identity ${className}`}>
+    <div className={className || "google-identity"}>
+      {children}
       <div aria-label={label} className="google-identity-button" ref={buttonRef} />
       {error && <small className="google-identity-error">{error}</small>}
     </div>

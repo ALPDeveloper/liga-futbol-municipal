@@ -239,25 +239,27 @@ export function PublicAccessRequestSheet({ league, onClose }) {
             </section>
           )}
 
-          <section className="public-access-google-card">
+          <GoogleIdentityButton
+            className="public-access-google-card"
+            label="Usar Google para solicitar acceso"
+            onCredential={(credential) => {
+              const profile = readGoogleCredentialProfile(credential);
+              setGoogleCredential(credential);
+              setGoogleProfile(profile);
+              setRequestName(profile?.name || requestName);
+              setRequestEmail(profile?.email || requestEmail);
+              setNotice(profile?.email ? `Google verificado: ${profile.email}. Completa telefono y envia la solicitud.` : "Google verificado. Completa tus datos y envia la solicitud.");
+              setError("");
+            }}
+            text="signup_with"
+          >
             <div>
               <strong>Registro rapido con Google</strong>
               <span>Usa tu correo verificado para llenar nombre y email. La aprobacion del administrador sigue siendo obligatoria.</span>
             </div>
-            <GoogleIdentityButton
-              label="Usar Google para solicitar acceso"
-              onCredential={(credential) => {
-                const profile = readGoogleCredentialProfile(credential);
-                setGoogleCredential(credential);
-                setGoogleProfile(profile);
-                setRequestName(profile?.name || requestName);
-                setRequestEmail(profile?.email || requestEmail);
-                setNotice(profile?.email ? `Google verificado: ${profile.email}. Completa telefono y envia la solicitud.` : "Google verificado. Completa tus datos y envia la solicitud.");
-                setError("");
-              }}
-              text="signup_with"
-            />
-            {googleProfile && (
+          </GoogleIdentityButton>
+
+          {googleProfile && (
               <div className="public-access-google-linked">
                 {googleProfile.picture && <img alt="" src={googleProfile.picture} />}
                 <span>
@@ -275,8 +277,7 @@ export function PublicAccessRequestSheet({ league, onClose }) {
                   Cambiar
                 </button>
               </div>
-            )}
-          </section>
+          )}
 
           <div className="public-access-fields">
             <label>Nombre completo
