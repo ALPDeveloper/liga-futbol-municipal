@@ -184,6 +184,26 @@ export function PublicAccessRequestSheet({ league, onClose }) {
             <button className={role === "referee" ? "active" : ""} type="button" onClick={() => setRole("referee")}>Arbitro</button>
           </div>
 
+          <GoogleIdentityButton
+            className="public-access-google-card"
+            label="Usar Google para solicitar acceso"
+            onCredential={(credential) => {
+              const profile = readGoogleCredentialProfile(credential);
+              setGoogleCredential(credential);
+              setGoogleProfile(profile);
+              setRequestName(profile?.name || requestName);
+              setRequestEmail(profile?.email || requestEmail);
+              setNotice(profile?.email ? `Google verificado: ${profile.email}. Completa telefono y envia la solicitud.` : "Google verificado. Completa tus datos y envia la solicitud.");
+              setError("");
+            }}
+            text="signup_with"
+          >
+            <div>
+              <strong>Registro con Google para delegado o arbitro</strong>
+              <span>Valida tu correo, llena tus datos mas rapido y espera la aprobacion del administrador de la liga.</span>
+            </div>
+          </GoogleIdentityButton>
+
           {role === "team_delegate" && (
             <section className="public-access-team-picker">
               <div className="public-access-guide">
@@ -238,26 +258,6 @@ export function PublicAccessRequestSheet({ league, onClose }) {
               <span>El administrador de {league.name} revisara tu registro antes de habilitar designaciones.</span>
             </section>
           )}
-
-          <GoogleIdentityButton
-            className="public-access-google-card"
-            label="Usar Google para solicitar acceso"
-            onCredential={(credential) => {
-              const profile = readGoogleCredentialProfile(credential);
-              setGoogleCredential(credential);
-              setGoogleProfile(profile);
-              setRequestName(profile?.name || requestName);
-              setRequestEmail(profile?.email || requestEmail);
-              setNotice(profile?.email ? `Google verificado: ${profile.email}. Completa telefono y envia la solicitud.` : "Google verificado. Completa tus datos y envia la solicitud.");
-              setError("");
-            }}
-            text="signup_with"
-          >
-            <div>
-              <strong>Registro rapido con Google</strong>
-              <span>Usa tu correo verificado para llenar nombre y email. La aprobacion del administrador sigue siendo obligatoria.</span>
-            </div>
-          </GoogleIdentityButton>
 
           {googleProfile && (
               <div className="public-access-google-linked">
