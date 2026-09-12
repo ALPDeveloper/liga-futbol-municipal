@@ -327,7 +327,7 @@ function InlineFallback({ label = "Cargando" }) {
   return <div className="inline-loading">{label}</div>;
 }
 
-function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePath, store, onSelectAccess }) {
+function AccessPage({ currentUser, onGoogleLogin, onLogin, onLogout, onNavigate, publicLeaguePath, store, onSelectAccess }) {
   const accessOptions = buildAccessOptions(currentUser, store);
   const returnLeagueId = getPublicLeagueIdFromPath(publicLeaguePath);
   const requestLeague = returnLeagueId ? store.leagues.find((league) => league.id === returnLeagueId) : null;
@@ -371,7 +371,7 @@ function AccessPage({ currentUser, onLogin, onLogout, onNavigate, publicLeaguePa
         </div>
 
         <Suspense fallback={<InlineFallback label="Cargando acceso" />}>
-          <LazyAuthPanel currentUser={currentUser} onGoogleLogin={loginWithGoogle} onLogin={onLogin} onLogout={onLogout} />
+          <LazyAuthPanel currentUser={currentUser} onGoogleLogin={onGoogleLogin} onLogin={onLogin} onLogout={onLogout} />
         </Suspense>
 
         {!currentUser && requestLeague && (
@@ -1896,6 +1896,7 @@ function App() {
       {isAccessRoute ? (
         <AccessPage
           currentUser={currentUser}
+          onGoogleLogin={loginWithGoogle}
           onLogin={login}
           onLogout={logout}
           onNavigate={navigateTo}
@@ -1913,6 +1914,7 @@ function App() {
       ) : isAdminRoute && !canUseAdmin ? (
         <AccessPage
           currentUser={currentUser}
+          onGoogleLogin={loginWithGoogle}
           onLogin={login}
           onLogout={logout}
           onNavigate={navigateTo}
@@ -1923,6 +1925,7 @@ function App() {
       ) : isTeamRoute && activeAccessRole !== "team_delegate" ? (
         <AccessPage
           currentUser={currentUser}
+          onGoogleLogin={loginWithGoogle}
           onLogin={login}
           onLogout={logout}
           onNavigate={navigateTo}
@@ -1933,6 +1936,7 @@ function App() {
       ) : isRefereeRoute && activeAccessRole !== "referee" ? (
         <AccessPage
           currentUser={currentUser}
+          onGoogleLogin={loginWithGoogle}
           onLogin={login}
           onLogout={logout}
           onNavigate={navigateTo}
