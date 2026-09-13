@@ -51,7 +51,8 @@ export function GoogleIdentityButton({
   disabled = false,
   label = "Continuar con Google",
   onCredential,
-  text = "continue_with"
+  text = "continue_with",
+  theme = "filled_black"
 }) {
   const buttonRef = useRef(null);
   const [config, setConfig] = useState({ enabled: false, clientId: "", loading: true });
@@ -91,7 +92,7 @@ export function GoogleIdentityButton({
           shape: "rectangular",
           size: "large",
           text,
-          theme: "outline",
+          theme,
           width: Math.min(400, Math.max(240, buttonRef.current.clientWidth || 320))
         });
       })
@@ -101,7 +102,7 @@ export function GoogleIdentityButton({
     return () => {
       cancelled = true;
     };
-  }, [config.clientId, config.enabled, disabled, onCredential, text]);
+  }, [config.clientId, config.enabled, disabled, onCredential, text, theme]);
 
   if (config.loading || !config.enabled) return null;
 

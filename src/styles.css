@@ -29103,6 +29103,10 @@ button.arbitration-metric-card {
   justify-content: center;
   width: min(100%, 400px);
   margin: 0 auto;
+  padding: 3px;
+  border: 1px solid rgba(42, 231, 188, 0.2);
+  border-radius: 11px;
+  background: rgba(1, 9, 15, 0.68);
 }
 
 .auth-experience-page .google-identity-error {
@@ -65786,9 +65790,10 @@ html.operation-data-active .admin-console-page::after {
   justify-content: center;
   width: min(100%, 400px);
   margin: 0 auto;
-  padding: 2px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.9);
+  padding: 3px;
+  border: 1px solid rgba(42, 231, 188, 0.22);
+  border-radius: 11px;
+  background: rgba(1, 9, 15, 0.78);
 }
 
 .public-access-google-linked {
