@@ -307,6 +307,25 @@ try {
   assert.equal(eligibility.get(ids.playerOne).officialAppearances, 0);
   assert.equal(eligibility.get(ids.playerTwo).officialAppearances, 1);
 
+  const sheetStore = await apiFetch(`/leagues/${ids.league}/matches/${ids.scheduledMatch}/sheet`, {
+    token,
+    method: "POST",
+    body: {
+      homeGoals: 1,
+      awayGoals: 0,
+      status: "finished",
+      observations: "Acta administrativa con convocatoria existente",
+      events: [
+        { type: "goal", playerId: ids.playerOne, teamId: ids.home, minute: 18 }
+      ]
+    }
+  });
+  const sheetLeague = getLeague(sheetStore);
+  const publishedScheduledMatch = sheetLeague.matches.find((match) => match.id === ids.scheduledMatch);
+  assert.equal(publishedScheduledMatch.status, "finished");
+  assert.equal(publishedScheduledMatch.events.length, 1);
+  assert.equal(sheetLeague.matchParticipations.filter((participation) => participation.matchId === ids.scheduledMatch && participation.active !== false).length, 1);
+
   console.log("Convocatorias admin y conteo de partidos jugados OK");
 } finally {
   server.kill("SIGTERM");

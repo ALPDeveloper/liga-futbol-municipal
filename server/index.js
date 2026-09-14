@@ -2871,7 +2871,11 @@ app.post("/api/leagues/:leagueId/matches/:matchId/sheet", requireAuth, async (re
 
   let nextStore;
   try {
-    nextStore = await importStoreData(nextStoreCandidate);
+    const nextLeague = nextStoreCandidate.leagues.find((item) => item.id === leagueId);
+    const publishedMatch = nextLeague?.matches?.find((item) => item.id === match.id);
+    if (!publishedMatch) return response.status(404).json({ error: "Partido publicado no encontrado." });
+    await publishOfficialMatchFromReportData({ leagueId, match: publishedMatch });
+    nextStore = await getStoreData();
   } catch (persistError) {
     console.error("Error al publicar acta desde panel admin:", persistError);
     return response.status(500).json({
