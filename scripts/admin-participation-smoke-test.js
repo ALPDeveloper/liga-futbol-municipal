@@ -22,6 +22,7 @@ process.env.SERVE_STATIC = "false";
 
 const { hashPassword } = await import("../server/password.js");
 const {
+  createTeamDelegateAssignmentData,
   createUserAccessData,
   createUserData,
   importStoreData,
@@ -39,12 +40,18 @@ const ids = {
   playerOne: "player-admin-one",
   playerTwo: "player-admin-two",
   awayPlayer: "player-admin-away",
-  admin: "user-admin-participation"
+  admin: "user-admin-participation",
+  delegate: "user-delegate-admin-participation"
 };
 
 const credentials = {
   email: "admin.participation@ligatec.test",
   password: "AdminParticipation123!"
+};
+
+const delegateCredentials = {
+  email: "delegate.admin.participation@ligatec.test",
+  password: "DelegateParticipation123!"
 };
 
 async function seedData() {
@@ -138,6 +145,31 @@ async function seedData() {
     permissions: ["match_sheets", "matches"],
     status: "active"
   });
+  await createUserData({
+    id: ids.delegate,
+    leagueId: ids.league,
+    name: "Delegado Convocatorias",
+    email: delegateCredentials.email,
+    role: "team_delegate",
+    status: "active",
+    passwordHash: hashPassword(delegateCredentials.password)
+  });
+  await createUserAccessData({
+    id: "access-delegate-admin-participation",
+    userId: ids.delegate,
+    leagueId: ids.league,
+    teamId: ids.home,
+    role: "team_delegate",
+    permissions: ["team_roster"],
+    status: "active"
+  });
+  await createTeamDelegateAssignmentData({
+    id: "assignment-delegate-admin-participation",
+    leagueId: ids.league,
+    teamId: ids.home,
+    userId: ids.delegate,
+    status: "active"
+  });
 }
 
 function startServer() {
@@ -190,8 +222,8 @@ async function waitForServer() {
   throw new Error("El servidor de prueba no inicio a tiempo.");
 }
 
-async function login() {
-  const payload = await apiFetch("/auth/login", { method: "POST", body: credentials });
+async function login(loginCredentials = credentials) {
+  const payload = await apiFetch("/auth/login", { method: "POST", body: loginCredentials });
   assert.ok(payload.token);
   return payload.token;
 }
@@ -219,11 +251,17 @@ const server = startServer();
 try {
   await waitForServer();
   const token = await login();
+  const delegateToken = await login(delegateCredentials);
 
   const scheduled = await adminParticipation(token, ids.scheduledMatch, [ids.playerOne]);
   assert.equal(scheduled.participation.matchId, ids.scheduledMatch);
   assert.equal(scheduled.participation.source, "admin_correction");
   assert.equal(scheduled.participation.players.length, 1);
+
+  const delegatePortalAfterAdmin = await apiFetch("/team-portal/me", { token: delegateToken });
+  const scheduledForDelegate = delegatePortalAfterAdmin.matches.find((match) => match.id === ids.scheduledMatch);
+  assert.equal(scheduledForDelegate.participationSubmitted, true);
+  assert.equal(scheduledForDelegate.participation.players[0].playerId, ids.playerOne);
 
   let store = await apiFetch("/store", { token });
   let eligibility = calculatePlayerAppearanceEligibility(getLeague(store));

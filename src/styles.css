@@ -72274,23 +72274,121 @@ body:has(.public-league-page) {
   align-items: center;
 }
 
-.admin-console-page .participation-hero b {
+.admin-console-page .participation-hero-stats {
   display: grid;
-  min-width: 124px;
+  grid-template-columns: repeat(3, minmax(86px, 1fr));
+  gap: 8px;
+  min-width: min(380px, 100%);
+}
+
+.admin-console-page .participation-hero-stats span {
+  display: grid;
+  min-width: 0;
   min-height: 58px;
   place-items: center;
   padding: 10px 14px;
   border: 1px solid rgba(145, 255, 88, 0.24);
   border-radius: 14px;
-  color: #91ff58;
   background: rgba(145, 255, 88, 0.09);
-  font-size: 0.88rem;
-  font-weight: 1000;
   text-align: center;
 }
 
+.admin-console-page .participation-hero-stats b {
+  color: #91ff58;
+  font-size: 1.04rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.admin-console-page .participation-hero-stats small {
+  color: rgba(220, 232, 240, 0.68);
+  font-size: 0.58rem;
+  font-weight: 1000;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .admin-console-page .participation-toolbar {
-  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(170px, 0.8fr) minmax(170px, 0.78fr) minmax(190px, 0.95fr) minmax(220px, 1.35fr);
+}
+
+.admin-console-page .participation-group-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-console-page .participation-round-group {
+  min-width: 0;
+  border: 1px solid rgba(132, 166, 190, 0.14);
+  border-radius: 15px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.025)),
+    rgba(3, 15, 23, 0.72);
+  overflow: hidden;
+}
+
+.admin-console-page .participation-round-group summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, auto) minmax(88px, auto);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.admin-console-page .participation-round-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-console-page .participation-round-group summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.admin-console-page .participation-round-group summary > div:not(:first-child) {
+  justify-items: center;
+  padding: 7px 8px;
+  border: 1px solid rgba(132, 166, 190, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: center;
+}
+
+.admin-console-page .participation-round-group summary strong {
+  min-width: 0;
+  color: #f7fbff;
+  font-size: 0.86rem;
+  font-weight: 1000;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-round-group summary span {
+  min-width: 0;
+  color: rgba(220, 232, 240, 0.64);
+  font-size: 0.64rem;
+  font-weight: 850;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.admin-console-page .participation-round-group summary b {
+  color: #91ff58;
+  font-size: 0.96rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.admin-console-page .participation-round-group > .participation-card-list {
+  padding: 0 12px 12px;
+}
+
+.admin-console-page .participation-card-list.compact {
+  gap: 8px;
 }
 
 .admin-console-page .participation-tabs {
@@ -72908,6 +73006,14 @@ body:has(.public-league-page) {
     grid-template-columns: 1fr;
   }
 
+  .admin-console-page .participation-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-page .participation-hero-stats {
+    width: 100%;
+  }
+
   .admin-console-page .participation-card {
     grid-template-columns: minmax(0, 1fr) 96px;
   }
@@ -72935,12 +73041,24 @@ body:has(.public-league-page) {
 }
 
 @media (max-width: 560px) {
-  .admin-console-page .participation-hero {
-    grid-template-columns: 1fr;
+  .admin-console-page .participation-hero-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    min-width: 0;
   }
 
-  .admin-console-page .participation-hero b {
-    width: 100%;
+  .admin-console-page .participation-hero-stats span {
+    min-height: 52px;
+    padding: 8px 6px;
+  }
+
+  .admin-console-page .participation-round-group summary {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(70px, 0.35fr));
+    gap: 7px;
+    padding: 10px;
+  }
+
+  .admin-console-page .participation-round-group summary > div:not(:first-child) {
+    padding: 6px;
   }
 
   .admin-console-page .participation-tabs {

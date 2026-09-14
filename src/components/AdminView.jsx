@@ -1283,10 +1283,53 @@ function createParticipationDraftFromRow(row, league) {
   };
 }
 
+function getParticipationRoundKey(row) {
+  const match = row.match || {};
+  if (match.stage === "playoff" || match.playoffRound) {
+    return `playoff:${match.playoffRound || "liguilla"}:${match.playoffLeg || ""}`;
+  }
+  return `round:${match.round || "sin-jornada"}`;
+}
+
+function getParticipationRoundLabel(row) {
+  const match = row.match || {};
+  if (match.stage === "playoff" || match.playoffRound) {
+    return [getPlayoffPhaseLabel(match.playoffRound) || match.playoffRound || "Liguilla", match.playoffLeg].filter(Boolean).join(" ");
+  }
+  return match.round ? `Jornada ${match.round}` : "Sin jornada";
+}
+
+function getParticipationGroupKey(row) {
+  return `${getParticipationRoundKey(row)}:${row.match?.date || "sin-fecha"}`;
+}
+
+function buildParticipationGroups(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const key = getParticipationGroupKey(row);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: getParticipationRoundLabel(row),
+        date: row.match?.date || "",
+        rows: []
+      });
+    }
+    groups.get(key).rows.push(row);
+  });
+  return [...groups.values()].map((group) => ({
+    ...group,
+    pendingCount: group.rows.filter((row) => !row.participation).length,
+    sentCount: group.rows.filter((row) => row.participation).length
+  }));
+}
+
 function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipation }) {
   const competitions = useMemo(() => [...(league.competitions || [])].sort((a, b) => a.name.localeCompare(b.name)), [league.competitions]);
   const defaultCompetitionId = getDefaultCompetitionId(league);
   const [competitionId, setCompetitionId] = useState(defaultCompetitionId);
+  const [roundFilter, setRoundFilter] = useState("all");
+  const [teamFilter, setTeamFilter] = useState("all");
   const [tab, setTab] = useState("pending");
   const [query, setQuery] = useState("");
   const [playerPickerQuery, setPlayerPickerQuery] = useState("");
@@ -1299,8 +1342,29 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
   const [notice, setNotice] = useState("");
   const [noticeType, setNoticeType] = useState("success");
   const rows = useMemo(() => buildParticipationControlRows(league, competitionId), [competitionId, league]);
-  const pendingRows = rows.filter((row) => !row.participation);
-  const submittedRows = rows.filter((row) => row.participation);
+  const roundOptions = useMemo(() => {
+    const options = new Map();
+    rows.forEach((row) => {
+      const key = getParticipationRoundKey(row);
+      if (!options.has(key)) options.set(key, { key, label: getParticipationRoundLabel(row), date: row.match?.date || "" });
+    });
+    return [...options.values()];
+  }, [rows]);
+  const teamOptions = useMemo(() => {
+    const options = new Map();
+    rows.forEach((row) => {
+      if (row.teamId && row.team) options.set(row.teamId, row.team);
+    });
+    return [...options.values()].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [rows]);
+  const scopedRows = rows.filter((row) => (
+    (roundFilter === "all" || getParticipationRoundKey(row) === roundFilter) &&
+    (teamFilter === "all" || row.teamId === teamFilter)
+  ));
+  const pendingRows = scopedRows.filter((row) => !row.participation);
+  const submittedRows = scopedRows.filter((row) => row.participation);
+  const allPendingRows = rows.filter((row) => !row.participation);
+  const allSubmittedRows = rows.filter((row) => row.participation);
   const scopedLeague = useMemo(() => competitionId ? scopeLeagueToCompetition(league, competitionId) : league, [competitionId, league]);
   const appearanceByPlayerId = useMemo(() => calculatePlayerAppearanceEligibility(scopedLeague), [scopedLeague]);
   const participationSuspensionByPlayerId = useMemo(() => new Map(
@@ -1309,6 +1373,7 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
       .map((notice) => [notice.player.id, notice])
   ), [scopedLeague]);
   const playerRows = useMemo(() => [...(scopedLeague.players || [])]
+    .filter((player) => teamFilter === "all" || player.teamId === teamFilter)
     .map((player) => {
       const appearance = appearanceByPlayerId.get(player.id) || {
         officialAppearances: 0,
@@ -1322,10 +1387,10 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
       };
     })
     .sort((a, b) => (
-      Number(b.appearance.recognizedAppearances || 0) - Number(a.appearance.recognizedAppearances || 0) ||
-      String(a.team?.name || "").localeCompare(String(b.team?.name || "")) ||
-      String(a.player.name || "").localeCompare(String(b.player.name || ""))
-    )), [appearanceByPlayerId, league, scopedLeague.players]);
+        Number(b.appearance.recognizedAppearances || 0) - Number(a.appearance.recognizedAppearances || 0) ||
+        String(a.team?.name || "").localeCompare(String(b.team?.name || "")) ||
+        String(a.player.name || "").localeCompare(String(b.player.name || ""))
+    )), [appearanceByPlayerId, league, scopedLeague.players, teamFilter]);
   const visibleRows = (tab === "sent" ? submittedRows : pendingRows).filter((row) => {
     const search = normalizeAdminSearchTerm(query);
     if (!search) return true;
@@ -1339,6 +1404,7 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
       getMatchStatusLabel(row.match.status)
     ].filter(Boolean).join(" ")).includes(search);
   });
+  const visibleGroups = useMemo(() => buildParticipationGroups(visibleRows), [visibleRows]);
   const visiblePlayerRows = playerRows.filter((row) => {
     const search = normalizeAdminSearchTerm(query);
     if (!search) return true;
@@ -1351,6 +1417,22 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
       setCompetitionId(defaultCompetitionId || competitions[0]?.id || "");
     }
   }, [competitionId, competitions, defaultCompetitionId]);
+
+  useEffect(() => {
+    if (roundFilter !== "all" && !roundOptions.some((option) => option.key === roundFilter)) setRoundFilter("all");
+  }, [roundFilter, roundOptions]);
+
+  useEffect(() => {
+    if (teamFilter !== "all" && !teamOptions.some((team) => team.id === teamFilter)) setTeamFilter("all");
+  }, [teamFilter, teamOptions]);
+
+  useEffect(() => {
+    if (!activeRowKey) return;
+    if (!visibleRows.some((row) => row.key === activeRowKey)) {
+      setActiveRowKey("");
+      setPlayerPickerQuery("");
+    }
+  }, [activeRowKey, visibleRows]);
 
   function getDraft(row) {
     return drafts[row.key] || createParticipationDraftFromRow(row, league);
@@ -1688,9 +1770,7 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
   }
 
   function renderParticipationCard(row) {
-    const matchLabel = row.match.stage === "playoff"
-      ? [getPlayoffPhaseLabel(row.match.playoffRound) || row.match.playoffRound || "Liguilla", row.match.playoffLeg].filter(Boolean).join(" ")
-      : `Jornada ${row.match.round || "-"}`;
+    const matchLabel = getParticipationRoundLabel(row);
     const participationPlayers = row.participation?.players || [];
     return (
       <article className={`participation-card ${row.participation ? "is-sent" : "is-pending"}`} key={row.key}>
@@ -1725,6 +1805,31 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
     );
   }
 
+  function renderParticipationGroup(group) {
+    const open = group.rows.length <= 8 || group.rows.some((row) => row.key === activeRowKey);
+    return (
+      <details className="participation-round-group" key={group.key} open={open}>
+        <summary>
+          <div>
+            <strong>{group.label}</strong>
+            <span>{group.date ? formatDate(group.date) : "Fecha por definir"} · {group.rows.length} equipo(s)</span>
+          </div>
+          <div>
+            <b>{group.pendingCount}</b>
+            <span>Pendientes</span>
+          </div>
+          <div>
+            <b>{group.sentCount}</b>
+            <span>Enviadas</span>
+          </div>
+        </summary>
+        <div className="participation-card-list compact">
+          {group.rows.map(renderParticipationCard)}
+        </div>
+      </details>
+    );
+  }
+
   return (
     <section className="panel admin-data-panel participation-control-panel">
       <SectionHeading eyebrow="Operacion" title="Convocatorias y partidos jugados" />
@@ -1732,21 +1837,49 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
       <div className="admin-data-hero participation-hero">
         <div>
           <span>Control de participantes</span>
-          <strong>{pendingRows.length} pendiente(s)</strong>
-          <small>{submittedRows.length} enviada(s) en el torneo seleccionado.</small>
+          <strong>{allPendingRows.length} pendiente(s)</strong>
+          <small>Admin y delegado comparten el mismo registro: al enviarse desde un panel deja de quedar pendiente en ambos.</small>
         </div>
-        <b>{visiblePlayerRows.reduce((total, row) => total + Number(row.appearance.recognizedAppearances || 0), 0)} jugados</b>
+        <div className="participation-hero-stats" aria-label="Resumen de convocatorias">
+          <span><b>{allPendingRows.length}</b><small>Pendientes</small></span>
+          <span><b>{allSubmittedRows.length}</b><small>Enviadas</small></span>
+          <span><b>{visiblePlayerRows.reduce((total, row) => total + Number(row.appearance.recognizedAppearances || 0), 0)}</b><small>PJ visibles</small></span>
+        </div>
       </div>
       <div className="admin-filter-console participation-toolbar">
         <label>Torneo
           <select value={competitionId} onChange={(event) => {
             setCompetitionId(event.target.value);
+            setRoundFilter("all");
+            setTeamFilter("all");
             setActiveRowKey("");
             setPlayerPickerQuery("");
             setPlayerListLimit(24);
           }}>
             {competitions.map((competition) => (
               <option key={competition.id} value={competition.id}>{competition.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>Jornada o fase
+          <select value={roundFilter} onChange={(event) => {
+            setRoundFilter(event.target.value);
+            setActiveRowKey("");
+          }}>
+            <option value="all">Todas las jornadas</option>
+            {roundOptions.map((option) => (
+              <option key={option.key} value={option.key}>{option.label}{option.date ? ` · ${formatDate(option.date)}` : ""}</option>
+            ))}
+          </select>
+        </label>
+        <label>Equipo
+          <select value={teamFilter} onChange={(event) => {
+            setTeamFilter(event.target.value);
+            setActiveRowKey("");
+          }}>
+            <option value="all">Todos los equipos</option>
+            {teamOptions.map((team) => (
+              <option key={team.id} value={team.id}>{team.name}</option>
             ))}
           </select>
         </label>
@@ -1767,8 +1900,8 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
       </div>
 
       {tab !== "players" && (
-        <div className="participation-card-list">
-          {visibleRows.map(renderParticipationCard)}
+        <div className="participation-group-list">
+          {visibleGroups.map(renderParticipationGroup)}
           {!visibleRows.length && <p className="empty">No hay convocatorias en esta vista.</p>}
         </div>
       )}
