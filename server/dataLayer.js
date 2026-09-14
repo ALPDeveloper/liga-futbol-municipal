@@ -2406,7 +2406,7 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
   transaction();
 }
 
-export async function createTeamPortalPlayerData({ id, leagueId, competitionId, teamId, name, number, position, photoUrl, photoAuthorized }) {
+export async function createPlayerData({ id, leagueId, competitionId, teamId, name, number, position, photoUrl, photoAuthorized, status = "active" }) {
   const values = [
     id,
     leagueId,
@@ -2416,20 +2416,37 @@ export async function createTeamPortalPlayerData({ id, leagueId, competitionId, 
     Number(number || 0),
     upperText(position || "Jugador"),
     sanitizeImageUrl(photoUrl),
-    photoAuthorized ? 1 : 0
+    photoAuthorized ? 1 : 0,
+    status === "historical" ? "historical" : "active"
   ];
 
   if (isPostgres()) {
     await pgQuery(`
       INSERT INTO players (id, league_id, competition_id, team_id, name, number, position, photo_url, photo_authorized, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
-    `, [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], Boolean(values[8])]);
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `, [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], Boolean(values[8]), values[9]]);
   } else {
     db.prepare(`
       INSERT INTO players (id, league_id, competition_id, team_id, name, number, position, photo_url, photo_authorized, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(...values);
   }
+  return {
+    id,
+    leagueId,
+    competitionId: competitionId || null,
+    teamId,
+    name: values[4],
+    number: values[5],
+    position: values[6],
+    photoUrl: values[7],
+    photoAuthorized: Boolean(values[8]),
+    status: values[9]
+  };
+}
+
+export async function createTeamPortalPlayerData({ id, leagueId, competitionId, teamId, name, number, position, photoUrl, photoAuthorized }) {
+  await createPlayerData({ id, leagueId, competitionId, teamId, name, number, position, photoUrl, photoAuthorized, status: "active" });
   return listTeamPortalPlayersData(teamId);
 }
 

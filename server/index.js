@@ -17,6 +17,7 @@ import {
   createMatchReportData,
   createMatchReportSignatureData,
   createMatchSessionOperationData,
+  createPlayerData,
   createAccessRequestData,
   countTeamDelegateAssignmentsData,
   createMatchParticipationData,
@@ -123,7 +124,7 @@ import {
 } from "./security.js";
 import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getPlayerNumberForTeam, getTeam, upperText } from "../src/lib/domain.js";
-import { addPlayer, advancePlayoffPhase, deletePlayer, deletePlayoffMatches, generatePlayoffBracket, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
+import { advancePlayoffPhase, deletePlayer, deletePlayoffMatches, generatePlayoffBracket, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
 import {
   MATCH_CAPTURE_MODES,
   MATCH_REPORT_STATUSES,
@@ -2638,7 +2639,21 @@ app.post("/api/leagues/:leagueId/players", requireAuth, async (request, response
   const validation = validatePlayerPayloadForLeague(league, payload);
   if (validation) return response.status(validation.status).json({ error: validation.error });
 
-  const nextStore = await importStoreData(addPlayer(store, leagueId, payload));
+  const team = (league.teams || []).find((item) => item.id === payload.teamId);
+  const competitionId = payload.competitionId || team?.competitionId || league.currentCompetitionId;
+  const player = await createPlayerData({
+    id: `player-${crypto.randomUUID()}`,
+    leagueId,
+    competitionId,
+    teamId: payload.teamId,
+    name: payload.name,
+    number: payload.number,
+    position: payload.position,
+    photoUrl: payload.photoUrl,
+    photoAuthorized: payload.photoAuthorized,
+    status: payload.status
+  });
+  const nextStore = await getStoreData();
   clearPublicCache();
 
   await logAudit({
@@ -2646,6 +2661,7 @@ app.post("/api/leagues/:leagueId/players", requireAuth, async (request, response
     leagueId,
     action: "player_create",
     entityType: "player",
+    entityId: player.id,
     detail: `Registro jugador ${upperText(payload.name || "")}`
   });
   response.status(201).json(nextStore);
@@ -4725,10 +4741,23 @@ app.post("/api/referee-portal/matches/:matchId/players", requireAuth, async (req
   const duplicate = findDuplicatePlayer(context.league, payload);
   if (duplicate) return response.status(409).json({ error: `Este jugador ya esta registrado como ${duplicate.name}.` });
 
-  const nextStore = await importStoreData(addPlayer(context.store, context.league.id, payload));
+  const createdPlayer = await createPlayerData({
+    id: `player-${crypto.randomUUID()}`,
+    leagueId: context.league.id,
+    competitionId: payload.competitionId,
+    teamId: payload.teamId,
+    name: payload.name,
+    number: payload.number,
+    position: payload.position,
+    photoUrl: "",
+    photoAuthorized: false,
+    status: "active"
+  });
+  const nextStore = await getStoreData();
   clearPublicCache();
   const nextLeague = nextStore.leagues.find((item) => item.id === context.league.id);
   const player = [...(nextLeague?.players || [])].reverse().find((item) => (
+    item.id === createdPlayer.id ||
     item.teamId === teamId &&
     normalizePlayerNameForMatch(item.name) === normalizePlayerNameForMatch(payload.name)
   ));

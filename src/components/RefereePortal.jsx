@@ -1338,6 +1338,16 @@ function createEvent(match, type, teamId, minuteInfo = "") {
   };
 }
 
+function supportsRefereeManualEventQuantity(type) {
+  return type === "goal" || type === "yellow";
+}
+
+function clampRefereeManualEventQuantity(value) {
+  const quantity = Number.parseInt(value, 10);
+  if (!Number.isFinite(quantity)) return 1;
+  return Math.max(1, Math.min(10, quantity));
+}
+
 function readRefereeDraft(key) {
   if (typeof window === "undefined") return null;
   try {
@@ -2602,25 +2612,21 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
     }
   }
 
-  function createEventFromSelection(type, teamId, playerId, minuteInfo = getLiveEventMinute()) {
+  function createEventFromSelection(type, teamId, playerId, minuteInfo = getLiveEventMinute(), options = {}) {
     setMessage("");
     const now = Date.now();
-    if (lastEventRef.current.type === type && lastEventRef.current.teamId === teamId && lastEventRef.current.playerId === playerId && now - lastEventRef.current.at < 800) {
+    const quantity = clampRefereeManualEventQuantity(options.quantity || 1);
+    if (quantity === 1 && lastEventRef.current.type === type && lastEventRef.current.teamId === teamId && lastEventRef.current.playerId === playerId && now - lastEventRef.current.at < 800) {
       setMessage("Evento ignorado para evitar duplicado por doble toque. Si fue intencional, vuelve a tocar.");
       return;
     }
     lastEventRef.current = { type, teamId, playerId, at: now };
-    const nextEvent = {
-      ...createEvent(match, type, teamId, minuteInfo),
-      playerId,
-      period: minuteInfo?.period || getCurrentEventPeriod()
-    };
     const shouldAdjustScore = sheetMode === "played" && isGoalEventType(type);
     const nextHomeGoals = shouldAdjustScore && teamId === match.homeTeamId
-      ? String(Math.max(0, Number(homeGoals || 0) + 1))
+      ? String(Math.max(0, Number(homeGoals || 0) + quantity))
       : homeGoals;
     const nextAwayGoals = shouldAdjustScore && teamId === match.awayTeamId
-      ? String(Math.max(0, Number(awayGoals || 0) + 1))
+      ? String(Math.max(0, Number(awayGoals || 0) + quantity))
       : awayGoals;
     const selectedPlayer = getPlayersForEvent(match, { type, teamId }).find((player) => player.id === playerId);
     const restrictionNotice = getRefereePlayerRestrictionNotice(selectedPlayer, match);
@@ -2629,23 +2635,30 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
       if (teamId === match.awayTeamId) setAwayGoals(nextAwayGoals);
     }
     setEvents((current) => {
+      const createdEvents = Array.from({ length: quantity }, () => ({
+        ...createEvent(match, type, teamId, minuteInfo),
+        playerId,
+        period: minuteInfo?.period || getCurrentEventPeriod()
+      }));
       const createsDoubleYellow = type === "yellow" && playerId && current.some((eventItem) => (
         eventItem.type === "yellow" &&
         eventItem.playerId === playerId &&
         eventItem.teamId === teamId
       ));
-      const nextEvents = normalizeDoubleYellowDraftEvents([...current, nextEvent]);
+      const nextEvents = normalizeDoubleYellowDraftEvents([...current, ...createdEvents]);
       const nextDraft = { ...buildDraftPayload(), homeGoals: nextHomeGoals, awayGoals: nextAwayGoals, events: nextEvents };
       persistLiveDraft(nextDraft);
-      const operation = recordLiveOperation("add_event", { event: nextEvent }, nextDraft);
+      const operation = recordLiveOperation("add_event", { event: createdEvents[0], bulkCount: quantity }, nextDraft);
       queueLiveAutoSync(nextDraft, operation);
       if (type === "red") {
-        setPendingRedReasonEventId(nextEvent.id);
+        setPendingRedReasonEventId(createdEvents[0]?.id || "");
         setMessage(`Roja directa registrada. Completa el motivo para que el acta quede lista.${restrictionNotice ? ` Aviso: ${restrictionNotice}.` : ""}`);
       } else {
-        const baseMessage = createsDoubleYellow
+        const baseMessage = createsDoubleYellow || (type === "yellow" && quantity > 1)
           ? "Segunda amarilla registrada: se agrego roja por doble amarilla en el mismo minuto."
-          : `${getEventLabel(type)} registrado. Guardado en este dispositivo.`;
+          : quantity > 1
+            ? `${quantity} ${getEventLabel(type).toLowerCase()}(s) registrados. Guardado en este dispositivo.`
+            : `${getEventLabel(type)} registrado. Guardado en este dispositivo.`;
         setMessage(restrictionNotice ? `${baseMessage} Aviso: ${restrictionNotice}.` : baseMessage);
       }
       return nextEvents;
@@ -2661,7 +2674,8 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
     setEventComposer({
       type,
       teamId,
-      minuteInfo: getLiveEventMinute()
+      minuteInfo: getLiveEventMinute(),
+      quantity: captureMode !== "live" && supportsRefereeManualEventQuantity(type) ? 1 : undefined
     });
     setEventComposerQuery("");
     setEventComposerFilter("all");
@@ -2689,7 +2703,10 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
 
   function confirmEventComposer(player) {
     if (!eventComposer) return;
-    createEventFromSelection(eventComposer.type, eventComposer.teamId, player.id, eventComposer.minuteInfo);
+    const quantity = captureMode !== "live" && supportsRefereeManualEventQuantity(eventComposer.type)
+      ? clampRefereeManualEventQuantity(eventComposer.quantity)
+      : 1;
+    createEventFromSelection(eventComposer.type, eventComposer.teamId, player.id, eventComposer.minuteInfo, { quantity });
     cancelEventComposer();
   }
 
@@ -2758,7 +2775,11 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
       if (response.payload) onSaved(response.payload, { draft: true, keepOpen: true, message: "" });
       addPlayerToLocalMatch(player, teamId);
       window.alert(`Jugador registrado correctamente.\n\n${player.name}`);
-      createEventFromSelection(eventComposer.type, eventComposer.teamId, player.id, eventComposer.minuteInfo);
+      createEventFromSelection(eventComposer.type, eventComposer.teamId, player.id, eventComposer.minuteInfo, {
+        quantity: captureMode !== "live" && supportsRefereeManualEventQuantity(eventComposer.type)
+          ? clampRefereeManualEventQuantity(eventComposer.quantity)
+          : 1
+      });
       cancelEventComposer();
     } catch (error) {
       const message = error.message || "No se pudo registrar el jugador.";
@@ -3173,6 +3194,19 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
           <span>{getMatchEventPeriodLabel(eventComposer.minuteInfo?.period || getCurrentEventPeriod())}</span>
           <span>Min {eventComposer.minuteInfo?.minuteLabel || eventComposer.minuteInfo?.minute || "Manual"}</span>
         </div>
+        {captureMode !== "live" && supportsRefereeManualEventQuantity(eventComposer.type) && (
+          <label className="referee-event-composer-quantity">
+            Cantidad de {eventComposer.type === "goal" ? "goles" : "amarillas"}
+            <input
+              value={eventComposer.quantity ?? 1}
+              onChange={(event) => setEventComposer((current) => current ? { ...current, quantity: event.target.value } : current)}
+              type="number"
+              min="1"
+              max="10"
+              inputMode="numeric"
+            />
+          </label>
+        )}
         <label className="referee-event-composer-search">
           Buscar jugador de {playerTeamName}
           <div className="referee-search-input-wrap">

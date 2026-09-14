@@ -34282,11 +34282,31 @@ button.arbitration-metric-card {
   font-weight: 950;
 }
 
+.referee-event-composer-quantity {
+  display: grid;
+  gap: 7px;
+  color: #dce8f0;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
 .referee-event-composer-search input {
   min-height: 46px;
   border-color: rgba(132, 166, 190, 0.22);
   background: rgba(2, 9, 15, 0.92);
   color: var(--ref-text);
+}
+
+.referee-event-composer-quantity input {
+  width: min(100%, 160px);
+  min-height: 46px;
+  border: 1px solid rgba(41, 230, 177, 0.28);
+  border-radius: 12px;
+  background: rgba(2, 9, 15, 0.92);
+  color: var(--ref-text);
+  font-size: 1rem;
+  font-weight: 950;
+  text-align: center;
 }
 
 .referee-event-composer-filters {

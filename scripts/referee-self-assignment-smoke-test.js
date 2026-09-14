@@ -221,6 +221,19 @@ try {
     method: "POST",
     body: { crewMode: "solo", role: "central" }
   });
+  const quickPlayerResponse = await apiFetch(`/referee-portal/matches/${ids.soloMatch}/players`, {
+    token: centralToken,
+    method: "POST",
+    body: {
+      teamId: ids.home,
+      name: "Jugador Rapido Arbitro",
+      number: 17,
+      position: "Delantero"
+    }
+  });
+  assert.ok(quickPlayerResponse.player?.id, "El arbitro debe poder registrar jugador rapido desde el acta.");
+  assert.equal(quickPlayerResponse.player.name, "JUGADOR RAPIDO ARBITRO");
+  assert.equal(quickPlayerResponse.player.teamId, ids.home);
   const auxiliarAfterSolo = await apiFetch("/referee-portal/me", { token: auxiliarToken });
   assert.equal(auxiliarAfterSolo.pendingMatches.some((match) => match.id === ids.soloMatch), false);
 

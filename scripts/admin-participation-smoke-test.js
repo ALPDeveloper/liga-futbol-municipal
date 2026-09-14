@@ -142,7 +142,7 @@ async function seedData() {
     userId: ids.admin,
     leagueId: ids.league,
     role: "league_admin",
-    permissions: ["match_sheets", "matches"],
+    permissions: ["match_sheets", "matches", "players"],
     status: "active"
   });
   await createUserData({
@@ -253,15 +253,30 @@ try {
   const token = await login();
   const delegateToken = await login(delegateCredentials);
 
-  const scheduled = await adminParticipation(token, ids.scheduledMatch, [ids.playerOne]);
+  const storeWithQuickPlayer = await apiFetch(`/leagues/${ids.league}/players`, {
+    token,
+    method: "POST",
+    body: {
+      teamId: ids.home,
+      competitionId: ids.competition,
+      name: "Jugador Nuevo Admin",
+      number: 12,
+      position: "Delantero"
+    }
+  });
+  const quickPlayer = getLeague(storeWithQuickPlayer).players.find((player) => player.name === "JUGADOR NUEVO ADMIN");
+  assert.ok(quickPlayer?.id, "El alta rapida admin debe regresar el jugador en el store actualizado.");
+
+  const scheduled = await adminParticipation(token, ids.scheduledMatch, [ids.playerOne, quickPlayer.id], ids.playerOne);
   assert.equal(scheduled.participation.matchId, ids.scheduledMatch);
   assert.equal(scheduled.participation.source, "admin_correction");
-  assert.equal(scheduled.participation.players.length, 1);
+  assert.equal(scheduled.participation.players.length, 2);
 
   const delegatePortalAfterAdmin = await apiFetch("/team-portal/me", { token: delegateToken });
   const scheduledForDelegate = delegatePortalAfterAdmin.matches.find((match) => match.id === ids.scheduledMatch);
   assert.equal(scheduledForDelegate.participationSubmitted, true);
   assert.equal(scheduledForDelegate.participation.players[0].playerId, ids.playerOne);
+  assert.equal(scheduledForDelegate.participation.players.some((player) => player.playerId === quickPlayer.id), true);
 
   let store = await apiFetch("/store", { token });
   let eligibility = calculatePlayerAppearanceEligibility(getLeague(store));

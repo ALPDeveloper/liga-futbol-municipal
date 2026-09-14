@@ -46,6 +46,22 @@ const ADMIN_SHEET_EVENT_ACTIONS = [
   { type: "injury_note", label: "Lesion", icon: "✚", className: "event-injury" },
   { type: "other_note", label: "Otro", icon: "⋯", className: "event-other" }
 ];
+
+function supportsAdminSheetEventQuantity(type) {
+  return type === "goal" || type === "yellow";
+}
+
+function clampManualEventQuantity(value) {
+  const quantity = Number.parseInt(value, 10);
+  if (!Number.isFinite(quantity)) return 1;
+  return Math.max(1, Math.min(10, quantity));
+}
+
+function stripManualEventTransientFields(eventItem) {
+  const { quantity, ...eventToSave } = eventItem || {};
+  return eventToSave;
+}
+
 const ADMIN_SHEET_OBSERVATION_CHIPS = ["Juego limpio", "Lluvia", "Retraso", "Suspension temporal", "Sin novedades"];
 
 function needsAdminMatchReportAttention(report) {
@@ -1341,6 +1357,7 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
   const [quickPlayerSaving, setQuickPlayerSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeType, setNoticeType] = useState("success");
+  const participationPlayerSearchRef = useRef(null);
   const rows = useMemo(() => buildParticipationControlRows(league, competitionId), [competitionId, league]);
   const roundOptions = useMemo(() => {
     const options = new Map();
@@ -1434,6 +1451,12 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
     }
   }, [activeRowKey, visibleRows]);
 
+  useEffect(() => {
+    if (!activeRowKey) return;
+    const focusTimer = window.setTimeout(() => participationPlayerSearchRef.current?.focus(), 80);
+    return () => window.clearTimeout(focusTimer);
+  }, [activeRowKey]);
+
   function getDraft(row) {
     return drafts[row.key] || createParticipationDraftFromRow(row, league);
   }
@@ -1461,6 +1484,17 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
         }
       };
     });
+  }
+
+  function focusParticipationPlayerSearch() {
+    window.setTimeout(() => participationPlayerSearchRef.current?.focus(), 0);
+  }
+
+  function handleParticipationPlayerToggle(row, player, checked) {
+    togglePlayer(row, player, checked);
+    setPlayerPickerQuery("");
+    setPlayerListLimit(24);
+    focusParticipationPlayerSearch();
   }
 
   function selectAllPlayers(row) {
@@ -1555,6 +1589,8 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
       setNoticeType("success");
       showAdminAlert(message);
       setQuickPlayerRowKey("");
+      setPlayerPickerQuery("");
+      focusParticipationPlayerSearch();
     } catch (error) {
       const message = error.message || "No se pudo registrar el jugador.";
       setNotice(message);
@@ -1704,6 +1740,7 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
             <span className="sr-only">Buscar jugador en convocatoria</span>
             <div className="admin-search-input-wrap">
               <input
+                ref={participationPlayerSearchRef}
                 type="search"
                 value={playerPickerQuery}
                 onChange={(event) => {
@@ -1726,7 +1763,7 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
             const warnings = getParticipationPlayerWarnings(row, player);
             return (
               <label className={`${selected ? "selected" : ""} ${warnings.length ? "warning" : ""}`} key={player.id}>
-                <input checked={selected} type="checkbox" onChange={(event) => togglePlayer(row, player, event.target.checked)} />
+                <input checked={selected} type="checkbox" onChange={(event) => handleParticipationPlayerToggle(row, player, event.target.checked)} />
                 <span>
                   <strong>{player.name}</strong>
                   <small>#{getPlayerNumberForTeam(league, player.id, row.teamId) || "-"} | {player.position || "Jugador"}</small>
@@ -7735,7 +7772,8 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
       suspensionMatches: type === "red" ? Number(league.rules?.defaultRedSuspensionMatches || 1) : 0,
       suspensionIndefinite: false,
       reason: "",
-      playerQuery: ""
+      playerQuery: "",
+      quantity: supportsAdminSheetEventQuantity(type) ? 1 : undefined
     };
   }
 
@@ -7754,7 +7792,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
       });
       return;
     }
-    setEventDraft(existingEvent ? { ...existingEvent } : createMatchSheetEvent(type, teamId));
+    setEventDraft(existingEvent ? { ...existingEvent, quantity: 1 } : createMatchSheetEvent(type, teamId));
   }
 
   function updateEventDraft(field, value) {
@@ -7879,14 +7917,32 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
       return;
     }
 
-    let savedDraft = draftToSave;
-    setEvents((current) => {
-      savedDraft = normalizeEventDraftForSave(draftToSave, current);
-      const exists = current.some((item) => item.id === draftToSave.id);
-      return exists
-        ? current.map((item) => item.id === draftToSave.id ? savedDraft : item)
-        : [...current, savedDraft];
-    });
+    const exists = events.some((item) => item.id === draftToSave.id);
+    const quantity = !exists && supportsAdminSheetEventQuantity(draftToSave.type)
+      ? clampManualEventQuantity(draftToSave.quantity)
+      : 1;
+    let savedDraft = stripManualEventTransientFields(normalizeEventDraftForSave(draftToSave, events));
+    if (exists || quantity === 1) {
+      setEvents((current) => {
+        const currentExists = current.some((item) => item.id === draftToSave.id);
+        savedDraft = stripManualEventTransientFields(normalizeEventDraftForSave(draftToSave, current));
+        return currentExists
+          ? current.map((item) => item.id === draftToSave.id ? savedDraft : item)
+          : [...current, savedDraft];
+      });
+    } else {
+      let nextEvents = events;
+      for (let index = 0; index < quantity; index += 1) {
+        const nextDraft = {
+          ...draftToSave,
+          id: index === 0 ? draftToSave.id : `event-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+          quantity: 1
+        };
+        savedDraft = stripManualEventTransientFields(normalizeEventDraftForSave(nextDraft, nextEvents));
+        nextEvents = [...nextEvents, savedDraft];
+      }
+      setEvents(nextEvents);
+    }
     setEventTeamId(savedDraft.teamId || selectedEventTeamId);
     setQuickPlayerOpen(false);
     setEventDraft(null);
@@ -7897,56 +7953,6 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
     if (restrictionNotice) {
       showAdminAlert(`Aviso: ${restrictionNotice}. El evento quedo guardado normalmente.`, "warning");
     }
-  }
-
-  function buildMissingGoalEvents(teamId, currentEvents) {
-    const players = getPlayersForTeam(teamId);
-    if (!players.length) return [];
-
-    const expected = teamId === selectedMatch.homeTeamId ? expectedHomeGoals : expectedAwayGoals;
-    const currentGoals = currentEvents.filter((item) => ["goal", "own_goal"].includes(item.type) && item.teamId === teamId && item.playerId).length;
-    const missing = Math.max(0, expected - currentGoals);
-    if (!missing) return [];
-
-    return Array.from({ length: missing }, () => ({
-      id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      type: "goal",
-      lockedType: "goal",
-      teamId,
-      lockedTeamId: "",
-      playerId: "",
-      minute: "",
-      minuteLabel: "",
-      subtype: "",
-      cardDetail: "",
-      countsForAccumulation: undefined,
-      sourceYellowCardMinutes: [],
-      suspensionMatches: 0,
-      suspensionIndefinite: false,
-      reason: "",
-      playerQuery: ""
-    }));
-  }
-
-  function completeGoalEventsFromScore() {
-    const localNeedsPlayers = expectedHomeGoals > 0 && !getPlayersForTeam(selectedMatch.homeTeamId).length;
-    const awayNeedsPlayers = expectedAwayGoals > 0 && !getPlayersForTeam(selectedMatch.awayTeamId).length;
-    if (localNeedsPlayers || awayNeedsPlayers) {
-      const message = "Para completar goles, los equipos con goles deben tener jugadores registrados.";
-      setValidationMessage("");
-      showAdminAlert(message, "error");
-      return;
-    }
-
-    setValidationMessage("");
-    setSheetNotice("");
-    showAdminAlert("Se agregaron eventos de gol pendientes. Selecciona jugador y minuto antes de guardar.");
-    setEvents((current) => {
-      const homeMissing = buildMissingGoalEvents(selectedMatch.homeTeamId, current);
-      const withHome = [...current, ...homeMissing];
-      const awayMissing = buildMissingGoalEvents(selectedMatch.awayTeamId, withHome);
-      return [...withHome, ...awayMissing];
-    });
   }
 
   function removeEvent(eventId) {
@@ -8020,7 +8026,6 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   const expectedAwayGoals = Number(awayGoals || 0);
   const isDefaultSheet = sheetMode !== "played";
   const isEditingSavedSheet = selectedMatch.status === "finished" || selectedMatch.status === "walkover";
-  const hasMissingGoalEvents = homeGoalEvents < expectedHomeGoals || awayGoalEvents < expectedAwayGoals;
   const homeTeam = getTeam(league, selectedMatch.homeTeamId);
   const awayTeam = getTeam(league, selectedMatch.awayTeamId);
   const selectedEventTeamId = [selectedMatch.homeTeamId, selectedMatch.awayTeamId].includes(eventTeamId)
@@ -8228,6 +8233,20 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
           <label className="admin-sheet-event-field">Minuto
             <input value={eventDraft.minuteLabel || eventDraft.minute || ""} onChange={(event) => updateEventDraft("minute", event.target.value)} inputMode="numeric" placeholder="12" />
           </label>
+
+          {!isNoteEvent && supportsAdminSheetEventQuantity(eventDraft.type) && (
+            <label className="admin-sheet-event-field">Cantidad
+              <input
+                value={eventDraft.quantity ?? 1}
+                onChange={(event) => updateEventDraft("quantity", event.target.value)}
+                type="number"
+                min="1"
+                max="10"
+                inputMode="numeric"
+                placeholder="1"
+              />
+            </label>
+          )}
 
           <label className="admin-sheet-event-field wide-field">Jugador
               <div className="admin-search-input-wrap">
@@ -8727,9 +8746,6 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
                       );
                     })}
                   </div>
-                </div>
-                <div className="event-toolbar admin-sheet-toolbar">
-                  <button type="button" onClick={completeGoalEventsFromScore} disabled={isDefaultSheet || !hasMissingGoalEvents}>Agregar goles pendientes</button>
                 </div>
                 <div className="event-quick-panel admin-sheet-action-grid" aria-label="Agregar eventos rapidos">
                   {ADMIN_SHEET_EVENT_ACTIONS.map((action) => {
