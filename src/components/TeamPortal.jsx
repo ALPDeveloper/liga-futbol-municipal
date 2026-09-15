@@ -80,6 +80,9 @@ function getDelegateMatchOpponentLine(match) {
 
 function getDelegateMatchStatus(match) {
   if (!match) return { tone: "neutral", label: "Sin partido", detail: "No hay partido seleccionado", step: 1 };
+  if (!match.participationSubmitted && isDelegateMatchOperational(match)) {
+    return { tone: "pending", label: "Participantes pendientes", detail: "Selecciona jugadores participantes y capitan", step: 1 };
+  }
   if (match.status === "finished" || match.status === "walkover" || match.reportStatus === "published") {
     return { tone: "published", label: "Publicado", detail: "Resultado oficial disponible", step: 6 };
   }
@@ -392,6 +395,16 @@ function getDelegateNextAction(match, status) {
       target: "matches"
     };
   }
+  if (!match.participationSubmitted && isDelegateMatchOperational(match)) {
+    return {
+      tone: "warning",
+      eyebrow: "Proxima accion",
+      title: "Enviar participantes",
+      detail: "Selecciona solo los jugadores que participaron realmente y define al capitan del partido.",
+      button: "Reportar participantes",
+      target: "lineup"
+    };
+  }
   if (match.reportStatus === "published" || match.status === "finished" || status?.tone === "published") {
     return {
       tone: "published",
@@ -400,16 +413,6 @@ function getDelegateNextAction(match, status) {
       detail: "El resultado ya quedo oficial y disponible para consulta publica.",
       button: "Ver acta",
       target: "acta"
-    };
-  }
-  if (!match.participationSubmitted) {
-    return {
-      tone: "warning",
-      eyebrow: "Proxima accion",
-      title: "Enviar participantes",
-      detail: "Selecciona solo los jugadores que participaron realmente y define al capitan del partido.",
-      button: "Reportar participantes",
-      target: "lineup"
     };
   }
   if (["pending_captain_review", "correction_requested", "both_signed"].includes(match.reportStatus) && !match.myTeamSigned) {
@@ -453,7 +456,7 @@ function getDelegateNextAction(match, status) {
 }
 
 function isDelegateMatchOperational(match) {
-  return ["scheduled", "rescheduled", "advanced"].includes(match?.status || "scheduled");
+  return ["scheduled", "rescheduled", "advanced", "live", "in_progress", "finished", "walkover"].includes(match?.status || "scheduled");
 }
 
 function hasDelegateActaAvailable(match) {
@@ -697,7 +700,10 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     [portalMatches, selectedMatchId]
   );
   const upcomingMatchItems = useMemo(
-    () => portalMatches.filter((match) => match.status !== "finished" && match.status !== "walkover" && match.reportStatus !== "published"),
+    () => portalMatches.filter((match) => (
+      !match.participationSubmitted ||
+      (match.status !== "finished" && match.status !== "walkover" && match.reportStatus !== "published")
+    )),
     [portalMatches]
   );
   const historicalMatchItems = useMemo(
@@ -707,7 +713,6 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const lineupPendingMatches = useMemo(
     () => sortDelegatePendingMatches(portalMatches.filter((match) => (
       isDelegateMatchOperational(match) &&
-      !hasDelegateActaAvailable(match) &&
       !match.participationSubmitted
     ))),
     [portalMatches]
@@ -1030,8 +1035,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const activeLineupAvailable = Boolean(
     activeMatch &&
     !activeMatch.participationSubmitted &&
-    isDelegateMatchOperational(activeMatch) &&
-    !hasDelegateActaAvailable(activeMatch)
+    isDelegateMatchOperational(activeMatch)
   );
   const activeDraft = activeMatch
     ? rosterDrafts[activeMatch.id] || { playerIds: [], starters: [], substitutes: [], captainPlayerId: "", goalkeeperPlayerId: "", jerseyNumbers: {}, notes: "" }
@@ -1087,6 +1091,10 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     setSelectedMatchId(match.id);
     setLineupPlayerQuery("");
     setLineupPlayerLimit(18);
+    if (!match.participationSubmitted && isDelegateMatchOperational(match)) {
+      setActiveView("lineup");
+      return;
+    }
     if (hasDelegateActaAvailable(match)) {
       setActaReturnView(activeView === "matches" ? "matches" : "home");
       setActiveView("acta");
@@ -1328,7 +1336,12 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                             </div>
                           </div>
                           <div className="delegate-match-card-action">
-                            {actaAvailable ? (
+                            {!match.participationSubmitted && isDelegateMatchOperational(match) ? (
+                              <button type="button" onClick={() => openMatchWorkflow(match)}>
+                                <span>Participantes</span>
+                                <strong>{status.label}</strong>
+                              </button>
+                            ) : actaAvailable ? (
                               <button type="button" onClick={() => openMatchWorkflow(match)}>
                                 <span>Ver acta</span>
                                 <strong>{score.own} - {score.opponent}</strong>

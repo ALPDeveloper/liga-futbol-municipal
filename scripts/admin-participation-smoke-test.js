@@ -36,6 +36,7 @@ const ids = {
   home: "team-admin-home",
   away: "team-admin-away",
   finishedMatch: "match-admin-finished",
+  pastPendingMatch: "match-admin-past-pending",
   scheduledMatch: "match-admin-scheduled",
   playerOne: "player-admin-one",
   playerTwo: "player-admin-two",
@@ -98,6 +99,21 @@ async function seedData() {
             status: "finished",
             workflowStatus: "published",
             homeGoals: 2,
+            awayGoals: 1,
+            events: []
+          },
+          {
+            id: ids.pastPendingMatch,
+            competitionId: ids.competition,
+            round: 1,
+            date: "2026-08-02",
+            time: "12:00",
+            venue: "Campo Finalizado Pendiente",
+            homeTeamId: ids.home,
+            awayTeamId: ids.away,
+            status: "finished",
+            workflowStatus: "published",
+            homeGoals: 1,
             awayGoals: 1,
             events: []
           },
@@ -277,6 +293,25 @@ try {
   assert.equal(scheduledForDelegate.participationSubmitted, true);
   assert.equal(scheduledForDelegate.participation.players[0].playerId, ids.playerOne);
   assert.equal(scheduledForDelegate.participation.players.some((player) => player.playerId === quickPlayer.id), true);
+
+  const delegatePortalWithPastPending = await apiFetch("/team-portal/me", { token: delegateToken });
+  const pastPendingForDelegate = delegatePortalWithPastPending.matches.find((match) => match.id === ids.pastPendingMatch);
+  assert.equal(pastPendingForDelegate.status, "finished");
+  assert.equal(pastPendingForDelegate.participationSubmitted, false);
+
+  const delegatePastParticipation = await apiFetch(`/team-portal/matches/${ids.pastPendingMatch}/participation`, {
+    token: delegateToken,
+    method: "POST",
+    body: {
+      playerIds: [quickPlayer.id],
+      captainPlayerId: quickPlayer.id,
+      jerseyNumbers: { [quickPlayer.id]: "12" },
+      notes: "Captura delegada de partido pasado pendiente"
+    }
+  });
+  const pastPendingAfterDelegate = delegatePastParticipation.matches.find((match) => match.id === ids.pastPendingMatch);
+  assert.equal(pastPendingAfterDelegate.participationSubmitted, true);
+  assert.equal(pastPendingAfterDelegate.participation.players[0].playerId, quickPlayer.id);
 
   let store = await apiFetch("/store", { token });
   let eligibility = calculatePlayerAppearanceEligibility(getLeague(store));
