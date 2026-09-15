@@ -65642,19 +65642,23 @@ html.operation-data-active .admin-console-page::after {
   display: grid;
   place-items: end center;
   padding: 16px;
+  overflow: hidden;
+  overscroll-behavior: contain;
   background: rgba(0, 8, 12, 0.72);
   backdrop-filter: blur(12px);
 }
 
 .public-access-request-sheet {
   width: min(100%, 560px);
-  max-height: min(92svh, 820px);
+  max-height: min(calc(100dvh - 32px), 820px);
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
-  overflow: auto;
+  overflow: hidden;
   padding: 16px;
   border: 1px solid rgba(42, 231, 188, 0.28);
   border-radius: 22px;
+  overscroll-behavior: contain;
   background:
     radial-gradient(circle at 100% 0%, rgba(42, 231, 188, 0.12), transparent 36%),
     linear-gradient(180deg, rgba(5, 22, 32, 0.98), rgba(2, 10, 16, 0.98));
@@ -65713,6 +65717,16 @@ html.operation-data-active .admin-console-page::after {
 .access-request-list {
   display: grid;
   gap: 10px;
+}
+
+.public-access-request-form {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+  padding-bottom: max(2px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .public-access-role-tabs {
@@ -65921,6 +65935,8 @@ html.operation-data-active .admin-console-page::after {
   display: grid;
   gap: 10px;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 15px;
@@ -66030,10 +66046,36 @@ html.operation-data-active .admin-console-page::after {
 }
 
 @media (max-width: 640px) {
+  .public-access-request-backdrop {
+    align-items: end;
+    padding: 10px;
+  }
+
+  .public-access-request-sheet {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    gap: 11px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .public-access-request-head {
+    align-items: flex-start;
+  }
+
+  .public-access-request-form {
+    gap: 9px;
+    padding-right: 0;
+  }
+
   .public-access-fields,
   .access-request-card,
   .access-request-actions {
     grid-template-columns: 1fr;
+  }
+
+  .public-access-team-list {
+    max-height: min(28dvh, 190px);
   }
 
   .access-request-avatar {
