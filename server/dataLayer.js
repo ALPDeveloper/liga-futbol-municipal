@@ -1931,6 +1931,113 @@ export async function updateMatchWorkflowData({ matchId, workflowStatus, capture
   `).run(workflowStatus || "", captureMode || "", currentReportId || "", finalizedAt || "", publishedAt || "", matchId);
 }
 
+const MATCH_SQL_COLUMNS = [
+  "id", "league_id", "competition_id", "stage", "playoff_round", "playoff_leg",
+  "aggregate_home", "aggregate_away", "extra_time_home_goals", "extra_time_away_goals",
+  "penalty_home_goals", "penalty_away_goals", "round", "date", "time", "venue",
+  "schedule_note", "original_date", "original_time", "original_round", "schedule_updated_at",
+  "home_team_id", "away_team_id", "status", "workflow_status", "capture_mode",
+  "current_report_id", "published_at", "finalized_at", "home_goals", "away_goals",
+  "observations", "resolution_type", "resolution_note", "central_referee_user_id",
+  "assistant_referee1_user_id", "assistant_referee2_user_id", "fourth_referee_user_id",
+  "referee_crew_mode"
+];
+
+function getMatchSqlValues({ leagueId, match }) {
+  return [
+    match.id,
+    leagueId,
+    match.competitionId,
+    match.stage || "regular",
+    match.playoffRound || "",
+    match.playoffLeg || "",
+    match.aggregateHome ?? null,
+    match.aggregateAway ?? null,
+    match.extraTimeHomeGoals ?? null,
+    match.extraTimeAwayGoals ?? null,
+    match.penaltyHomeGoals ?? null,
+    match.penaltyAwayGoals ?? null,
+    match.round,
+    match.date || (isPostgres() ? null : ""),
+    match.time || "",
+    match.venue || "",
+    match.scheduleNote || "",
+    match.originalDate || (isPostgres() ? null : ""),
+    match.originalTime || "",
+    match.originalRound || null,
+    match.scheduleUpdatedAt || null,
+    match.homeTeamId,
+    match.awayTeamId,
+    match.status || "scheduled",
+    match.workflowStatus || match.status || "scheduled",
+    match.captureMode || "admin",
+    match.currentReportId || null,
+    match.publishedAt || null,
+    match.finalizedAt || null,
+    match.homeGoals ?? null,
+    match.awayGoals ?? null,
+    match.observations || "",
+    match.resolutionType || "normal",
+    match.resolutionNote || null,
+    match.centralRefereeUserId || null,
+    match.assistantReferee1UserId || null,
+    match.assistantReferee2UserId || null,
+    match.fourthRefereeUserId || null,
+    match.refereeCrewMode || ""
+  ];
+}
+
+export async function createMatchData({ leagueId, match }) {
+  if (!match?.id) throw new Error("Partido requerido.");
+  const values = getMatchSqlValues({ leagueId, match });
+  if (isPostgres()) {
+    await pgQuery(`
+      INSERT INTO matches (${MATCH_SQL_COLUMNS.join(", ")})
+      VALUES (${MATCH_SQL_COLUMNS.map((_, index) => `$${index + 1}`).join(", ")})
+    `, values);
+    return getStoreData();
+  }
+
+  db.prepare(`
+    INSERT INTO matches (${MATCH_SQL_COLUMNS.join(", ")})
+    VALUES (${MATCH_SQL_COLUMNS.map(() => "?").join(", ")})
+  `).run(...values);
+  return getStoreData();
+}
+
+export async function updateMatchData({ leagueId, match }) {
+  if (!match?.id) throw new Error("Partido requerido.");
+  const allValues = getMatchSqlValues({ leagueId, match });
+  const updateColumns = MATCH_SQL_COLUMNS.filter((column) => column !== "id" && column !== "league_id");
+  const updateValues = updateColumns.map((column) => allValues[MATCH_SQL_COLUMNS.indexOf(column)]);
+  if (isPostgres()) {
+    await pgQuery(`
+      UPDATE matches
+      SET ${updateColumns.map((column, index) => `${column} = $${index + 1}`).join(", ")}
+      WHERE id = $${updateValues.length + 1} AND league_id = $${updateValues.length + 2}
+    `, [...updateValues, match.id, leagueId]);
+    return getStoreData();
+  }
+
+  db.prepare(`
+    UPDATE matches
+    SET ${updateColumns.map((column) => `${column} = ?`).join(", ")}
+    WHERE id = ? AND league_id = ?
+  `).run(...updateValues, match.id, leagueId);
+  return getStoreData();
+}
+
+export async function deleteMatchData({ leagueId, matchId }) {
+  if (!matchId) throw new Error("Partido requerido.");
+  if (isPostgres()) {
+    await pgQuery("DELETE FROM matches WHERE id = $1 AND league_id = $2", [matchId, leagueId]);
+    return getStoreData();
+  }
+
+  db.prepare("DELETE FROM matches WHERE id = ? AND league_id = ?").run(matchId, leagueId);
+  return getStoreData();
+}
+
 export async function createMatchReportData({ id, leagueId, matchId, sessionId = "", generatedByUserId = "", captureMode = "live", status = "draft", payload = {}, homeGoals = null, awayGoals = null }) {
   const now = new Date().toISOString();
   const payloadJson = JSON.stringify(payload || {});

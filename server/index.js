@@ -17,6 +17,7 @@ import {
   createMatchReportData,
   createMatchReportSignatureData,
   createMatchSessionOperationData,
+  createMatchData,
   createPlayerData,
   createAccessRequestData,
   countTeamDelegateAssignmentsData,
@@ -33,6 +34,7 @@ import {
   createUserData,
   DATABASE_LABEL,
   DATABASE_PROVIDER,
+  deleteMatchData,
   deleteTeamDelegateAssignmentData,
   deleteUserData,
   disableUserData,
@@ -85,6 +87,7 @@ import {
   revokeTeamDelegateActivationsData,
   activateTeamDelegateUserData,
   updateAccessRequestReviewData,
+  updateMatchData,
   updateTeamDelegateStatusData,
   updateMatchRefereesData,
   updateMatchWorkflowData,
@@ -2502,19 +2505,27 @@ app.post("/api/leagues/:leagueId/matches", requireAuth, async (request, response
   const store = await getStoreData();
   const league = store.leagues.find((item) => item.id === leagueId);
   if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida" });
-  const match = {
-    ...buildMatchPayload({ league, payload: request.body, canEditResults: false }),
-    id: `match-${crypto.randomUUID()}`,
-    homeGoals: null,
-    awayGoals: null,
-    observations: "",
-    events: []
-  };
-  const nextLeague = { ...league, matches: [...(league.matches || []), match] };
-  const nextStore = await importStoreData({
-    ...store,
-    leagues: store.leagues.map((item) => (item.id === league.id ? nextLeague : item))
-  });
+  let match;
+  try {
+    match = {
+      ...buildMatchPayload({ league, payload: request.body, canEditResults: false }),
+      id: `match-${crypto.randomUUID()}`,
+      homeGoals: null,
+      awayGoals: null,
+      observations: "",
+      events: []
+    };
+  } catch (matchError) {
+    return response.status(matchError.status || 400).json({ error: matchError.message || "No se pudo validar el partido." });
+  }
+
+  let nextStore;
+  try {
+    nextStore = await createMatchData({ leagueId, match });
+  } catch (persistError) {
+    console.error("Error al crear partido:", persistError);
+    return response.status(500).json({ error: "No se pudo crear el partido en servidor. Intenta nuevamente antes de continuar." });
+  }
   clearPublicCache();
 
   await logAudit({
@@ -2539,15 +2550,20 @@ app.patch("/api/leagues/:leagueId/matches/:matchId", requireAuth, async (request
   const currentMatch = league?.matches?.find((item) => item.id === request.params.matchId);
   if (!league || !currentMatch) return response.status(404).json({ error: "Partido no encontrado" });
   const canEditResults = canEditMatchResults(request.user, leagueId);
-  const nextMatch = buildMatchPayload({ league, payload: request.body, currentMatch, canEditResults });
-  const nextLeague = {
-    ...league,
-    matches: league.matches.map((item) => (item.id === currentMatch.id ? nextMatch : item))
-  };
-  const nextStore = await importStoreData({
-    ...store,
-    leagues: store.leagues.map((item) => (item.id === league.id ? nextLeague : item))
-  });
+  let nextMatch;
+  try {
+    nextMatch = buildMatchPayload({ league, payload: request.body, currentMatch, canEditResults });
+  } catch (matchError) {
+    return response.status(matchError.status || 400).json({ error: matchError.message || "No se pudo validar el partido." });
+  }
+
+  let nextStore;
+  try {
+    nextStore = await updateMatchData({ leagueId, match: nextMatch });
+  } catch (persistError) {
+    console.error("Error al actualizar partido:", persistError);
+    return response.status(500).json({ error: "No se pudo actualizar el partido en servidor. Intenta nuevamente antes de continuar." });
+  }
   clearPublicCache();
 
   await logAudit({
@@ -2574,14 +2590,13 @@ app.delete("/api/leagues/:leagueId/matches/:matchId", requireAuth, async (reques
   if (!MATCH_ACTIVE_SCHEDULE_STATUSES.has(match.status || "scheduled") && match.status !== "postponed" && !canEditMatchResults(request.user, leagueId)) {
     return response.status(403).json({ error: "Este permiso solo permite eliminar partidos pendientes." });
   }
-  const nextLeague = {
-    ...league,
-    matches: league.matches.filter((item) => item.id !== match.id)
-  };
-  const nextStore = await importStoreData({
-    ...store,
-    leagues: store.leagues.map((item) => (item.id === league.id ? nextLeague : item))
-  });
+  let nextStore;
+  try {
+    nextStore = await deleteMatchData({ leagueId, matchId: match.id });
+  } catch (persistError) {
+    console.error("Error al eliminar partido:", persistError);
+    return response.status(500).json({ error: "No se pudo eliminar el partido en servidor. Intenta nuevamente antes de continuar." });
+  }
   clearPublicCache();
 
   await logAudit({
