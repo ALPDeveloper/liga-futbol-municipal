@@ -2859,7 +2859,7 @@ app.post("/api/leagues/:leagueId/matches/:matchId/sheet", requireAuth, async (re
   let nextStoreCandidate;
   try {
     nextStoreCandidate = saveMatchSheet(store, leagueId, {
-    ...request.body,
+      ...request.body,
       matchId: match.id,
       events: Array.isArray(request.body?.events) ? request.body.events : []
     });
@@ -2878,8 +2878,11 @@ app.post("/api/leagues/:leagueId/matches/:matchId/sheet", requireAuth, async (re
     nextStore = await getStoreData();
   } catch (persistError) {
     console.error("Error al publicar acta desde panel admin:", persistError);
-    return response.status(500).json({
-      error: "No se pudo guardar el acta en servidor. Intenta nuevamente antes de continuar."
+    const isDataReferenceError = persistError?.code === "23503";
+    return response.status(isDataReferenceError ? 400 : 500).json({
+      error: isDataReferenceError
+        ? "El acta incluye un jugador, equipo o partido que ya no coincide con la base de datos. Recarga el panel e intenta seleccionar nuevamente."
+        : "No se pudo guardar el acta en servidor. Intenta nuevamente antes de continuar."
     });
   }
   clearPublicCache();

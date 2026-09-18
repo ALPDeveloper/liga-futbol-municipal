@@ -2243,82 +2243,92 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
   const events = Array.isArray(match.events) ? match.events : [];
 
   if (isPostgres()) {
-    await pgQuery("DELETE FROM match_events WHERE match_id = $1", [match.id]);
-    await pgQuery(`
-      UPDATE matches
-      SET status = $1,
-          workflow_status = 'published',
-          current_report_id = $2,
-          published_at = $3,
-          finalized_at = COALESCE(finalized_at, $3),
-          home_goals = $4,
-          away_goals = $5,
-          observations = $6,
-          resolution_type = $7,
-          resolution_note = $8,
-          extra_time_home_goals = $9,
-          extra_time_away_goals = $10,
-          penalty_home_goals = $11,
-          penalty_away_goals = $12,
-          capture_mode = $13
-      WHERE id = $14 AND league_id = $15
-    `, [
-      match.status || "finished",
-      reportId || null,
-      publishedAt,
-      match.homeGoals,
-      match.awayGoals,
-      match.observations || "",
-      match.resolutionType || "normal",
-      match.resolutionNote || null,
-      match.extraTimeHomeGoals ?? null,
-      match.extraTimeAwayGoals ?? null,
-      match.penaltyHomeGoals ?? null,
-      match.penaltyAwayGoals ?? null,
-      match.captureMode || "admin",
-      match.id,
-      leagueId
-    ]);
-    for (const event of events) {
-      const eventMetadata = {
-        ...(event.metadata && typeof event.metadata === "object" ? event.metadata : {}),
-        ...(event.cardDetail ? { cardDetail: event.cardDetail } : {}),
-        ...(event.countsForAccumulation !== undefined ? { countsForAccumulation: event.countsForAccumulation } : {}),
-        ...(event.excludedFromAccumulation !== undefined ? { excludedFromAccumulation: event.excludedFromAccumulation } : {}),
-        ...(Array.isArray(event.sourceYellowCardMinutes) ? { sourceYellowCardMinutes: event.sourceYellowCardMinutes } : {})
-      };
-      await pgQuery(`
-        INSERT INTO match_events (
-          match_id, type, player_id, team_id, subtype, period, minute, minute_label,
-          suspension_matches, suspension_indefinite, disciplinary_pending, reason,
-          metadata_json, is_official, sync_status, version
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, true, 'synced', 1)
+    const client = await postgresPool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM match_events WHERE match_id = $1", [match.id]);
+      await client.query(`
+        UPDATE matches
+        SET status = $1,
+            workflow_status = 'published',
+            current_report_id = $2,
+            published_at = $3,
+            finalized_at = COALESCE(finalized_at, $3),
+            home_goals = $4,
+            away_goals = $5,
+            observations = $6,
+            resolution_type = $7,
+            resolution_note = $8,
+            extra_time_home_goals = $9,
+            extra_time_away_goals = $10,
+            penalty_home_goals = $11,
+            penalty_away_goals = $12,
+            capture_mode = $13
+        WHERE id = $14 AND league_id = $15
       `, [
+        match.status || "finished",
+        reportId || null,
+        publishedAt,
+        match.homeGoals,
+        match.awayGoals,
+        match.observations || "",
+        match.resolutionType || "normal",
+        match.resolutionNote || null,
+        match.extraTimeHomeGoals ?? null,
+        match.extraTimeAwayGoals ?? null,
+        match.penaltyHomeGoals ?? null,
+        match.penaltyAwayGoals ?? null,
+        match.captureMode || "admin",
         match.id,
-        event.type,
-        event.playerId || null,
-        event.teamId || null,
-        event.subtype || event.cardDetail || "",
-        event.period || "",
-        event.minute === "" || event.minute === undefined ? null : event.minute,
-        event.minuteLabel || "",
-        event.suspensionMatches ?? null,
-        toBoolean(event.suspensionIndefinite),
-        toBoolean(event.disciplinaryPending),
-        event.reason || "",
-        JSON.stringify(eventMetadata)
+        leagueId
       ]);
-    }
-    if (reportId) {
-      await pgQuery(`
-        UPDATE match_reports
-        SET status = 'published',
-            finalized_at = COALESCE(finalized_at, $1),
-            published_at = $1,
-            updated_at = $1
-        WHERE id = $2
-      `, [publishedAt, reportId]);
+      for (const event of events) {
+        const eventMetadata = {
+          ...(event.metadata && typeof event.metadata === "object" ? event.metadata : {}),
+          ...(event.cardDetail ? { cardDetail: event.cardDetail } : {}),
+          ...(event.countsForAccumulation !== undefined ? { countsForAccumulation: event.countsForAccumulation } : {}),
+          ...(event.excludedFromAccumulation !== undefined ? { excludedFromAccumulation: event.excludedFromAccumulation } : {}),
+          ...(Array.isArray(event.sourceYellowCardMinutes) ? { sourceYellowCardMinutes: event.sourceYellowCardMinutes } : {})
+        };
+        await client.query(`
+          INSERT INTO match_events (
+            match_id, type, player_id, team_id, subtype, period, minute, minute_label,
+            suspension_matches, suspension_indefinite, disciplinary_pending, reason,
+            metadata_json, is_official, sync_status, version
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, true, 'synced', 1)
+        `, [
+          match.id,
+          event.type,
+          event.playerId || null,
+          event.teamId || null,
+          event.subtype || event.cardDetail || "",
+          event.period || "",
+          event.minute === "" || event.minute === undefined ? null : event.minute,
+          event.minuteLabel || "",
+          event.suspensionMatches ?? null,
+          toBoolean(event.suspensionIndefinite),
+          toBoolean(event.disciplinaryPending),
+          event.reason || "",
+          JSON.stringify(eventMetadata)
+        ]);
+      }
+      if (reportId) {
+        await client.query(`
+          UPDATE match_reports
+          SET status = 'published',
+              finalized_at = COALESCE(finalized_at, $1),
+              published_at = $1,
+              updated_at = $1
+          WHERE id = $2
+        `, [publishedAt, reportId]);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
     }
     return;
   }
