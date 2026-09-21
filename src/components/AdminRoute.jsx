@@ -49,6 +49,7 @@ import {
   updateMediaItem,
   updatePlayer,
   updatePlayerInjury,
+  updatePlayerSanction,
   updateSponsor,
   updateTeam,
   updateTeamAffiliationPlayerNumber,
@@ -459,6 +460,7 @@ export function AdminRoute({
       onUpdateMatch={updateMatchFromPanel}
       onUpdateMediaItem={(mediaId, payload) => commit(updateMediaItem(store, league.id, mediaId, payload))}
       onUpdatePlayerInjury={(injuryId, payload) => commit(updatePlayerInjury(store, league.id, injuryId, payload))}
+      onUpdatePlayerSanction={(sanctionId, payload) => commit(updatePlayerSanction(store, league.id, sanctionId, payload))}
       onUpdateSponsor={(leagueId, sponsorId, payload) => commit(updateSponsor(store, leagueId, sponsorId, payload))}
       onUpdatePlayer={updatePlayerFromPanel}
       onUpdateTeam={(teamId, payload) => commit(updateTeam(store, league.id, teamId, payload))}

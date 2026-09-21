@@ -1251,12 +1251,15 @@ export function calculateSuspensionNotices(league) {
         continue;
       }
       if (event.type !== "red") continue;
-      if (event.disciplinaryPending) {
-        const hasCommissionResolution = (league.sanctions || []).some((sanction) => (
-          sanction.status !== "revoked" &&
-          sanction.playerId === event.playerId &&
+      const hasCommissionResolution = (league.sanctions || []).some((sanction) => (
+        sanction.status !== "revoked" &&
+        sanction.playerId === event.playerId &&
+        (
+          (sanction.sourceMatchId && sanction.sourceMatchId === match.id) ||
           upperText(sanction.notes || "").includes(upperText(match.id))
-        ));
+        )
+      ));
+      if (event.disciplinaryPending) {
         if (hasCommissionResolution) continue;
         notices.push(buildPendingDisciplinaryNotice(league, {
           playerId: event.playerId,
@@ -1266,6 +1269,7 @@ export function calculateSuspensionNotices(league) {
         }));
         continue;
       }
+      if (hasCommissionResolution) continue;
       notices.push(buildSuspensionNotice(league, {
         playerId: event.playerId,
         totalMatches: event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1,

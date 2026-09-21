@@ -621,6 +621,7 @@ export function AdminView({
   onUpdateMediaItem,
   onUpdatePlayer,
   onUpdatePlayerInjury,
+  onUpdatePlayerSanction,
   onUpdateSponsor,
   onUpdateTeam,
   onMergeDuplicatePlayer,
@@ -716,6 +717,7 @@ export function AdminView({
               onUpdateMediaItem={onUpdateMediaItem}
               onUpdatePlayer={onUpdatePlayer}
               onUpdatePlayerInjury={onUpdatePlayerInjury}
+              onUpdatePlayerSanction={onUpdatePlayerSanction}
               onUpdateTeam={onUpdateTeam}
               onOpenSuperAdmin={canUseSuperAdmin ? () => onSetAdminPanel("super") : undefined}
               onMergeDuplicatePlayer={onMergeDuplicatePlayer}
@@ -794,6 +796,7 @@ function LeagueAdmin({
   onUpdateMediaItem,
   onUpdatePlayer,
   onUpdatePlayerInjury,
+  onUpdatePlayerSanction,
   onUpdateTeam,
   onOpenSuperAdmin,
   onMergeDuplicatePlayer,
@@ -1191,6 +1194,7 @@ function LeagueAdmin({
                 onAddPlayerSanction={onAddPlayerSanction}
                 onDeletePlayerSanction={onDeletePlayerSanction}
                 onResolveMatchDiscipline={onResolveMatchDiscipline}
+                onUpdatePlayerSanction={onUpdatePlayerSanction}
               />
             )}
 
@@ -9525,13 +9529,17 @@ function getPendingDisciplinaryReviews(league) {
   return (league.matches || []).flatMap((match) => (
     (match.events || [])
       .map((event, index) => ({ event, index }))
-      .filter(({ event }) => event.type === "red" && (event.disciplinaryPending || event.suspensionIndefinite))
+      .filter(({ event }) => event.type === "red")
       .map(({ event, index }) => {
         const player = getPlayer(league, event.playerId);
         const team = player ? getTeam(league, player.teamId) : null;
         const hasResolution = (league.sanctions || []).some((sanction) => (
+          sanction.status !== "revoked" &&
           sanction.playerId === event.playerId &&
-          normalizeAdminSearchTerm(sanction.notes || "").includes(normalizeAdminSearchTerm(match.id))
+          (
+            (sanction.sourceMatchId && sanction.sourceMatchId === match.id && Number(sanction.sourceEventIndex) === index) ||
+            normalizeAdminSearchTerm(sanction.notes || "").includes(normalizeAdminSearchTerm(match.id))
+          )
         ));
         return {
           id: `${match.id}-${event.playerId}-${index}`,
@@ -9540,7 +9548,8 @@ function getPendingDisciplinaryReviews(league) {
           eventIndex: index,
           player,
           team,
-          resolved: hasResolution
+          resolved: hasResolution,
+          suggestedMatches: event.suspensionIndefinite ? 1 : Math.max(1, Number(event.suspensionMatches || league.rules?.defaultRedSuspensionMatches || 1))
         };
       })
   ))
@@ -9552,7 +9561,7 @@ function getPendingDisciplinaryReviews(league) {
     ));
 }
 
-function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, onResolveMatchDiscipline }) {
+function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, onResolveMatchDiscipline, onUpdatePlayerSanction }) {
   const activeCompetitionIds = new Set((league.competitions || [])
     .filter((competition) => competition.status !== "archived")
     .map((competition) => competition.id));
@@ -9606,6 +9615,8 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   const [sanctionPlayerQuery, setSanctionPlayerQuery] = useState("");
   const [sanctionTeamFilter, setSanctionTeamFilter] = useState("");
   const [selectedSanctionPlayerId, setSelectedSanctionPlayerId] = useState("");
+  const [editingSanctionId, setEditingSanctionId] = useState("");
+  const [editingIndefiniteById, setEditingIndefiniteById] = useState({});
   const visibleActiveSanctions = useMemo(() => {
     return activeSanctions.filter((sanction) => {
       const player = getPlayer(activeLeague, sanction.playerId);
@@ -9687,6 +9698,33 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
       showAdminAlert(message);
     } catch (error) {
       const message = error.message || "No se pudo guardar el dictamen disciplinario.";
+      setSanctionNotice(message);
+      setSanctionNoticeType("error");
+      showAdminAlert(message, "error");
+    }
+  }
+
+  async function submitSanctionUpdate(event, sanction) {
+    event.preventDefault();
+    if (!onUpdatePlayerSanction) {
+      const message = "No hay accion configurada para actualizar sanciones.";
+      setSanctionNotice(message);
+      setSanctionNoticeType("error");
+      showAdminAlert(message, "error");
+      return;
+    }
+    const form = event.currentTarget;
+    const payload = getFormPayload(form);
+    if (!window.confirm("¿Confirmas actualizar esta sancion?")) return;
+    try {
+      await onUpdatePlayerSanction(sanction.id, payload);
+      const message = "Sancion actualizada correctamente.";
+      setSanctionNotice(message);
+      setSanctionNoticeType("success");
+      setEditingSanctionId("");
+      showAdminAlert(message);
+    } catch (error) {
+      const message = error.message || "No se pudo actualizar la sancion.";
       setSanctionNotice(message);
       setSanctionNoticeType("error");
       showAdminAlert(message, "error");
@@ -9781,7 +9819,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
       </div>
 
       {sanctionStatusFilter === "pending" && <div className="sanction-list">
-        <h3>Rojas pendientes de comision</h3>
+        <h3>Rojas de acta por revisar</h3>
         {pendingReviews.map((item) => {
           const resolutionType = pendingResolutionType[item.id] || "matches";
           return (
@@ -9806,7 +9844,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
                   </select>
                 </label>
                 <label>Partidos
-                  <input disabled={resolutionType !== "matches"} min="1" max="99" name="matches" required={resolutionType === "matches"} type="number" defaultValue="1" />
+                  <input disabled={resolutionType !== "matches"} min="1" max="99" name="matches" required={resolutionType === "matches"} type="number" defaultValue={item.suggestedMatches || 1} />
                 </label>
                 <label className="wide-field">Notas de comision
                   <input name="notes" placeholder="Ej. Se reduce a 2 partidos despues de revision" />
@@ -9818,7 +9856,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
             </article>
           );
         })}
-        {!pendingReviews.length && <p className="empty">No hay expulsiones pendientes o indefinidas por dictaminar.</p>}
+        {!pendingReviews.length && <p className="empty">No hay rojas de acta sin dictamen de comision.</p>}
       </div>}
 
       {sanctionStatusFilter === "active" && <div className="sanction-list">
@@ -9827,43 +9865,111 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
           const player = getPlayer(activeLeague, sanction.playerId);
           const team = player ? getTeam(activeLeague, player.teamId) : null;
           const competition = getCompetition(league, sanction.competitionId);
+          const isEditing = editingSanctionId === sanction.id;
+          const editingIndefinite = editingIndefiniteById[sanction.id] ?? Boolean(sanction.indefinite);
 
           return (
             <article className="sanction-card" key={sanction.id}>
-              <div>
-                <strong>{player?.name || "Jugador eliminado"}</strong>
-                <span>{team?.name || "Sin equipo"} | {competition?.name || "Torneo"} | {sanction.type}</span>
-              </div>
-              <div>
-                <small>Castigo</small>
-                <span>{sanction.indefinite ? "Indefinido" : `${sanction.matches} partido(s)`}</span>
-              </div>
-              <div>
-                <small>Motivo</small>
-                <span>{sanction.reason}</span>
-              </div>
-              <time dateTime={sanction.date}>{sanction.date ? formatDate(sanction.date) : "Sin fecha"}</time>
-              <button
-                className="danger"
-                type="button"
-                onClick={async () => {
-                  if (!window.confirm(`¿Seguro que quieres quitar la sancion de ${player?.name || "este jugador"}?`)) return;
-                  try {
-                    await onDeletePlayerSanction(sanction.id);
-                    const message = "Sancion eliminada correctamente.";
-                    setSanctionNotice(message);
-                    setSanctionNoticeType("success");
-                    showAdminAlert(message);
-                  } catch (error) {
-                    const message = error.message || "No se pudo eliminar la sancion.";
-                    setSanctionNotice(message);
-                    setSanctionNoticeType("error");
-                    showAdminAlert(message, "error");
-                  }
-                }}
-              >
-                Quitar
-              </button>
+              {!isEditing ? (
+                <>
+                  <div>
+                    <strong>{player?.name || "Jugador eliminado"}</strong>
+                    <span>{team?.name || "Sin equipo"} | {competition?.name || "Torneo"} | {sanction.type}</span>
+                  </div>
+                  <div>
+                    <small>Castigo</small>
+                    <span>{sanction.indefinite ? "Indefinido" : `${sanction.matches} partido(s)`}</span>
+                  </div>
+                  <div>
+                    <small>Motivo</small>
+                    <span>{sanction.reason}</span>
+                  </div>
+                  <time dateTime={sanction.date}>{sanction.date ? formatDate(sanction.date) : "Sin fecha"}</time>
+                  <div className="sanction-card-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingSanctionId(sanction.id);
+                        setEditingIndefiniteById((current) => ({ ...current, [sanction.id]: Boolean(sanction.indefinite) }));
+                      }}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      className="danger"
+                      type="button"
+                      onClick={async () => {
+                        if (!window.confirm(`¿Seguro que quieres quitar la sancion de ${player?.name || "este jugador"}?`)) return;
+                        try {
+                          await onDeletePlayerSanction(sanction.id);
+                          const message = "Sancion eliminada correctamente.";
+                          setSanctionNotice(message);
+                          setSanctionNoticeType("success");
+                          showAdminAlert(message);
+                        } catch (error) {
+                          const message = error.message || "No se pudo eliminar la sancion.";
+                          setSanctionNotice(message);
+                          setSanctionNoticeType("error");
+                          showAdminAlert(message, "error");
+                        }
+                      }}
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <form className="sanction-edit-form" onSubmit={(event) => submitSanctionUpdate(event, sanction)}>
+                  <div className="sanction-edit-head">
+                    <strong>{player?.name || "Jugador eliminado"}</strong>
+                    <span>{team?.name || "Sin equipo"} | {competition?.name || "Torneo"}</span>
+                  </div>
+                  <label>Tipo
+                    <input name="type" defaultValue={sanction.type || "Expulsion"} />
+                  </label>
+                  <label>Fecha
+                    <input name="date" type="date" defaultValue={sanction.date || new Date().toISOString().slice(0, 10)} />
+                  </label>
+                  <label className="event-toggle-field sanction-indefinite-toggle">
+                    <input
+                      checked={editingIndefinite}
+                      name="indefinite"
+                      onChange={(event) => setEditingIndefiniteById((current) => ({ ...current, [sanction.id]: event.target.checked }))}
+                      type="checkbox"
+                    />
+                    Inhabilitado indefinido
+                  </label>
+                  <label>Partidos
+                    <input
+                      disabled={editingIndefinite}
+                      max="99"
+                      min="0"
+                      name="matches"
+                      required={!editingIndefinite}
+                      type="number"
+                      defaultValue={sanction.matches ?? 0}
+                    />
+                  </label>
+                  <label>Estado
+                    <select name="status" defaultValue={sanction.status || "active"}>
+                      <option value="active">Activa</option>
+                      <option value="cleared">Liberado</option>
+                      <option value="served">Cumplida</option>
+                      <option value="revoked">Revocada</option>
+                    </select>
+                  </label>
+                  <label>Motivo
+                    <input name="reason" defaultValue={sanction.reason || ""} />
+                  </label>
+                  <label className="wide-field">Notas
+                    <textarea name="notes" defaultValue={sanction.notes || ""} />
+                  </label>
+                  <div className="sanction-card-actions">
+                    <button className="primary" type="submit">Guardar cambios</button>
+                    <button type="button" onClick={() => setEditingSanctionId("")}>Cancelar</button>
+                  </div>
+                </form>
+              )}
             </article>
           );
         })}

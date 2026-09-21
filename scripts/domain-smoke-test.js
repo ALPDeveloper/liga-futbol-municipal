@@ -31,6 +31,7 @@ import {
   saveResult,
   updatePlayer,
   updatePlayerInjury,
+  updatePlayerSanction,
   updateTeamAffiliationPlayerNumber,
   updateLeagueMembership,
   updateLeagueRules,
@@ -1256,6 +1257,29 @@ assert.equal(league.sanctions.some((sanction) => (
 )), true);
 const resolvedCommissionNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.remainingMatches === 3);
 assert.equal(resolvedCommissionNotice.originMatch?.id, "m4");
+assert.equal(calculateSuspensionNotices(league).filter((notice) => notice.player.id === "p5" && notice.originMatch?.id === "m4").length, 1);
+store = resolveMatchEventDiscipline(store, league.id, {
+  matchId: "m4",
+  eventIndex: 2,
+  resolutionType: "matches",
+  matches: 2,
+  reason: "Insultos al arbitro",
+  notes: "Ajuste de comision"
+});
+league = getCurrentLeague(store);
+const linkedRedSanctions = league.sanctions.filter((sanction) => sanction.playerId === "p5" && String(sanction.notes || "").includes("ACTA M4"));
+assert.equal(linkedRedSanctions.length, 1);
+assert.equal(linkedRedSanctions[0].matches, 2);
+store = updatePlayerSanction(store, league.id, linkedRedSanctions[0].id, {
+  matches: 4,
+  reason: "Comision amplia sancion",
+  status: "active",
+  notes: linkedRedSanctions[0].notes
+});
+league = getCurrentLeague(store);
+const editedCommissionNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.remainingMatches === 4);
+assert.equal(editedCommissionNotice.originMatch?.id, "m4");
+assert.equal(calculateSuspensionNotices(league).filter((notice) => notice.player.id === "p5" && notice.originMatch?.id === "m4").length, 1);
 
 store = saveMatchSheet(store, league.id, {
   matchId: "m3",

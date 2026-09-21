@@ -250,6 +250,41 @@ export function addPlayerSanction(store, leagueId, payload) {
   }));
 }
 
+export function updatePlayerSanction(store, leagueId, sanctionId, payload) {
+  return updateLeague(store, leagueId, (league) => {
+    const target = (league.sanctions || []).find((sanction) => sanction.id === sanctionId);
+    if (!target) return league;
+
+    const nextStatus = ["active", "cleared", "revoked", "served", "completed"].includes(payload.status)
+      ? payload.status
+      : target.status || "active";
+    const nextIndefinite = checkboxValue(payload.indefinite);
+    const nextMatches = nextIndefinite ? 0 : Number(payload.matches ?? target.matches ?? 0);
+    if (!nextIndefinite && (!Number.isInteger(nextMatches) || nextMatches < 0 || nextMatches > 99)) {
+      throw new Error("La sancion debe tener entre 0 y 99 partidos.");
+    }
+
+    return {
+      ...league,
+      sanctions: (league.sanctions || []).map((sanction) => {
+        if (sanction.id !== sanctionId) return sanction;
+        return {
+          ...sanction,
+          competitionId: payload.competitionId || sanction.competitionId || getDefaultCompetitionId(league),
+          type: upperText(payload.type || sanction.type || "Sancion disciplinaria"),
+          matches: nextMatches,
+          indefinite: nextIndefinite,
+          reason: upperText(payload.reason || sanction.reason || ""),
+          date: payload.date || sanction.date || new Date().toISOString().slice(0, 10),
+          status: nextStatus,
+          notes: upperText(payload.notes ?? sanction.notes ?? ""),
+          updatedAt: new Date().toISOString()
+        };
+      })
+    };
+  });
+}
+
 export function deletePlayerSanction(store, leagueId, sanctionId) {
   return updateLeague(store, leagueId, (league) => ({
     ...league,
@@ -282,8 +317,16 @@ export function resolveMatchEventDiscipline(store, leagueId, payload) {
       `JORNADA ${targetMatch.round || "-"}`,
       payload.notes || ""
     ].filter(Boolean).join(" "));
+    const existingSanction = (league.sanctions || []).find((sanction) => (
+      sanction.playerId === targetEvent.playerId &&
+      (
+        (sanction.sourceMatchId && sanction.sourceMatchId === targetMatch.id && Number(sanction.sourceEventIndex) === eventIndex) ||
+        upperText(sanction.notes || "").includes(upperText(targetMatch.id))
+      )
+    ));
     const nextSanction = {
-      id: makeId("sanction"),
+      ...(existingSanction || {}),
+      id: existingSanction?.id || makeId("sanction"),
       competitionId: targetMatch.competitionId || payload.competitionId || getDefaultCompetitionId(league),
       playerId: targetEvent.playerId,
       type: upperText(payload.type || "Expulsion"),
@@ -292,7 +335,11 @@ export function resolveMatchEventDiscipline(store, leagueId, payload) {
       reason: resolutionType === "release" ? upperText(payload.reason || "Sin suspension adicional por comision") : reason,
       date,
       status: resolutionType === "release" ? "cleared" : "active",
-      notes: resolutionNote
+      notes: resolutionNote,
+      source: "match_red_card",
+      sourceMatchId: targetMatch.id,
+      sourceEventIndex: eventIndex,
+      updatedAt: new Date().toISOString()
     };
 
     return {
@@ -305,8 +352,8 @@ export function resolveMatchEventDiscipline(store, leagueId, payload) {
             index === eventIndex
               ? {
                 ...event,
-                suspensionMatches: 0,
-                suspensionIndefinite: false,
+                suspensionMatches: resolutionType === "matches" ? sanctionMatches : 0,
+                suspensionIndefinite: resolutionType === "indefinite",
                 disciplinaryPending: true,
                 reason
               }
@@ -316,8 +363,14 @@ export function resolveMatchEventDiscipline(store, leagueId, payload) {
       }),
       sanctions: [
         ...(league.sanctions || []).filter((sanction) => !(
-          sanction.playerId === targetEvent.playerId &&
-          upperText(sanction.notes || "").includes(upperText(targetMatch.id))
+          sanction.id === existingSanction?.id ||
+          (
+            sanction.playerId === targetEvent.playerId &&
+            (
+              (sanction.sourceMatchId && sanction.sourceMatchId === targetMatch.id && Number(sanction.sourceEventIndex) === eventIndex) ||
+              upperText(sanction.notes || "").includes(upperText(targetMatch.id))
+            )
+          )
         )),
         nextSanction
       ]
