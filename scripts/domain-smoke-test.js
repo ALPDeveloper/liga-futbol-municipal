@@ -280,6 +280,91 @@ assert.equal(affiliationLeague.disciplineLinks.length, 1);
 assert.deepEqual(new Set(affiliationLeague.disciplineLinks[0].playerIds), new Set(["juan-guascuaro", "juan-fresno"]));
 const blockedCrossCompetitionMerge = mergeDuplicatePlayer(affiliationStore, "liga-afiliacion", { targetPlayerId: "juan-guascuaro", duplicatePlayerId: "juan-fresno" });
 assert.equal(getCurrentLeague(blockedCrossCompetitionMerge).players.some((player) => player.id === "juan-fresno"), true);
+
+let duplicateMergeStore = normalizeStore({
+  currentLeagueId: "liga-merge",
+  leagues: [
+    {
+      id: "liga-merge",
+      name: "Liga Merge",
+      city: "Ciudad",
+      season: "2026",
+      currentCompetitionId: "primera",
+      competitions: [{ id: "primera", name: "Primera", season: "2026", status: "active" }],
+      rules: { disciplineScope: "league", yellowSuspensionLimit: 3 },
+      identity: {},
+      teams: [{ id: "merge-team", competitionId: "primera", name: "Merge Team" }],
+      players: [
+        { id: "merge-main", competitionId: "primera", teamId: "merge-team", name: "Jugador Principal", number: 9 },
+        { id: "merge-duplicate", competitionId: "primera", teamId: "merge-team", name: "#9 Jugador Principal", number: 19 }
+      ],
+      sanctions: [{ id: "sanction-merge", playerId: "merge-duplicate", competitionId: "primera", type: "ROJA", matches: 1, status: "active" }],
+      injuries: [{ id: "injury-merge", playerId: "merge-duplicate", competitionId: "primera", type: "LESION", status: "active" }],
+      disciplineAdjustments: [{ id: "disc-adj-merge", playerId: "merge-duplicate", competitionId: "primera", value: 1 }],
+      disciplineResets: [{ id: "disc-reset-merge", playerId: "merge-duplicate", date: "2026-01-01" }],
+      appearanceAdjustments: [{ id: "app-adj-merge", playerId: "merge-duplicate", value: 1 }],
+      disciplineLinks: [{ id: "link-merge", playerIds: ["merge-main", "merge-duplicate"] }],
+      matches: [
+        {
+          id: "match-merge",
+          competitionId: "primera",
+          round: 1,
+          date: "2026-01-01",
+          status: "finished",
+          homeTeamId: "merge-team",
+          awayTeamId: "merge-team",
+          events: [
+            { type: "goal", playerId: "merge-duplicate", secondaryPlayerId: "merge-duplicate", assistPlayerId: "merge-duplicate", teamId: "merge-team" }
+          ]
+        }
+      ],
+      matchRosters: [
+        {
+          id: "roster-merge",
+          matchId: "match-merge",
+          teamId: "merge-team",
+          captainPlayerId: "merge-duplicate",
+          goalkeeperPlayerId: "merge-duplicate",
+          starters: ["merge-main", "merge-duplicate"],
+          substitutes: ["merge-duplicate"],
+          lineup: { captain: "merge-duplicate" },
+          players: [{ playerId: "merge-main", jerseyNumber: "9" }, { playerId: "merge-duplicate", jerseyNumber: "19" }]
+        }
+      ],
+      matchParticipations: [
+        {
+          id: "participation-merge",
+          matchId: "match-merge",
+          teamId: "merge-team",
+          captainPlayerId: "merge-duplicate",
+          players: [{ playerId: "merge-duplicate", playerNameSnapshot: "#9 Jugador Principal", playerNumberSnapshot: "19" }]
+        }
+      ],
+      matchReports: [
+        {
+          id: "report-merge",
+          matchId: "match-merge",
+          payload: {
+            captainPlayerId: "merge-duplicate",
+            events: [{ playerId: "merge-duplicate", assistPlayerId: "merge-duplicate" }]
+          }
+        }
+      ]
+    }
+  ]
+});
+duplicateMergeStore = mergeDuplicatePlayer(duplicateMergeStore, "liga-merge", { targetPlayerId: "merge-main", duplicatePlayerId: "merge-duplicate" });
+const duplicateMergeLeague = getCurrentLeague(duplicateMergeStore);
+assert.equal(duplicateMergeLeague.players.some((player) => player.id === "merge-duplicate"), false);
+assert.equal(JSON.stringify(duplicateMergeLeague).includes("merge-duplicate"), false);
+assert.equal(duplicateMergeLeague.matches[0].events[0].playerId, "merge-main");
+assert.equal(duplicateMergeLeague.matches[0].events[0].assistPlayerId, "merge-main");
+assert.equal(duplicateMergeLeague.matchRosters[0].captainPlayerId, "merge-main");
+assert.deepEqual(duplicateMergeLeague.matchRosters[0].starters, ["merge-main"]);
+assert.deepEqual(duplicateMergeLeague.matchRosters[0].substitutes, ["merge-main"]);
+assert.equal(duplicateMergeLeague.matchParticipations[0].captainPlayerId, "merge-main");
+assert.equal(duplicateMergeLeague.matchReports[0].payload.events[0].assistPlayerId, "merge-main");
+
 affiliationStore = updatePlayer(affiliationStore, "liga-afiliacion", "juan-fresno", {
   teamId: "fresno",
   competitionId: "primera",
@@ -1221,8 +1306,8 @@ store = addPlayerSanction(store, league.id, {
 });
 league = getCurrentLeague(store);
 assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.pendingReview), false);
-assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.remainingMatches === 2), true);
-const commissionNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.remainingMatches === 2);
+assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.remainingMatches === 14), true);
+const commissionNotice = calculateSuspensionNotices(league).find((notice) => notice.player.id === "p5" && notice.remainingMatches === 14);
 assert.equal(commissionNotice.originMatch?.id, "m4");
 
 store = saveMatchSheet(store, league.id, {
@@ -1250,7 +1335,6 @@ assert.equal(resolvedRedEvent.suspensionIndefinite, false);
 assert.equal(calculateSuspensionNotices(league).some((notice) => notice.player.id === "p5" && notice.indefinite), false);
 assert.equal(league.sanctions.some((sanction) => (
   sanction.playerId === "p5" &&
-  sanction.type === "EXPULSION" &&
   sanction.matches === 3 &&
   sanction.indefinite === false &&
   String(sanction.notes || "").includes("ACTA M4")

@@ -7562,6 +7562,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   const [quickPlayerOpen, setQuickPlayerOpen] = useState(false);
   const [quickPlayerSaving, setQuickPlayerSaving] = useState(false);
   const eventComposerRef = useRef(null);
+  const eventPlayerSearchInputRef = useRef(null);
   const suspensionNoticeByPlayerId = useMemo(() => {
     const notices = calculateSuspensionNotices(competitionLeague);
     return new Map(
@@ -7722,6 +7723,9 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
     if (sheetStep !== "events" || !eventDraft) return;
     window.requestAnimationFrame(() => {
       eventComposerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (eventDraft.type !== "injury_note" && eventDraft.type !== "other_note") {
+        eventPlayerSearchInputRef.current?.focus({ preventScroll: true });
+      }
     });
   }, [eventDraft, sheetStep]);
 
@@ -7925,17 +7929,15 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
     const quantity = !exists && supportsAdminSheetEventQuantity(draftToSave.type)
       ? clampManualEventQuantity(draftToSave.quantity)
       : 1;
-    let savedDraft = stripManualEventTransientFields(normalizeEventDraftForSave(draftToSave, events));
+    let savedDraft = null;
+    let nextEvents = events;
     if (exists || quantity === 1) {
-      setEvents((current) => {
-        const currentExists = current.some((item) => item.id === draftToSave.id);
-        savedDraft = stripManualEventTransientFields(normalizeEventDraftForSave(draftToSave, current));
-        return currentExists
-          ? current.map((item) => item.id === draftToSave.id ? savedDraft : item)
-          : [...current, savedDraft];
-      });
+      const currentExists = nextEvents.some((item) => item.id === draftToSave.id);
+      savedDraft = stripManualEventTransientFields(normalizeEventDraftForSave(draftToSave, nextEvents));
+      nextEvents = currentExists
+        ? nextEvents.map((item) => item.id === draftToSave.id ? savedDraft : item)
+        : [...nextEvents, savedDraft];
     } else {
-      let nextEvents = events;
       for (let index = 0; index < quantity; index += 1) {
         const nextDraft = {
           ...draftToSave,
@@ -7945,8 +7947,8 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
         savedDraft = stripManualEventTransientFields(normalizeEventDraftForSave(nextDraft, nextEvents));
         nextEvents = [...nextEvents, savedDraft];
       }
-      setEvents(nextEvents);
     }
+    setEvents(nextEvents);
     setEventTeamId(savedDraft.teamId || selectedEventTeamId);
     setQuickPlayerOpen(false);
     setEventDraft(null);
@@ -8085,19 +8087,23 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
         return "Para guardar goles o autogoles, el partido debe tener jugadores registrados.";
       }
 
-      if (expectedHomeGoals > 0 && homeGoalEvents !== expectedHomeGoals) {
-        return `Revisa goleadores del equipo local: marcador ${expectedHomeGoals}, capturados ${homeGoalEvents}.`;
+      const currentGoalEvents = events.filter((item) => item.playerId && (item.type === "goal" || item.type === "own_goal"));
+      const currentHomeGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.homeTeamId).length;
+      const currentAwayGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.awayTeamId).length;
+
+      if (expectedHomeGoals > 0 && currentHomeGoalEvents !== expectedHomeGoals) {
+        return `Revisa goleadores del equipo local: marcador ${expectedHomeGoals}, capturados ${currentHomeGoalEvents}.`;
       }
 
-      if (expectedAwayGoals > 0 && awayGoalEvents !== expectedAwayGoals) {
-        return `Revisa goleadores del equipo visitante: marcador ${expectedAwayGoals}, capturados ${awayGoalEvents}.`;
+      if (expectedAwayGoals > 0 && currentAwayGoalEvents !== expectedAwayGoals) {
+        return `Revisa goleadores del equipo visitante: marcador ${expectedAwayGoals}, capturados ${currentAwayGoalEvents}.`;
       }
 
-      if (expectedHomeGoals === 0 && homeGoalEvents > 0) {
+      if (expectedHomeGoals === 0 && currentHomeGoalEvents > 0) {
         return "Hay goleadores capturados para el local, pero el marcador local esta en 0.";
       }
 
-      if (expectedAwayGoals === 0 && awayGoalEvents > 0) {
+      if (expectedAwayGoals === 0 && currentAwayGoalEvents > 0) {
         return "Hay goleadores capturados para el visitante, pero el marcador visitante esta en 0.";
       }
     }
@@ -8254,7 +8260,12 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
 
           <label className="admin-sheet-event-field wide-field">Jugador
               <div className="admin-search-input-wrap">
-                <input value={eventDraft.playerQuery || ""} onChange={(event) => updateEventDraft("playerQuery", event.target.value)} placeholder="Busca por nombre o numero" />
+                <input
+                  ref={eventPlayerSearchInputRef}
+                  value={eventDraft.playerQuery || ""}
+                  onChange={(event) => updateEventDraft("playerQuery", event.target.value)}
+                  placeholder="Busca por nombre o numero"
+                />
                 {eventDraft.playerQuery && <button type="button" onClick={() => updateEventDraft("playerQuery", "")} aria-label="Limpiar jugador">×</button>}
               </div>
           </label>
@@ -8401,8 +8412,11 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   function moveSheetStep(direction) {
     if (direction > 0 && sheetStep === "events" && !isDefaultSheet) {
       const expectedTotal = expectedHomeGoals + expectedAwayGoals;
-      const capturedTotal = homeGoalEvents + awayGoalEvents;
-      if (homeGoalEvents !== expectedHomeGoals || awayGoalEvents !== expectedAwayGoals) {
+      const currentGoalEvents = events.filter((item) => item.playerId && (item.type === "goal" || item.type === "own_goal"));
+      const currentHomeGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.homeTeamId).length;
+      const currentAwayGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.awayTeamId).length;
+      const capturedTotal = currentHomeGoalEvents + currentAwayGoalEvents;
+      if (currentHomeGoalEvents !== expectedHomeGoals || currentAwayGoalEvents !== expectedAwayGoals) {
         const message = `La cantidad de goles del marcador (${expectedTotal}) no coincide con los goles registrados en eventos (${capturedTotal}).`;
         setValidationMessage(message);
         showAdminAlert(message, "error");
@@ -9594,16 +9608,12 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
     return map;
   }, [activeLeague]);
   const activeSanctions = sanctions
-    .filter((sanction) => sanction.status !== "cleared" && sanction.status !== "revoked")
-    .filter((sanction) => {
-      if (sanction.indefinite) return true;
-      return suspensionNoticesBySanctionId.get(sanction.id)?.status === "active";
-    })
+    .filter((sanction) => !["cleared", "revoked", "served", "completed"].includes(sanction.status || "active"))
     .sort((a, b) => (
       String(b.date || "").localeCompare(String(a.date || "")) ||
       String(b.id || "").localeCompare(String(a.id || ""))
     ));
-  const clearedSanctions = sanctions.filter((sanction) => sanction.status === "cleared");
+  const clearedSanctions = sanctions.filter((sanction) => ["cleared", "served", "completed"].includes(sanction.status || ""));
   const pendingReviews = getPendingDisciplinaryReviews(activeLeague);
   const [sanctionNotice, setSanctionNotice] = useState("");
   const [sanctionNoticeType, setSanctionNoticeType] = useState("success");
@@ -9617,20 +9627,33 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
   const [selectedSanctionPlayerId, setSelectedSanctionPlayerId] = useState("");
   const [editingSanctionId, setEditingSanctionId] = useState("");
   const [editingIndefiniteById, setEditingIndefiniteById] = useState({});
+  const selectedPlayerOpenSanction = activeSanctions.find((sanction) => sanction.playerId === selectedSanctionPlayerId) || null;
+  const getSanctionSearchValues = (sanction) => {
+    const player = getPlayer(activeLeague, sanction.playerId);
+    const team = player ? getTeam(activeLeague, player.teamId) : null;
+    const competition = getCompetition(league, sanction.competitionId);
+    const notice = suspensionNoticesBySanctionId.get(sanction.id);
+    return [
+      player?.name,
+      player?.number,
+      player?.position,
+      team?.name,
+      competition?.name,
+      sanction.type,
+      sanction.reason,
+      sanction.notes,
+      sanction.date,
+      sanction.sourceMatchId,
+      notice?.returnRound ? `jornada ${notice.returnRound}` : "",
+      notice?.remainingMatches ? `${notice.remainingMatches} pendientes` : ""
+    ];
+  };
   const visibleActiveSanctions = useMemo(() => {
-    return activeSanctions.filter((sanction) => {
-      const player = getPlayer(activeLeague, sanction.playerId);
-      const team = player ? getTeam(activeLeague, player.teamId) : null;
-      return adminSearchMatches([player?.name, player?.number, team?.name, sanction.type, sanction.reason], sanctionQuery);
-    });
-  }, [activeLeague, activeSanctions, sanctionQuery]);
+    return activeSanctions.filter((sanction) => adminSearchMatches(getSanctionSearchValues(sanction), sanctionQuery));
+  }, [activeLeague, activeSanctions, league, sanctionQuery, suspensionNoticesBySanctionId]);
   const visibleClearedSanctions = useMemo(() => {
-    return clearedSanctions.filter((sanction) => {
-      const player = getPlayer(activeLeague, sanction.playerId);
-      const team = player ? getTeam(activeLeague, player.teamId) : null;
-      return adminSearchMatches([player?.name, player?.number, team?.name, sanction.type, sanction.reason], sanctionQuery);
-    });
-  }, [activeLeague, clearedSanctions, sanctionQuery]);
+    return clearedSanctions.filter((sanction) => adminSearchMatches(getSanctionSearchValues(sanction), sanctionQuery));
+  }, [activeLeague, clearedSanctions, league, sanctionQuery, suspensionNoticesBySanctionId]);
 
   async function submitSanction(event) {
     event.preventDefault();
@@ -9759,6 +9782,11 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
           onSelectPlayer={setSelectedSanctionPlayerId}
           onTeamFilterChange={setSanctionTeamFilter}
         />
+        {selectedPlayerOpenSanction && (
+          <p className="sanction-merge-hint wide-field">
+            Este jugador ya tiene una sancion activa. Al guardar, los partidos se acumularan en ese mismo expediente y conservaran la fecha original de inicio.
+          </p>
+        )}
         <label>Tipo
           <select name="type" defaultValue="Agresion">
             <option value="Agresion">Agresion</option>
@@ -9813,7 +9841,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
           <select value={sanctionStatusFilter} onChange={(event) => setSanctionStatusFilter(event.target.value)}>
             <option value="active">Activas</option>
             <option value="pending">Rojas por dictaminar</option>
-            <option value="cleared">Liberados</option>
+            <option value="cleared">Resoluciones</option>
           </select>
         </label>
       </div>
@@ -9867,6 +9895,12 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
           const competition = getCompetition(league, sanction.competitionId);
           const isEditing = editingSanctionId === sanction.id;
           const editingIndefinite = editingIndefiniteById[sanction.id] ?? Boolean(sanction.indefinite);
+          const notice = suspensionNoticesBySanctionId.get(sanction.id);
+          const computedStatusLabel = sanction.indefinite
+            ? "Indefinida"
+            : notice?.status === "active"
+            ? `${notice.remainingMatches || 0} pendiente(s)`
+            : "Sin pendientes calculados";
 
           return (
             <article className="sanction-card" key={sanction.id}>
@@ -9879,6 +9913,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
                   <div>
                     <small>Castigo</small>
                     <span>{sanction.indefinite ? "Indefinido" : `${sanction.matches} partido(s)`}</span>
+                    <em>{computedStatusLabel}</em>
                   </div>
                   <div>
                     <small>Motivo</small>
@@ -9979,7 +10014,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
 
       {sanctionStatusFilter === "cleared" && !!clearedSanctions.length && (
         <div className="sanction-list">
-          <h3>Liberados por comision</h3>
+          <h3>Resoluciones e historial</h3>
           {visibleClearedSanctions.map((sanction) => {
             const player = getPlayer(activeLeague, sanction.playerId);
             const team = player ? getTeam(activeLeague, player.teamId) : null;
@@ -9988,7 +10023,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
               <article className="sanction-card" key={sanction.id}>
                 <div>
                   <strong>{player?.name || "Jugador eliminado"}</strong>
-                  <span>{team?.name || "Sin equipo"} | {competition?.name || "Torneo"} | Resolucion sin castigo</span>
+                  <span>{team?.name || "Sin equipo"} | {competition?.name || "Torneo"} | {sanction.status === "cleared" ? "Resolucion sin castigo" : "Sancion cumplida"}</span>
                 </div>
                 <div>
                   <small>Motivo</small>
@@ -10001,7 +10036,7 @@ function SanctionsPanel({ league, onAddPlayerSanction, onDeletePlayerSanction, o
           {clearedSanctions.length > 0 && !visibleClearedSanctions.length && <p className="empty">No hay liberados con esos filtros.</p>}
         </div>
       )}
-      {sanctionStatusFilter === "cleared" && !clearedSanctions.length && <p className="empty">Aun no hay jugadores liberados por comision.</p>}
+      {sanctionStatusFilter === "cleared" && !clearedSanctions.length && <p className="empty">Aun no hay resoluciones registradas.</p>}
     </section>
   );
 }

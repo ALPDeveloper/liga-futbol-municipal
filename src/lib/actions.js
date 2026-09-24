@@ -229,25 +229,86 @@ function checkboxValue(value) {
   return value === true || value === "on" || value === "true" || value === "1";
 }
 
+function isOpenPlayerSanction(sanction) {
+  return !["cleared", "revoked", "served", "completed"].includes(sanction?.status || "active");
+}
+
+function isAccumulablePlayerSanction(sanction) {
+  return isOpenPlayerSanction(sanction) && !sanction?.indefinite;
+}
+
+function appendSanctionNote(existingNotes, note) {
+  const current = upperText(existingNotes || "");
+  const next = upperText(note || "");
+  if (!next) return current;
+  if (!current) return next;
+  if (current.includes(next)) return current;
+  return `${current}\n${next}`;
+}
+
 export function addPlayerSanction(store, leagueId, payload) {
-  return updateLeague(store, leagueId, (league) => ({
-    ...league,
-    sanctions: [
-      ...(league.sanctions || []),
-      {
-        id: makeId("sanction"),
-        competitionId: payload.competitionId || getDefaultCompetitionId(league),
-        playerId: payload.playerId,
-        type: upperText(payload.type || "Sancion disciplinaria"),
-        matches: checkboxValue(payload.indefinite) ? 0 : Number(payload.matches || 0),
-        indefinite: checkboxValue(payload.indefinite),
-        reason: upperText(payload.reason || ""),
-        date: payload.date || new Date().toISOString().slice(0, 10),
-        status: payload.status || "active",
-        notes: upperText(payload.notes || "")
-      }
-    ]
-  }));
+  return updateLeague(store, leagueId, (league) => {
+    const indefinite = checkboxValue(payload.indefinite);
+    const matches = indefinite ? 0 : Number(payload.matches || 0);
+    if (!payload.playerId) throw new Error("Selecciona el jugador sancionado.");
+    if (!indefinite && (!Number.isInteger(matches) || matches < 0 || matches > 99)) {
+      throw new Error("La sancion debe tener entre 0 y 99 partidos.");
+    }
+
+    const existingOpenSanction = (league.sanctions || []).find((sanction) => (
+      sanction.playerId === payload.playerId &&
+      isAccumulablePlayerSanction(sanction)
+    ));
+    const reason = upperText(payload.reason || "");
+    const type = upperText(payload.type || "Sancion disciplinaria");
+    const note = [
+      existingOpenSanction ? `AMPLIACION DE SANCION ${payload.date || new Date().toISOString().slice(0, 10)}` : "",
+      indefinite ? "INHABILITADO INDEFINIDO" : `+${matches} PARTIDO(S)`,
+      reason ? `MOTIVO: ${reason}` : "",
+      payload.notes || ""
+    ].filter(Boolean).join(" | ");
+
+    if (existingOpenSanction) {
+      return {
+        ...league,
+        sanctions: (league.sanctions || []).map((sanction) => {
+          if (sanction.id !== existingOpenSanction.id) return sanction;
+          const nextIndefinite = Boolean(sanction.indefinite) || indefinite;
+          return {
+            ...sanction,
+            competitionId: sanction.competitionId || payload.competitionId || getDefaultCompetitionId(league),
+            type: sanction.type || type,
+            matches: nextIndefinite ? 0 : Number(sanction.matches || 0) + matches,
+            indefinite: nextIndefinite,
+            reason: sanction.reason || reason,
+            date: sanction.date || payload.date || new Date().toISOString().slice(0, 10),
+            status: "active",
+            notes: appendSanctionNote(sanction.notes, note),
+            updatedAt: new Date().toISOString()
+          };
+        })
+      };
+    }
+
+    return {
+      ...league,
+      sanctions: [
+        ...(league.sanctions || []),
+        {
+          id: makeId("sanction"),
+          competitionId: payload.competitionId || getDefaultCompetitionId(league),
+          playerId: payload.playerId,
+          type,
+          matches,
+          indefinite,
+          reason,
+          date: payload.date || new Date().toISOString().slice(0, 10),
+          status: payload.status || "active",
+          notes: upperText(payload.notes || "")
+        }
+      ]
+    };
+  });
 }
 
 export function updatePlayerSanction(store, leagueId, sanctionId, payload) {
@@ -317,25 +378,35 @@ export function resolveMatchEventDiscipline(store, leagueId, payload) {
       `JORNADA ${targetMatch.round || "-"}`,
       payload.notes || ""
     ].filter(Boolean).join(" "));
-    const existingSanction = (league.sanctions || []).find((sanction) => (
+    const existingEventSanction = (league.sanctions || []).find((sanction) => (
       sanction.playerId === targetEvent.playerId &&
       (
         (sanction.sourceMatchId && sanction.sourceMatchId === targetMatch.id && Number(sanction.sourceEventIndex) === eventIndex) ||
         upperText(sanction.notes || "").includes(upperText(targetMatch.id))
       )
     ));
+    const existingOpenPlayerSanction = existingEventSanction || (league.sanctions || []).find((sanction) => (
+      sanction.playerId === targetEvent.playerId &&
+      isAccumulablePlayerSanction(sanction)
+    ));
+    const isAccumulatingOnExistingPlayer = Boolean(existingOpenPlayerSanction && existingOpenPlayerSanction.id !== existingEventSanction?.id);
+    const existingMatches = Number(existingOpenPlayerSanction?.matches || 0);
+    const nextMatches = resolutionType === "matches"
+      ? isAccumulatingOnExistingPlayer ? existingMatches + sanctionMatches : sanctionMatches
+      : existingMatches;
+    const nextNotes = appendSanctionNote(existingOpenPlayerSanction?.notes, resolutionNote);
     const nextSanction = {
-      ...(existingSanction || {}),
-      id: existingSanction?.id || makeId("sanction"),
-      competitionId: targetMatch.competitionId || payload.competitionId || getDefaultCompetitionId(league),
+      ...(existingOpenPlayerSanction || {}),
+      id: existingOpenPlayerSanction?.id || makeId("sanction"),
+      competitionId: existingOpenPlayerSanction?.competitionId || targetMatch.competitionId || payload.competitionId || getDefaultCompetitionId(league),
       playerId: targetEvent.playerId,
-      type: upperText(payload.type || "Expulsion"),
-      matches: resolutionType === "matches" ? sanctionMatches : 0,
-      indefinite: resolutionType === "indefinite",
-      reason: resolutionType === "release" ? upperText(payload.reason || "Sin suspension adicional por comision") : reason,
-      date,
-      status: resolutionType === "release" ? "cleared" : "active",
-      notes: resolutionNote,
+      type: upperText(existingOpenPlayerSanction?.type || payload.type || "Expulsion"),
+      matches: resolutionType === "matches" ? nextMatches : resolutionType === "indefinite" ? 0 : existingMatches,
+      indefinite: Boolean(existingOpenPlayerSanction?.indefinite) || resolutionType === "indefinite",
+      reason: existingOpenPlayerSanction?.reason || (resolutionType === "release" ? upperText(payload.reason || "Sin suspension adicional por comision") : reason),
+      date: existingOpenPlayerSanction?.date || date,
+      status: resolutionType === "release" && !isAccumulatingOnExistingPlayer ? "cleared" : "active",
+      notes: nextNotes,
       source: "match_red_card",
       sourceMatchId: targetMatch.id,
       sourceEventIndex: eventIndex,
@@ -363,7 +434,7 @@ export function resolveMatchEventDiscipline(store, leagueId, payload) {
       }),
       sanctions: [
         ...(league.sanctions || []).filter((sanction) => !(
-          sanction.id === existingSanction?.id ||
+          sanction.id === existingOpenPlayerSanction?.id ||
           (
             sanction.playerId === targetEvent.playerId &&
             (
@@ -622,6 +693,50 @@ export function updateTeamAffiliationPlayerNumber(store, leagueId, affiliationId
   }));
 }
 
+function replacePlayerReferenceValue(value, duplicatePlayerId, targetPlayerId) {
+  if (value === duplicatePlayerId) return targetPlayerId;
+  if (Array.isArray(value)) {
+    return value.map((item) => replacePlayerReferenceValue(item, duplicatePlayerId, targetPlayerId));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        replacePlayerReferenceValue(item, duplicatePlayerId, targetPlayerId)
+      ])
+    );
+  }
+  return value;
+}
+
+function mergePlayerReferenceObjects(entries, duplicatePlayerId, targetPlayerId, targetPlayer) {
+  const byPlayerId = new Map();
+  for (const sourceEntry of entries || []) {
+    const rawEntry = typeof sourceEntry === "string" ? { playerId: sourceEntry } : { ...(sourceEntry || {}) };
+    const nextEntry = replacePlayerReferenceValue(rawEntry, duplicatePlayerId, targetPlayerId);
+    if (!nextEntry.playerId) continue;
+    if (nextEntry.playerId === targetPlayerId) {
+      nextEntry.playerNameSnapshot = nextEntry.playerNameSnapshot || nextEntry.name || targetPlayer.name || "";
+      nextEntry.playerNumberSnapshot = nextEntry.playerNumberSnapshot || nextEntry.number || targetPlayer.number || "";
+      nextEntry.playerPhotoSnapshot = nextEntry.playerPhotoSnapshot || nextEntry.photoUrl || targetPlayer.photoUrl || "";
+    }
+    const currentEntry = byPlayerId.get(nextEntry.playerId);
+    if (!currentEntry) {
+      byPlayerId.set(nextEntry.playerId, nextEntry);
+      continue;
+    }
+    byPlayerId.set(nextEntry.playerId, {
+      ...nextEntry,
+      ...currentEntry,
+      playerNameSnapshot: currentEntry.playerNameSnapshot || nextEntry.playerNameSnapshot || "",
+      playerNumberSnapshot: currentEntry.playerNumberSnapshot || currentEntry.jerseyNumber || nextEntry.playerNumberSnapshot || nextEntry.jerseyNumber || "",
+      playerPhotoSnapshot: currentEntry.playerPhotoSnapshot || nextEntry.playerPhotoSnapshot || "",
+      jerseyNumber: currentEntry.jerseyNumber || nextEntry.jerseyNumber || ""
+    });
+  }
+  return [...byPlayerId.values()];
+}
+
 export function mergeDuplicatePlayer(store, leagueId, payload) {
   return updateLeague(store, leagueId, (league) => {
     const targetPlayer = getPlayer(league, payload.targetPlayerId);
@@ -632,6 +747,9 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
     if (targetCompetitionId !== duplicateCompetitionId) return league;
 
     const replacePlayerId = (playerId) => (playerId === duplicatePlayer.id ? targetPlayer.id : playerId);
+    const replaceValue = (value) => replacePlayerReferenceValue(value, duplicatePlayer.id, targetPlayer.id);
+    const uniquePlayerIds = (playerIds) => [...new Set((playerIds || []).map(replacePlayerId).filter(Boolean))];
+    const mergePlayerEntries = (entries) => mergePlayerReferenceObjects(entries, duplicatePlayer.id, targetPlayer.id, targetPlayer);
     const affiliationForDuplicateTeam = (league.teamAffiliations || []).find((affiliation) => (
       affiliation.status !== "revoked" &&
       affiliation.sourceTeamId === targetPlayer.teamId &&
@@ -662,45 +780,61 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
         return { ...affiliation, playerNumbers };
       }),
       sanctions: (league.sanctions || []).map((sanction) => ({
-        ...sanction,
+        ...replaceValue(sanction),
         playerId: replacePlayerId(sanction.playerId)
       })),
       injuries: (league.injuries || []).map((injury) => ({
-        ...injury,
+        ...replaceValue(injury),
         playerId: replacePlayerId(injury.playerId)
       })),
       disciplineAdjustments: (league.disciplineAdjustments || []).map((adjustment) => ({
-        ...adjustment,
+        ...replaceValue(adjustment),
         playerId: replacePlayerId(adjustment.playerId)
       })),
       disciplineResets: (league.disciplineResets || []).map((reset) => ({
-        ...reset,
+        ...replaceValue(reset),
         playerId: replacePlayerId(reset.playerId)
       })),
       appearanceAdjustments: (league.appearanceAdjustments || []).map((adjustment) => ({
-        ...adjustment,
+        ...replaceValue(adjustment),
         playerId: replacePlayerId(adjustment.playerId)
       })),
       disciplineLinks: (league.disciplineLinks || [])
         .map((link) => ({
           ...link,
-          playerIds: [...new Set((link.playerIds || []).map(replacePlayerId))]
+          playerIds: uniquePlayerIds(link.playerIds)
         }))
         .filter((link) => link.playerIds.length > 1),
       matches: league.matches.map((match) => ({
         ...match,
-        events: (match.events || []).map((event) => (
-          event.playerId === duplicatePlayer.id
-            ? { ...event, playerId: targetPlayer.id, teamId: event.teamId || duplicatePlayer.teamId }
-            : event
-        ))
+        events: (match.events || []).map((event) => {
+          const nextEvent = replaceValue(event);
+          if (event.playerId === duplicatePlayer.id) {
+            return { ...nextEvent, playerId: targetPlayer.id, teamId: event.teamId || duplicatePlayer.teamId };
+          }
+          return nextEvent;
+        })
       })),
       matchRosters: (league.matchRosters || []).map((roster) => ({
-        ...roster,
+        ...replaceValue(roster),
         captainPlayerId: replacePlayerId(roster.captainPlayerId),
-        players: [...new Set((roster.players || []).map((entry) => replacePlayerId(typeof entry === "string" ? entry : entry.playerId)))]
-          .filter(Boolean)
-          .map((playerId) => ({ playerId }))
+        goalkeeperPlayerId: replacePlayerId(roster.goalkeeperPlayerId),
+        starters: uniquePlayerIds(roster.starters),
+        substitutes: uniquePlayerIds(roster.substitutes),
+        lineup: replaceValue(roster.lineup || {}),
+        players: mergePlayerEntries(roster.players)
+      })),
+      matchParticipations: (league.matchParticipations || []).map((participation) => ({
+        ...replaceValue(participation),
+        captainPlayerId: replacePlayerId(participation.captainPlayerId),
+        goalkeeperPlayerId: replacePlayerId(participation.goalkeeperPlayerId),
+        starters: uniquePlayerIds(participation.starters),
+        substitutes: uniquePlayerIds(participation.substitutes),
+        players: mergePlayerEntries(participation.players)
+      })),
+      matchReports: (league.matchReports || []).map((report) => ({
+        ...report,
+        payload: replaceValue(report.payload || {})
       }))
     };
   });

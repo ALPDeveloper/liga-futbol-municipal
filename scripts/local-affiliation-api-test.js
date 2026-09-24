@@ -151,6 +151,50 @@ function buildTestLeague() {
         awayGoals: null,
         events: []
       }
+    ],
+    matchRosters: [
+      {
+        id: "roster-merge-test",
+        matchId: "primera-j2-test",
+        teamId: "vasco-test",
+        captainPlayerId: "jose-vasco-duplicate-test",
+        goalkeeperPlayerId: "star-vasco-test",
+        starters: ["jose-vasco-primary-test", "jose-vasco-duplicate-test"],
+        substitutes: ["jose-vasco-duplicate-test"],
+        lineup: { captain: "jose-vasco-duplicate-test" },
+        players: [
+          { playerId: "jose-vasco-primary-test", jerseyNumber: "15" },
+          { playerId: "jose-vasco-duplicate-test", jerseyNumber: "16" },
+          { playerId: "star-vasco-test", jerseyNumber: "10" }
+        ],
+        status: "submitted"
+      }
+    ],
+    matchParticipations: [
+      {
+        id: "participation-merge-test",
+        matchId: "primera-j2-test",
+        teamId: "vasco-test",
+        captainPlayerId: "jose-vasco-duplicate-test",
+        players: [
+          { playerId: "jose-vasco-duplicate-test", playerNameSnapshot: "#15 Martinez Jose L", playerNumberSnapshot: "16" },
+          { playerId: "star-vasco-test", playerNameSnapshot: "Goleador Vasco", playerNumberSnapshot: "10" }
+        ],
+        status: "submitted",
+        active: true
+      }
+    ],
+    matchReports: [
+      {
+        id: "report-merge-test",
+        matchId: "primera-j2-test",
+        status: "draft",
+        payload: {
+          captainPlayerId: "jose-vasco-duplicate-test",
+          events: [{ playerId: "jose-vasco-duplicate-test", assistPlayerId: "jose-vasco-duplicate-test" }],
+          roster: { players: [{ playerId: "jose-vasco-duplicate-test" }] }
+        }
+      }
     ]
   };
 }
@@ -214,6 +258,18 @@ async function main() {
   store = mergeDuplicatePlayer(store, TEST_LEAGUE_ID, { targetPlayerId: "jose-vasco-primary-test", duplicatePlayerId: "jose-vasco-duplicate-test" });
   league = store.leagues.find((item) => item.id === TEST_LEAGUE_ID);
   assert.equal(league.players.some((player) => player.id === "jose-vasco-duplicate-test"), false);
+  assert.equal(JSON.stringify(league).includes("jose-vasco-duplicate-test"), false);
+  const mergedRoster = league.matchRosters.find((roster) => roster.id === "roster-merge-test");
+  assert.equal(mergedRoster.captainPlayerId, "jose-vasco-primary-test");
+  assert.equal(mergedRoster.players.filter((entry) => entry.playerId === "jose-vasco-primary-test").length, 1);
+  assert.deepEqual(mergedRoster.starters, ["jose-vasco-primary-test"]);
+  assert.deepEqual(mergedRoster.substitutes, ["jose-vasco-primary-test"]);
+  assert.equal(mergedRoster.lineup.captain, "jose-vasco-primary-test");
+  const mergedParticipation = league.matchParticipations.find((participation) => participation.id === "participation-merge-test");
+  assert.equal(mergedParticipation.captainPlayerId, "jose-vasco-primary-test");
+  assert.equal(mergedParticipation.players.some((entry) => entry.playerId === "jose-vasco-primary-test"), true);
+  assert.equal(league.matchReports[0].payload.captainPlayerId, "jose-vasco-primary-test");
+  assert.equal(league.matchReports[0].payload.events[0].assistPlayerId, "jose-vasco-primary-test");
   assert.ok((league.disciplineLinks || []).some((link) => (
     link.playerIds.includes("jose-naranja-test") &&
     link.playerIds.includes("jose-vasco-primary-test")

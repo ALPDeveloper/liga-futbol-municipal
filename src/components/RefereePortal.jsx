@@ -1681,6 +1681,7 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
   const liveAutoSyncRef = useRef(Promise.resolve());
   const lastEventRef = useRef({ type: "", teamId: "", at: 0 });
   const signatureSnapshotRef = useRef({ initialized: false, homeSigned: false, awaySigned: false });
+  const eventComposerSearchInputRef = useRef(null);
 
   useEffect(() => {
     setLocalMatch(sourceMatch);
@@ -1904,6 +1905,14 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
     });
     return () => window.cancelAnimationFrame(frameId);
   }, [events, eventComposer, pendingRedReasonEventId]);
+
+  useEffect(() => {
+    if (!eventComposer || typeof window === "undefined") return undefined;
+    const frameId = window.requestAnimationFrame(() => {
+      eventComposerSearchInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [eventComposer]);
 
   useEffect(() => {
     if (!liveStarted) return;
@@ -3211,6 +3220,7 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
           Buscar jugador de {playerTeamName}
           <div className="referee-search-input-wrap">
             <input
+              ref={eventComposerSearchInputRef}
               value={eventComposerQuery}
               onChange={(event) => setEventComposerQuery(event.target.value)}
               placeholder="Numero, nombre o apellido"
