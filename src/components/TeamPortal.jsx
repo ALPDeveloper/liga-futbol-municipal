@@ -915,6 +915,26 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
     }));
   }
 
+  function setAllRosterParticipants(matchId, checked, availablePlayers) {
+    const playerIds = checked ? availablePlayers.map((player) => player.id) : [];
+    updateRosterDraft(matchId, (current) => ({
+      ...current,
+      playerIds,
+      starters: checked ? [...new Set([...(current.starters || []), ...playerIds])] : [],
+      substitutes: checked ? (current.substitutes || []).filter((playerId) => playerIds.includes(playerId)) : [],
+      captainPlayerId: checked
+        ? (playerIds.includes(current.captainPlayerId) ? current.captainPlayerId : playerIds[0] || "")
+        : "",
+      goalkeeperPlayerId: checked && playerIds.includes(current.goalkeeperPlayerId) ? current.goalkeeperPlayerId : "",
+      jerseyNumbers: checked
+        ? Object.fromEntries(availablePlayers.map((player) => [
+          player.id,
+          normalizeJerseyNumberInput(current.jerseyNumbers?.[player.id] ?? player.number ?? "")
+        ]))
+        : {}
+    }));
+  }
+
   async function submitMatchRoster(event, match) {
     event.preventDefault();
     if (busyMatchId) return;
@@ -1043,6 +1063,7 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
   const activeAvailablePlayers = activeMatch
     ? eligiblePlayers
     : [];
+  const activeAllPlayersSelected = activeAvailablePlayers.length > 0 && activeAvailablePlayers.every((player) => activeDraft.playerIds.includes(player.id));
   const activeLineupPlayers = activeAvailablePlayers.filter((player) => {
     const tokens = getSearchTokens(lineupPlayerQuery);
     if (!tokens.length) return true;
@@ -1595,6 +1616,15 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                       <strong>Filtrar plantilla</strong>
                       <span>{activeLineupPlayers.length} visible(s) · {activeDraft.playerIds?.length || 0} seleccionado(s)</span>
                     </div>
+                    <label className="delegate-select-all-participants">
+                      <input
+                        checked={activeAllPlayersSelected}
+                        disabled={!activeAvailablePlayers.length || activeMatch.participationSubmitted || busyMatchId === activeMatch.id}
+                        type="checkbox"
+                        onChange={(event) => setAllRosterParticipants(activeMatch.id, event.target.checked, activeAvailablePlayers)}
+                      />
+                      <span>Seleccionar todos</span>
+                    </label>
                     <div className="delegate-search-input-wrap">
                       <input
                         type="search"

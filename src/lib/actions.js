@@ -744,17 +744,38 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
     if (!targetPlayer || !duplicatePlayer || targetPlayer.id === duplicatePlayer.id) return league;
     const targetCompetitionId = targetPlayer.competitionId || getTeam(league, targetPlayer.teamId)?.competitionId || getDefaultCompetitionId(league);
     const duplicateCompetitionId = duplicatePlayer.competitionId || getTeam(league, duplicatePlayer.teamId)?.competitionId || getDefaultCompetitionId(league);
-    if (targetCompetitionId !== duplicateCompetitionId) return league;
+    const isCrossCompetitionMerge = targetCompetitionId !== duplicateCompetitionId;
+    const shouldCreateAffiliation = payload.createAffiliationFromDuplicate === true;
+    if (isCrossCompetitionMerge && !shouldCreateAffiliation) return league;
 
     const replacePlayerId = (playerId) => (playerId === duplicatePlayer.id ? targetPlayer.id : playerId);
     const replaceValue = (value) => replacePlayerReferenceValue(value, duplicatePlayer.id, targetPlayer.id);
     const uniquePlayerIds = (playerIds) => [...new Set((playerIds || []).map(replacePlayerId).filter(Boolean))];
     const mergePlayerEntries = (entries) => mergePlayerReferenceObjects(entries, duplicatePlayer.id, targetPlayer.id, targetPlayer);
     const affiliationForDuplicateTeam = (league.teamAffiliations || []).find((affiliation) => (
+      affiliation.status !== "inactive" &&
       affiliation.status !== "revoked" &&
       affiliation.sourceTeamId === targetPlayer.teamId &&
       affiliation.targetTeamId === duplicatePlayer.teamId
     ));
+    const convertedAffiliationExists = shouldCreateAffiliation && (league.teamAffiliations || []).some((affiliation) => (
+      affiliation.status !== "inactive" &&
+      affiliation.status !== "revoked" &&
+      affiliation.sourceTeamId === targetPlayer.teamId &&
+      affiliation.targetTeamId === duplicatePlayer.teamId
+    ));
+    const convertedAffiliation = shouldCreateAffiliation && targetPlayer.teamId !== duplicatePlayer.teamId && !convertedAffiliationExists
+      ? {
+          id: makeId("team-affiliation"),
+          sourceTeamId: targetPlayer.teamId,
+          targetTeamId: duplicatePlayer.teamId,
+          status: "active",
+          startsAt: payload.startsAt || "",
+          endsAt: payload.endsAt || "",
+          playerNumbers: duplicatePlayer.number ? { [targetPlayer.id]: Number(duplicatePlayer.number || 0) } : {},
+          notes: upperText(payload.affiliationNotes || "AFILIACION CREADA AL CONVERTIR DUPLICADO ENTRE CATEGORIAS")
+        }
+      : null;
 
     return {
       ...league,
@@ -768,17 +789,24 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
             photoAuthorized: player.photoAuthorized || duplicatePlayer.photoAuthorized === true
           };
         }),
-      teamAffiliations: (league.teamAffiliations || []).map((affiliation) => {
-        const playerNumbers = { ...(affiliation.playerNumbers || {}) };
-        if (playerNumbers[duplicatePlayer.id] !== undefined) {
-          playerNumbers[targetPlayer.id] = playerNumbers[duplicatePlayer.id];
-          delete playerNumbers[duplicatePlayer.id];
-        }
-        if (affiliation.id === affiliationForDuplicateTeam?.id && duplicatePlayer.number) {
-          playerNumbers[targetPlayer.id] = Number(duplicatePlayer.number || 0);
-        }
-        return { ...affiliation, playerNumbers };
-      }),
+      teamAffiliations: [
+        ...(league.teamAffiliations || []).map((affiliation) => {
+          const playerNumbers = { ...(affiliation.playerNumbers || {}) };
+          if (playerNumbers[duplicatePlayer.id] !== undefined) {
+            playerNumbers[targetPlayer.id] = playerNumbers[duplicatePlayer.id];
+            delete playerNumbers[duplicatePlayer.id];
+          }
+          if ((affiliation.id === affiliationForDuplicateTeam?.id || (
+            shouldCreateAffiliation &&
+            affiliation.sourceTeamId === targetPlayer.teamId &&
+            affiliation.targetTeamId === duplicatePlayer.teamId
+          )) && duplicatePlayer.number) {
+            playerNumbers[targetPlayer.id] = Number(duplicatePlayer.number || 0);
+          }
+          return { ...affiliation, playerNumbers };
+        }),
+        ...(convertedAffiliation ? [convertedAffiliation] : [])
+      ],
       sanctions: (league.sanctions || []).map((sanction) => ({
         ...replaceValue(sanction),
         playerId: replacePlayerId(sanction.playerId)

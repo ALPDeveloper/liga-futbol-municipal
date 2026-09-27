@@ -67947,7 +67947,7 @@ main.public-league-page.public-view-calendario .public-match-control-panel.publi
 
 .team-portal-page.delegate-view-lineup .delegate-lineup-search {
   display: grid;
-  grid-template-columns: minmax(0, 0.72fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(0, 0.72fr) minmax(150px, auto) minmax(220px, 1fr);
   gap: 9px;
   align-items: end;
   padding: 10px;
@@ -67972,6 +67972,36 @@ main.public-league-page.public-view-calendario .public-match-control-panel.publi
   color: rgba(220, 232, 240, 0.62);
   font-size: 0.64rem;
   font-weight: 900;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-select-all-participants {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid rgba(145, 255, 88, 0.24);
+  border-radius: 12px;
+  color: #f7fbff;
+  background: rgba(145, 255, 88, 0.08);
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-select-all-participants input {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  accent-color: #91ff58;
+}
+
+.team-portal-page.delegate-view-lineup .delegate-select-all-participants span {
+  color: inherit;
+  font-size: inherit;
+  line-height: 1.05;
 }
 
 .team-portal-page.delegate-view-lineup .delegate-search-input-wrap {
@@ -72763,7 +72793,7 @@ body:has(.public-league-page) {
 
 .admin-console-page .participation-player-filter {
   display: grid;
-  grid-template-columns: minmax(0, 0.78fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(0, 0.72fr) minmax(150px, auto) minmax(220px, 1fr);
   gap: 10px;
   align-items: end;
   padding: 10px;
@@ -72788,6 +72818,37 @@ body:has(.public-league-page) {
   color: rgba(220, 232, 240, 0.62);
   font-size: 0.66rem;
   font-weight: 900;
+}
+
+.admin-console-page .participation-player-filter .participation-select-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid rgba(145, 255, 88, 0.24);
+  border-radius: 12px;
+  color: #f7fbff;
+  background: rgba(145, 255, 88, 0.08);
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.admin-console-page .participation-player-filter .participation-select-all input {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  accent-color: #91ff58;
+}
+
+.admin-console-page .participation-player-filter .participation-select-all span {
+  color: inherit;
+  font-size: inherit;
+  line-height: 1.05;
 }
 
 .admin-console-page .participation-quick-player {

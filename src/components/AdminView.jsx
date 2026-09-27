@@ -1502,12 +1502,13 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
   }
 
   function selectAllPlayers(row) {
+    const allPlayerIds = row.players.map((player) => player.id);
     updateDraft(row, (draft) => ({
       ...draft,
-      playerIds: row.players.map((player) => player.id),
-      captainPlayerId: draft.captainPlayerId && row.players.some((player) => player.id === draft.captainPlayerId)
+      playerIds: allPlayerIds,
+      captainPlayerId: draft.captainPlayerId && allPlayerIds.includes(draft.captainPlayerId)
         ? draft.captainPlayerId
-        : "",
+        : allPlayerIds[0] || "",
       jerseyNumbers: Object.fromEntries(row.players.map((player) => [
         player.id,
         draft.jerseyNumbers?.[player.id] ?? getPlayerNumberForTeam(league, player.id, row.teamId)
@@ -1676,6 +1677,7 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
   function renderParticipationEditor(row) {
     const draft = getDraft(row);
     const selectedPlayers = row.players.filter((player) => draft.playerIds.includes(player.id));
+    const allPlayersSelected = row.players.length > 0 && row.players.every((player) => draft.playerIds.includes(player.id));
     const playerSearch = normalizeAdminSearchTerm(playerPickerQuery);
     const filteredRowPlayers = row.players.filter((player) => {
       if (!playerSearch) return true;
@@ -1696,7 +1698,6 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
             <strong>{row.team?.name || "Equipo"}</strong>
           </div>
           <div>
-            <button type="button" onClick={() => selectAllPlayers(row)} disabled={!row.players.length || savingRowKey === row.key}>Todos</button>
             <button type="button" onClick={() => updateDraft(row, (draftItem) => ({ ...draftItem, playerIds: [], captainPlayerId: "" }))} disabled={savingRowKey === row.key}>Limpiar</button>
             <button type="button" onClick={() => setQuickPlayerRowKey((current) => current === row.key ? "" : row.key)} disabled={!onAddPlayer || quickPlayerSaving}>Agregar jugador</button>
           </div>
@@ -1740,6 +1741,21 @@ function ParticipationControlPanel({ league, onAddPlayer, onSaveMatchParticipati
             <strong>Plantilla disponible</strong>
             <span>{filteredRowPlayers.length} de {row.players.length} jugador(es) · {draft.playerIds.length} seleccionado(s)</span>
           </div>
+          <label className="participation-select-all">
+            <input
+              checked={allPlayersSelected}
+              disabled={!row.players.length || savingRowKey === row.key}
+              type="checkbox"
+              onChange={(event) => {
+                if (event.target.checked) {
+                  selectAllPlayers(row);
+                  return;
+                }
+                updateDraft(row, (draftItem) => ({ ...draftItem, playerIds: [], captainPlayerId: "" }));
+              }}
+            />
+            <span>Seleccionar todos</span>
+          </label>
           <label>
             <span className="sr-only">Buscar jugador en convocatoria</span>
             <div className="admin-search-input-wrap">
@@ -4629,21 +4645,30 @@ function AffiliationsPanel({
     const duplicateTeam = getTeam(league, duplicate.teamId);
     const targetCompetitionId = target.competitionId || targetTeam?.competitionId || getDefaultCompetitionId(league);
     const duplicateCompetitionId = duplicate.competitionId || duplicateTeam?.competitionId || getDefaultCompetitionId(league);
-    if (targetCompetitionId !== duplicateCompetitionId) {
-      const message = "No fusione jugadores de categorias distintas. Usa Vincular misma persona para conservar cada historial en su torneo.";
-      setNotice(message);
-      setNoticeType("error");
-      showAdminAlert(message, "error");
-      return;
-    }
+    const isCrossCompetitionMerge = targetCompetitionId !== duplicateCompetitionId;
     const hasAffiliation = (league.teamAffiliations || []).some((affiliation) => (
+      affiliation.status !== "inactive" &&
+      affiliation.status !== "revoked" &&
       affiliation.sourceTeamId === target.teamId && affiliation.targetTeamId === duplicate.teamId
     ));
-    const affiliationWarning = hasAffiliation ? "" : "\n\nAviso: no encontre una afiliacion del equipo principal hacia el equipo del duplicado. Conviene crearla antes para conservar numero alterno y elegibilidad.";
-    if (!window.confirm(`¿Fusionar el duplicado ${duplicate.name} (${duplicateTeam?.name || "sin equipo"}) dentro de ${target.name} (${targetTeam?.name || "sin equipo"})?\n\nSe moveran actas, goles, tarjetas, sanciones y movimientos manuales al jugador principal.${affiliationWarning}`)) return;
+    const targetCompetition = getCompetition(league, targetCompetitionId);
+    const duplicateCompetition = getCompetition(league, duplicateCompetitionId);
+    const affiliationWarning = hasAffiliation ? "" : "\n\nEl sistema creara la afiliacion del equipo principal hacia el equipo donde estaba el duplicado para que siga apareciendo disponible ahi.";
+    const confirmMessage = isCrossCompetitionMerge
+      ? `¿Convertir ${duplicate.name} (${duplicateTeam?.name || "sin equipo"} | ${duplicateCompetition?.name || "otra categoria"}) en afiliacion de ${target.name} (${targetTeam?.name || "sin equipo"} | ${targetCompetition?.name || "categoria principal"})?\n\nSe trasladara todo el historial del duplicado al jugador principal, se eliminara el duplicado y el jugador principal quedara habilitado como afiliado en ${duplicateTeam?.name || "el otro equipo"}.${affiliationWarning}`
+      : `¿Fusionar el duplicado ${duplicate.name} (${duplicateTeam?.name || "sin equipo"}) dentro de ${target.name} (${targetTeam?.name || "sin equipo"})?\n\nSe moveran actas, goles, tarjetas, sanciones y movimientos manuales al jugador principal.`;
+    if (!window.confirm(confirmMessage)) return;
     try {
-      await onMergeDuplicatePlayer(payload);
-      const message = "Jugador duplicado fusionado. Revisa estadisticas y actas del jugador principal.";
+      await onMergeDuplicatePlayer({
+        ...payload,
+        createAffiliationFromDuplicate: isCrossCompetitionMerge,
+        affiliationNotes: isCrossCompetitionMerge
+          ? `AFILIACION CREADA AL CONVERTIR DUPLICADO ${duplicate.name} EN ${target.name}`
+          : ""
+      });
+      const message = isCrossCompetitionMerge
+        ? "Duplicado convertido en afiliacion. Solo queda el jugador principal y conserva historial en el otro equipo."
+        : "Jugador duplicado fusionado. Revisa estadisticas y actas del jugador principal.";
       setNotice(message);
       setNoticeType("success");
       showAdminAlert(message);

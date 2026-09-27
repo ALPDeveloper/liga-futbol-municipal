@@ -281,6 +281,76 @@ assert.deepEqual(new Set(affiliationLeague.disciplineLinks[0].playerIds), new Se
 const blockedCrossCompetitionMerge = mergeDuplicatePlayer(affiliationStore, "liga-afiliacion", { targetPlayerId: "juan-guascuaro", duplicatePlayerId: "juan-fresno" });
 assert.equal(getCurrentLeague(blockedCrossCompetitionMerge).players.some((player) => player.id === "juan-fresno"), true);
 
+let crossCompetitionMergeStore = normalizeStore({
+  currentLeagueId: "liga-cross-merge",
+  leagues: [
+    {
+      id: "liga-cross-merge",
+      name: "Liga Fusion Afiliacion",
+      city: "Ciudad",
+      season: "2026",
+      currentCompetitionId: "segunda",
+      competitions: [
+        { id: "segunda", name: "Segunda Fuerza", season: "2026", status: "active" },
+        { id: "primera", name: "Primera Fuerza", season: "2026", status: "active" }
+      ],
+      rules: { disciplineScope: "league", yellowSuspensionLimit: 3 },
+      identity: {},
+      teams: [
+        { id: "segunda-main", competitionId: "segunda", name: "Equipo Segunda" },
+        { id: "primera-affiliated", competitionId: "primera", name: "Equipo Primera" }
+      ],
+      players: [
+        { id: "cross-main", competitionId: "segunda", teamId: "segunda-main", name: "Jugador Principal", number: 10 },
+        { id: "cross-duplicate", competitionId: "primera", teamId: "primera-affiliated", name: "Jugador Princ.", number: 18 }
+      ],
+      teamAffiliations: [],
+      sanctions: [{ id: "cross-sanction", playerId: "cross-duplicate", competitionId: "primera", type: "ROJA", matches: 1, status: "active" }],
+      injuries: [],
+      matches: [
+        {
+          id: "cross-match",
+          competitionId: "primera",
+          round: 4,
+          date: "2026-02-10",
+          status: "finished",
+          homeTeamId: "primera-affiliated",
+          awayTeamId: "segunda-main",
+          events: [
+            { type: "goal", playerId: "cross-duplicate", teamId: "primera-affiliated", minute: 35 }
+          ]
+        }
+      ],
+      matchParticipations: [
+        {
+          id: "cross-participation",
+          matchId: "cross-match",
+          teamId: "primera-affiliated",
+          players: [{ playerId: "cross-duplicate", playerNameSnapshot: "Jugador Princ.", playerNumberSnapshot: "18" }]
+        }
+      ]
+    }
+  ]
+});
+crossCompetitionMergeStore = mergeDuplicatePlayer(crossCompetitionMergeStore, "liga-cross-merge", {
+  targetPlayerId: "cross-main",
+  duplicatePlayerId: "cross-duplicate",
+  createAffiliationFromDuplicate: true
+});
+const crossCompetitionMergeLeague = getCurrentLeague(crossCompetitionMergeStore);
+assert.equal(crossCompetitionMergeLeague.players.some((player) => player.id === "cross-duplicate"), false);
+assert.equal(JSON.stringify(crossCompetitionMergeLeague).includes("cross-duplicate"), false);
+assert.equal(crossCompetitionMergeLeague.matches[0].events[0].playerId, "cross-main");
+assert.equal(crossCompetitionMergeLeague.matches[0].events[0].teamId, "primera-affiliated");
+assert.equal(crossCompetitionMergeLeague.sanctions[0].playerId, "cross-main");
+assert.equal(getEligiblePlayersForTeam(crossCompetitionMergeLeague, "primera-affiliated").some((player) => player.id === "cross-main"), true);
+assert.equal(getPlayerNumberForTeam(crossCompetitionMergeLeague, "cross-main", "primera-affiliated"), 18);
+assert.equal(crossCompetitionMergeLeague.teamAffiliations.some((affiliation) => (
+  affiliation.sourceTeamId === "segunda-main" &&
+  affiliation.targetTeamId === "primera-affiliated" &&
+  affiliation.status === "active"
+)), true);
+
 let duplicateMergeStore = normalizeStore({
   currentLeagueId: "liga-merge",
   leagues: [
