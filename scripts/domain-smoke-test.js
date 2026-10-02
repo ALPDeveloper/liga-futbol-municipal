@@ -423,9 +423,17 @@ let duplicateMergeStore = normalizeStore({
     }
   ]
 });
+duplicateMergeStore = {
+  ...duplicateMergeStore,
+  leagues: duplicateMergeStore.leagues.map((league) => ({
+    ...league,
+    allPlayers: [...league.players]
+  }))
+};
 duplicateMergeStore = mergeDuplicatePlayer(duplicateMergeStore, "liga-merge", { targetPlayerId: "merge-main", duplicatePlayerId: "merge-duplicate" });
 const duplicateMergeLeague = getCurrentLeague(duplicateMergeStore);
 assert.equal(duplicateMergeLeague.players.some((player) => player.id === "merge-duplicate"), false);
+assert.equal(duplicateMergeLeague.allPlayers.some((player) => player.id === "merge-duplicate"), false);
 assert.equal(JSON.stringify(duplicateMergeLeague).includes("merge-duplicate"), false);
 assert.equal(duplicateMergeLeague.matches[0].events[0].playerId, "merge-main");
 assert.equal(duplicateMergeLeague.matches[0].events[0].assistPlayerId, "merge-main");

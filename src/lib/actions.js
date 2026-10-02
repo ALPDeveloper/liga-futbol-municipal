@@ -752,6 +752,16 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
     const replaceValue = (value) => replacePlayerReferenceValue(value, duplicatePlayer.id, targetPlayer.id);
     const uniquePlayerIds = (playerIds) => [...new Set((playerIds || []).map(replacePlayerId).filter(Boolean))];
     const mergePlayerEntries = (entries) => mergePlayerReferenceObjects(entries, duplicatePlayer.id, targetPlayer.id, targetPlayer);
+    const mergePlayerList = (players = []) => players
+      .filter((player) => player.id !== duplicatePlayer.id)
+      .map((player) => {
+        if (player.id !== targetPlayer.id) return player;
+        return {
+          ...player,
+          photoUrl: player.photoUrl || duplicatePlayer.photoUrl || "",
+          photoAuthorized: player.photoAuthorized || duplicatePlayer.photoAuthorized === true
+        };
+      });
     const affiliationForDuplicateTeam = (league.teamAffiliations || []).find((affiliation) => (
       affiliation.status !== "inactive" &&
       affiliation.status !== "revoked" &&
@@ -779,16 +789,8 @@ export function mergeDuplicatePlayer(store, leagueId, payload) {
 
     return {
       ...league,
-      players: league.players
-        .filter((player) => player.id !== duplicatePlayer.id)
-        .map((player) => {
-          if (player.id !== targetPlayer.id) return player;
-          return {
-            ...player,
-            photoUrl: player.photoUrl || duplicatePlayer.photoUrl || "",
-            photoAuthorized: player.photoAuthorized || duplicatePlayer.photoAuthorized === true
-          };
-        }),
+      players: mergePlayerList(league.players),
+      ...(Array.isArray(league.allPlayers) ? { allPlayers: mergePlayerList(league.allPlayers) } : {}),
       teamAffiliations: [
         ...(league.teamAffiliations || []).map((affiliation) => {
           const playerNumbers = { ...(affiliation.playerNumbers || {}) };
