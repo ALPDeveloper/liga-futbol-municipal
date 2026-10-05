@@ -1294,7 +1294,17 @@ assert.throws(() => saveMatchSheet(store, league.id, {
   homeGoals: 1,
   awayGoals: 0,
   events: []
-}), /goleadores capturados/);
+}), /goles por equipo no coinciden/);
+
+assert.throws(() => saveMatchSheet(store, league.id, {
+  matchId: "m4",
+  homeGoals: 2,
+  awayGoals: 0,
+  events: [
+    { type: "goal", playerId: "p3", teamId: "union", minute: 12 },
+    { type: "own_goal", playerId: "p3", teamId: "atletico", minute: 55 }
+  ]
+}), /UNION MUNICIPAL marcador 2, eventos 1; ATLETICO BARRIO marcador 0, eventos 1/);
 
 assert.throws(() => saveMatchSheet(store, league.id, {
   matchId: "m4",

@@ -1727,7 +1727,9 @@ export function saveMatchSheet(store, leagueId, payload) {
       const homeGoalEvents = goals.filter((event) => event.teamId === match.homeTeamId).length;
       const awayGoalEvents = goals.filter((event) => event.teamId === match.awayTeamId).length;
       if (homeGoalEvents !== homeGoals || awayGoalEvents !== awayGoals) {
-        throw new Error("Los goleadores capturados no coinciden con el marcador.");
+        const homeTeamName = getTeam(league, match.homeTeamId)?.name || "Local";
+        const awayTeamName = getTeam(league, match.awayTeamId)?.name || "Visitante";
+        throw new Error(`Los goles por equipo no coinciden con el marcador: ${homeTeamName} marcador ${homeGoals}, eventos ${homeGoalEvents}; ${awayTeamName} marcador ${awayGoals}, eventos ${awayGoalEvents}. En autogol selecciona como equipo al equipo favorecido.`);
       }
 
       const nextMatch = {

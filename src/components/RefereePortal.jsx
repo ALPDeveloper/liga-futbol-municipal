@@ -1904,7 +1904,16 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
       setPendingRedReasonEventId("");
     });
     return () => window.cancelAnimationFrame(frameId);
-  }, [events, eventComposer, pendingRedReasonEventId]);
+  }, [pendingRedReasonEventId]);
+
+  const eventComposerFocusKey = eventComposer
+    ? [
+        eventComposer.type,
+        eventComposer.teamId,
+        eventComposer.minuteInfo?.period || "",
+        eventComposer.minuteInfo?.minuteLabel || eventComposer.minuteInfo?.minute || ""
+      ].join(":")
+    : "";
 
   useEffect(() => {
     if (!eventComposer || typeof window === "undefined") return undefined;
@@ -1912,7 +1921,7 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
       eventComposerSearchInputRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frameId);
-  }, [eventComposer]);
+  }, [eventComposerFocusKey]);
 
   useEffect(() => {
     if (!liveStarted) return;
@@ -2037,6 +2046,10 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
 
   function isGoalEventType(type) {
     return type === "goal" || type === "own_goal";
+  }
+
+  function getRefereeGoalMismatchMessage(homeEventGoals, awayEventGoals) {
+    return `Revisa goles por equipo: ${match.homeTeamName || "Local"} marcador ${Number(homeGoals || 0)}, eventos ${homeEventGoals}; ${match.awayTeamName || "Visitante"} marcador ${Number(awayGoals || 0)}, eventos ${awayEventGoals}. En autogol selecciona como equipo al equipo favorecido.`;
   }
 
   function getCurrentEventPeriod() {
@@ -3105,7 +3118,7 @@ function RefereeSheetForm({ authToken, match: sourceMatch, initialCaptureMode = 
       const homeEventGoals = cleanEvents.filter((item) => ["goal", "own_goal"].includes(item.type) && item.teamId === match.homeTeamId).length;
       const awayEventGoals = cleanEvents.filter((item) => ["goal", "own_goal"].includes(item.type) && item.teamId === match.awayTeamId).length;
       if (homeEventGoals !== Number(homeGoals || 0) || awayEventGoals !== Number(awayGoals || 0)) {
-        setMessage(`Revisa goleadores: marcador ${homeGoals}-${awayGoals}, eventos ${homeEventGoals}-${awayEventGoals}.`);
+        setMessage(getRefereeGoalMismatchMessage(homeEventGoals, awayEventGoals));
         return;
       }
     }

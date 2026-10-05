@@ -7744,6 +7744,10 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
     setEventTeamId(selectedMatch.homeTeamId || "");
   }, [selectedMatchCaptureKey]);
 
+  const eventDraftFocusKey = eventDraft && sheetStep === "events"
+    ? [eventDraft.id, eventDraft.type, eventDraft.teamId].filter(Boolean).join(":")
+    : "";
+
   useEffect(() => {
     if (sheetStep !== "events" || !eventDraft) return;
     window.requestAnimationFrame(() => {
@@ -7752,7 +7756,7 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
         eventPlayerSearchInputRef.current?.focus({ preventScroll: true });
       }
     });
-  }, [eventDraft, sheetStep]);
+  }, [eventDraftFocusKey, sheetStep]);
 
   function getPlayersForTeam(teamId) {
     return getEligiblePlayersForTeam(league, teamId);
@@ -8062,6 +8066,10 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
   const selectedEventTeamId = [selectedMatch.homeTeamId, selectedMatch.awayTeamId].includes(eventTeamId)
     ? eventTeamId
     : selectedMatch.homeTeamId;
+
+  function getAdminGoalMismatchMessage(currentHomeGoalEvents, currentAwayGoalEvents) {
+    return `Los goles por equipo no coinciden: ${homeTeam?.name || "Local"} marcador ${expectedHomeGoals}, eventos ${currentHomeGoalEvents}; ${awayTeam?.name || "Visitante"} marcador ${expectedAwayGoals}, eventos ${currentAwayGoalEvents}. En autogol selecciona como equipo al equipo favorecido.`;
+  }
   const selectedEventTeam = getTeam(league, selectedEventTeamId);
 
   function validateMatchSheet() {
@@ -8116,12 +8124,8 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
       const currentHomeGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.homeTeamId).length;
       const currentAwayGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.awayTeamId).length;
 
-      if (expectedHomeGoals > 0 && currentHomeGoalEvents !== expectedHomeGoals) {
-        return `Revisa goleadores del equipo local: marcador ${expectedHomeGoals}, capturados ${currentHomeGoalEvents}.`;
-      }
-
-      if (expectedAwayGoals > 0 && currentAwayGoalEvents !== expectedAwayGoals) {
-        return `Revisa goleadores del equipo visitante: marcador ${expectedAwayGoals}, capturados ${currentAwayGoalEvents}.`;
+      if (currentHomeGoalEvents !== expectedHomeGoals || currentAwayGoalEvents !== expectedAwayGoals) {
+        return getAdminGoalMismatchMessage(currentHomeGoalEvents, currentAwayGoalEvents);
       }
 
       if (expectedHomeGoals === 0 && currentHomeGoalEvents > 0) {
@@ -8436,13 +8440,11 @@ function MatchSheet({ league, onAddPlayer, onSaveMatchSheet }) {
 
   function moveSheetStep(direction) {
     if (direction > 0 && sheetStep === "events" && !isDefaultSheet) {
-      const expectedTotal = expectedHomeGoals + expectedAwayGoals;
       const currentGoalEvents = events.filter((item) => item.playerId && (item.type === "goal" || item.type === "own_goal"));
       const currentHomeGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.homeTeamId).length;
       const currentAwayGoalEvents = currentGoalEvents.filter((item) => item.teamId === selectedMatch.awayTeamId).length;
-      const capturedTotal = currentHomeGoalEvents + currentAwayGoalEvents;
       if (currentHomeGoalEvents !== expectedHomeGoals || currentAwayGoalEvents !== expectedAwayGoals) {
-        const message = `La cantidad de goles del marcador (${expectedTotal}) no coincide con los goles registrados en eventos (${capturedTotal}).`;
+        const message = getAdminGoalMismatchMessage(currentHomeGoalEvents, currentAwayGoalEvents);
         setValidationMessage(message);
         showAdminAlert(message, "error");
         return;
