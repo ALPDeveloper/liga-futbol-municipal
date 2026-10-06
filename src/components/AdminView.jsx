@@ -5873,7 +5873,7 @@ function CapturePanel({ allowedModes = null, authToken, league, onAddMatch, onAd
           {captureMode === "playoffs" && (
             <>
               <form
-                className="capture-form schedule-generator-form"
+                className="capture-form schedule-generator-form playoff-generator-form"
                 onSubmit={async (event) => {
                   event.preventDefault();
                   const payload = getFormPayload(event.currentTarget);

@@ -73643,3 +73643,123 @@ body:has(.public-league-page) {
     align-items: stretch;
   }
 }
+
+/* Liguilla publica: prioridad visual estable para marcadores largos como 12-10. */
+.public-league-page.public-view-inicio .home-featured-teams {
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 148px) minmax(0, 1fr) !important;
+  column-gap: 12px !important;
+}
+
+.public-league-page.public-view-inicio .home-featured-teams em {
+  width: min(148px, 100%) !important;
+  min-width: 112px !important;
+  height: auto !important;
+  min-height: 78px !important;
+  padding: 8px 10px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  font-size: 3.25rem !important;
+  font-variant-numeric: tabular-nums !important;
+  line-height: 0.95 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+}
+
+main.public-league-page.public-view-calendario .schedule-scoreboard {
+  grid-template-columns: minmax(0, 1fr) minmax(82px, 96px) minmax(0, 1fr) !important;
+}
+
+main.public-league-page.public-view-calendario .schedule-scoreboard-center strong,
+main.public-league-page.public-view-calendario .schedule-scoreboard.is-live .schedule-scoreboard-center strong {
+  width: 96px !important;
+  font-size: 1.56rem !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+@media (max-width: 640px) {
+  .public-league-page.public-view-inicio .home-featured-teams {
+    grid-template-columns: minmax(0, 1fr) minmax(92px, 112px) minmax(0, 1fr) !important;
+    column-gap: 8px !important;
+  }
+
+  .public-league-page.public-view-inicio .home-featured-teams em {
+    min-width: 92px !important;
+    width: 112px !important;
+    min-height: 62px !important;
+    font-size: 2.25rem !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .public-league-page.public-view-inicio .home-featured-teams em {
+    min-width: 88px !important;
+    width: 104px !important;
+    min-height: 56px !important;
+    font-size: 1.92rem !important;
+  }
+
+  main.public-league-page.public-view-calendario .schedule-scoreboard {
+    grid-template-columns: minmax(0, 1fr) minmax(74px, 84px) minmax(0, 1fr) !important;
+  }
+
+  main.public-league-page.public-view-calendario .schedule-scoreboard-center strong,
+  main.public-league-page.public-view-calendario .schedule-scoreboard.is-live .schedule-scoreboard-center strong {
+    width: 84px !important;
+    font-size: 1.24rem !important;
+  }
+}
+
+/* Admin liga: generador de liguilla legible dentro del tema oscuro. */
+.admin-console-page .playoff-generator-form,
+.admin-console-page .playoff-advance-form {
+  border-color: rgba(34, 211, 238, 0.18);
+  background:
+    linear-gradient(135deg, rgba(8, 47, 73, 0.42), rgba(2, 12, 18, 0.86)),
+    rgba(3, 13, 22, 0.92);
+  color: rgba(248, 252, 255, 0.95);
+}
+
+.admin-console-page .playoff-generator-form h3,
+.admin-console-page .playoff-advance-form h3,
+.admin-console-page .playoff-generator-form label,
+.admin-console-page .playoff-advance-form label {
+  color: rgba(248, 252, 255, 0.94);
+}
+
+.admin-console-page .playoff-generator-form .helper-text,
+.admin-console-page .playoff-advance-form .helper-text {
+  color: rgba(221, 232, 241, 0.78);
+}
+
+.admin-console-page .playoff-generator-form input,
+.admin-console-page .playoff-generator-form select,
+.admin-console-page .playoff-advance-form input,
+.admin-console-page .playoff-advance-form select {
+  border-color: rgba(125, 211, 252, 0.22);
+  background: rgba(1, 8, 14, 0.82);
+  color: rgba(248, 252, 255, 0.96);
+}
+
+.admin-console-page .playoff-generator-form .checkbox-field,
+.admin-console-page .playoff-advance-form .checkbox-field {
+  border-color: rgba(125, 211, 252, 0.16);
+  background: rgba(8, 47, 73, 0.22);
+}
+
+.admin-console-page .playoff-seeding-preview {
+  border-color: rgba(125, 211, 252, 0.18);
+  background: rgba(1, 8, 14, 0.46);
+}
+
+.admin-console-page .playoff-seeding-preview strong {
+  color: rgba(248, 252, 255, 0.96);
+}
+
+.admin-console-page .playoff-seeding-preview span {
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  background: rgba(8, 47, 73, 0.36);
+  color: rgba(221, 232, 241, 0.9);
+}

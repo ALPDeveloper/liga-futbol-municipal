@@ -196,6 +196,17 @@ function getPublicPlayoffSegmentIdForMatch(segments = [], match) {
   return segments.find((segment) => segment.matches.some((item) => item.id === match.id))?.id || "";
 }
 
+function getPublicDefaultPlayoffSegmentId(segments = []) {
+  if (!segments.length) return "";
+  const liveSegment = segments.find((segment) => segment.matches.some(isPublicMatchLive));
+  if (liveSegment) return liveSegment.id;
+  const activeSegment = segments.find((segment) => (
+    segment.matches.some((match) => !["finished", "walkover"].includes(match?.status || "scheduled"))
+  ));
+  if (activeSegment) return activeSegment.id;
+  return segments.at(-1)?.id || "";
+}
+
 function getCompetitionScopedPublicAssets(items = [], competitionId = "") {
   const scopedItems = items.filter((item) => (item.competitionId || "") === competitionId);
   if (competitionId && scopedItems.length) return scopedItems;
@@ -309,9 +320,15 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     [activeLeague, activeCompetition]
   );
   const playoffSegments = useMemo(() => getPublicPlayoffSegments(playoffs), [playoffs]);
+  const defaultPlayoffSegmentId = useMemo(() => (
+    getPublicDefaultPlayoffSegmentId(playoffSegments)
+  ), [playoffSegments]);
   const championPlayoffSegmentId = useMemo(() => (
-    getPublicPlayoffSegmentIdForMatch(playoffSegments, championHighlight?.finalMatch) || playoffSegments.at(-1)?.id || ""
-  ), [championHighlight?.finalMatch, playoffSegments]);
+    getPublicPlayoffSegmentIdForMatch(playoffSegments, championHighlight?.finalMatch) ||
+    defaultPlayoffSegmentId ||
+    playoffSegments.at(-1)?.id ||
+    ""
+  ), [championHighlight?.finalMatch, defaultPlayoffSegmentId, playoffSegments]);
   const competitionAccent = getCompetitionAccent(league.competitions || [], selectedCompetitionId);
   const publicCompetitions = getPublicCompetitions(league);
   const archivedPublicCompetitions = getArchivedPublicCompetitions(league);
@@ -325,7 +342,15 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   const scheduledMatches = sortPublicMatches(regularLeague.matches.filter(isPublicPlayableScheduledMatch));
   const nextMatches = scheduledMatches.slice(0, 4);
   const latestResults = sortRecentMatches(finishedMatches(regularLeague)).slice(0, 3);
-  const featuredMatch = getFeaturedPublicMatch(regularLeague, standings);
+  const playoffFeaturedMatch = useMemo(() => {
+    const segment = playoffSegments.find((item) => item.id === defaultPlayoffSegmentId) || playoffSegments[0];
+    if (!segment?.matches?.length) return null;
+    return getFeaturedPublicPlayoffMatch({ ...activeLeague, matches: segment.matches }, standings);
+  }, [activeLeague, defaultPlayoffSegmentId, playoffSegments, standings]);
+  const featuredMatch = playoffFeaturedMatch || getFeaturedPublicMatch(regularLeague, standings);
+  const featuredMatchPlayoffSegmentId = useMemo(() => (
+    getPublicPlayoffSegmentIdForMatch(playoffSegments, featuredMatch)
+  ), [featuredMatch, playoffSegments]);
   const disciplineLeague = league.rules?.disciplineScope === "league" ? league : activeLeague;
   const rounds = useMemo(() => (
     [...new Set(regularLeague.matches.map((match) => Number(match.round || 0)).filter(Boolean))]
@@ -342,10 +367,12 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   ), [activeCompetition?.activeRound, regularLeague.matches, rounds]);
   const [selectedRound, setSelectedRound] = useState(defaultRound);
   const [selectedPlayoffSegmentId, setSelectedPlayoffSegmentId] = useState("");
+  const [hasAutoSelectedPlayoffSegment, setHasAutoSelectedPlayoffSegment] = useState(false);
+  const [isRegularRoundSelected, setIsRegularRoundSelected] = useState(false);
   const urlPlayoffSegmentId = typeof window !== "undefined" && window.location.hash === "#liguilla"
-    ? championPlayoffSegmentId || playoffSegments.at(-1)?.id || ""
+    ? championPlayoffSegmentId || defaultPlayoffSegmentId || playoffSegments.at(-1)?.id || ""
     : "";
-  const activeSelectedPlayoffSegmentId = selectedPlayoffSegmentId || urlPlayoffSegmentId;
+  const activeSelectedPlayoffSegmentId = isRegularRoundSelected ? "" : selectedPlayoffSegmentId || urlPlayoffSegmentId;
   const selectedRoundMatches = useMemo(() => (
     regularLeague.matches
       .filter((match) => Number(match.round) === Number(selectedRound))
@@ -440,15 +467,21 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
     const nextView = PUBLIC_SCREEN_VIEWS.has(viewId) ? viewId : "inicio";
     if (options.playoffSegmentId) {
       setSelectedPlayoffSegmentId(options.playoffSegmentId);
+      setHasAutoSelectedPlayoffSegment(true);
+      setIsRegularRoundSelected(false);
       setMatchSearchQuery("");
       setFocusedMatchId("");
     } else if (options.round) {
       setSelectedPlayoffSegmentId("");
+      setHasAutoSelectedPlayoffSegment(true);
+      setIsRegularRoundSelected(true);
       setSelectedRound(options.round);
       setMatchSearchQuery("");
       setFocusedMatchId("");
     } else if (nextView === "calendario" && !options.preserveRound) {
-      setSelectedPlayoffSegmentId("");
+      setSelectedPlayoffSegmentId(defaultPlayoffSegmentId || "");
+      setHasAutoSelectedPlayoffSegment(Boolean(defaultPlayoffSegmentId));
+      setIsRegularRoundSelected(!defaultPlayoffSegmentId);
       setSelectedRound(defaultRound);
       setMatchSearchQuery("");
       setFocusedMatchId("");
@@ -693,6 +726,8 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
   useEffect(() => {
     setSelectedRound(defaultRound);
     setSelectedPlayoffSegmentId("");
+    setHasAutoSelectedPlayoffSegment(false);
+    setIsRegularRoundSelected(false);
   }, [defaultRound, selectedCompetitionId]);
 
   useEffect(() => {
@@ -703,9 +738,19 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.location.hash !== "#liguilla" || !playoffSegments.length || selectedPlayoffSegmentId) return;
-    setSelectedPlayoffSegmentId(championPlayoffSegmentId || playoffSegments.at(-1)?.id || "");
-  }, [championPlayoffSegmentId, playoffSegments, selectedPlayoffSegmentId]);
+    if (window.location.hash !== "#liguilla" || !playoffSegments.length || selectedPlayoffSegmentId || isRegularRoundSelected) return;
+    setSelectedPlayoffSegmentId(championPlayoffSegmentId || defaultPlayoffSegmentId || playoffSegments.at(-1)?.id || "");
+    setHasAutoSelectedPlayoffSegment(true);
+    setIsRegularRoundSelected(false);
+  }, [championPlayoffSegmentId, defaultPlayoffSegmentId, isRegularRoundSelected, playoffSegments, selectedPlayoffSegmentId]);
+
+  useEffect(() => {
+    if (activePublicView !== "calendario") return;
+    if (!defaultPlayoffSegmentId || selectedPlayoffSegmentId || hasAutoSelectedPlayoffSegment) return;
+    setSelectedPlayoffSegmentId(defaultPlayoffSegmentId);
+    setHasAutoSelectedPlayoffSegment(true);
+    setIsRegularRoundSelected(false);
+  }, [activePublicView, defaultPlayoffSegmentId, hasAutoSelectedPlayoffSegment, selectedPlayoffSegmentId]);
 
   useEffect(() => {
     if (!rounds.length) {
@@ -858,11 +903,15 @@ export function PublicView({ heroImage, legalPath = "/legal", league, onNavigate
             onSelectMatch={selectPublicMatch}
             onSelectPlayoffSegment={(segmentId) => {
               setSelectedPlayoffSegmentId(segmentId);
+              setHasAutoSelectedPlayoffSegment(true);
+              setIsRegularRoundSelected(false);
               setMatchSearchQuery("");
               setFocusedMatchId("");
             }}
             onSelectRound={(round) => {
               setSelectedPlayoffSegmentId("");
+              setHasAutoSelectedPlayoffSegment(true);
+              setIsRegularRoundSelected(true);
               setSelectedRound(round);
               setMatchSearchQuery("");
               setFocusedMatchId("");
@@ -3720,6 +3769,17 @@ function getFeaturedPublicMatch(league, standings) {
   return sortPublicMatches(finishedMatches(league)).reverse()[0] || null;
 }
 
+function getFeaturedPublicPlayoffMatch(league, standings) {
+  const scheduled = sortPublicMatchesByRound(league.matches.filter(isPublicScheduledMatch));
+  if (scheduled.length) {
+    return scheduled
+      .map((match) => ({ match, score: getFeaturedMatchScore(match, standings, league.rules) }))
+      .sort((a, b) => b.score - a.score || comparePublicMatches(a.match, b.match))[0]?.match || scheduled[0];
+  }
+
+  return sortPublicMatches(finishedMatches(league)).reverse()[0] || null;
+}
+
 function getNextScheduledRound(matches) {
   const scheduledRounds = matches
     .map((match) => Number(match.round || 0))
@@ -4214,7 +4274,17 @@ function PublicHomeDashboard({
           seasonName={seasonName}
           home={featuredHome}
           away={featuredAway}
-          onOpen={() => championHighlight ? onSelectView("calendario", { playoffSegmentId: championPlayoffSegmentId }) : onSelectView("calendario", { round: featuredMatch?.round || currentRoundLabel })}
+          onOpen={() => {
+            if (championHighlight) {
+              onSelectView("calendario", { playoffSegmentId: championPlayoffSegmentId });
+              return;
+            }
+            if (featuredMatchPlayoffSegmentId) {
+              onSelectView("calendario", { playoffSegmentId: featuredMatchPlayoffSegmentId });
+              return;
+            }
+            onSelectView("calendario", { round: featuredMatch?.round || currentRoundLabel });
+          }}
         />
 
         {activeAnnouncement && (
@@ -4727,6 +4797,8 @@ function HomeFeaturedMatch({ championHighlight = null, competitionName, currentR
     );
   }
   const isFinished = match.status === "finished" || match.status === "walkover";
+  const isPlayoff = (match.stage || "regular") === "playoff";
+  const stageLabel = isPlayoff ? getPublicMatchStageLabel(match) : `Jornada ${match.round || currentRound || "-"}`;
   const displayDate = match.date ? formatDate(match.date) : "Fecha por definir";
   const displayTime = match.time || "Hora por definir";
   const displayVenue = match.venue || "Cancha por definir";
@@ -4744,8 +4816,8 @@ function HomeFeaturedMatch({ championHighlight = null, competitionName, currentR
       </header>
       <section className="home-match-showcard">
         <div className="home-featured-top">
-          <span>{isFinished ? "Resultado reciente" : "Partido destacado"}</span>
-          <strong>Jornada {match.round || currentRound || "-"}</strong>
+          <span>{isFinished ? "Resultado reciente" : isPlayoff ? "Liguilla destacada" : "Partido destacado"}</span>
+          <strong>{stageLabel}</strong>
         </div>
         <div className="home-featured-teams">
           <div>
