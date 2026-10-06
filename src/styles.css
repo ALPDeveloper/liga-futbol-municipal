@@ -32380,6 +32380,12 @@ button.arbitration-metric-card {
   padding-right: 2px;
 }
 
+.delegate-acta-mini-events.full.delegate-acta-participants-list {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
 .delegate-acta-mini-events > span {
   display: grid;
   grid-template-columns: 28px 48px minmax(0, 1fr);
@@ -32399,6 +32405,77 @@ button.arbitration-metric-card {
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);
   font-size: 0.82rem;
+}
+
+.delegate-acta-participants-list > .delegate-acta-participant-row {
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 62px;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.delegate-acta-participants-list > .delegate-acta-participant-row b {
+  width: 44px;
+  height: 44px;
+  color: #f8fbff;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07)),
+    rgba(255, 255, 255, 0.08);
+  font-size: 0.94rem;
+  font-weight: 1000;
+}
+
+.delegate-acta-participant-main {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.delegate-acta-participant-main em {
+  display: block;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 0.88rem;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.delegate-acta-participant-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.delegate-acta-participant-meta span,
+.delegate-acta-participant-meta i {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.63rem;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.delegate-acta-participant-meta span:first-child {
+  color: #baff8a;
+  background: rgba(140, 247, 76, 0.12);
+  border-color: rgba(140, 247, 76, 0.18);
 }
 
 .delegate-acta-mini-events strong {
@@ -32455,6 +32532,35 @@ button.arbitration-metric-card {
   color: rgba(255, 255, 255, 0.68);
   font-size: 0.74rem;
   font-weight: 850;
+}
+
+@media (max-width: 420px) {
+  .delegate-acta-participants-list > .delegate-acta-participant-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 58px;
+    padding: 9px 10px;
+  }
+
+  .delegate-acta-participants-list > .delegate-acta-participant-row b {
+    width: 38px;
+    height: 38px;
+    font-size: 0.86rem;
+  }
+
+  .delegate-acta-participant-main em {
+    font-size: 0.82rem;
+  }
+
+  .delegate-acta-participant-meta {
+    gap: 5px;
+  }
+
+  .delegate-acta-participant-meta span,
+  .delegate-acta-participant-meta i {
+    padding: 4px 6px;
+    font-size: 0.58rem;
+  }
 }
 
 .delegate-sign-card label {

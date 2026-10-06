@@ -407,7 +407,18 @@ let duplicateMergeStore = normalizeStore({
           matchId: "match-merge",
           teamId: "merge-team",
           captainPlayerId: "merge-duplicate",
-          players: [{ playerId: "merge-duplicate", playerNameSnapshot: "#9 Jugador Principal", playerNumberSnapshot: "19" }]
+          players: [
+            { id: "participation-player-main", playerId: "merge-main", playerNameSnapshot: "Jugador Principal", playerNumberSnapshot: "9" },
+            { id: "participation-player-duplicate", playerId: "merge-duplicate", playerNameSnapshot: "#9 Jugador Principal", playerNumberSnapshot: "19" }
+          ]
+        },
+        {
+          id: "participation-merge-history",
+          matchId: "match-merge",
+          teamId: "merge-team",
+          active: false,
+          status: "superseded",
+          players: [{ id: "participation-player-history", playerId: "merge-duplicate", playerNameSnapshot: "#9 Jugador Principal", playerNumberSnapshot: "19" }]
         }
       ],
       matchReports: [
@@ -441,6 +452,10 @@ assert.equal(duplicateMergeLeague.matchRosters[0].captainPlayerId, "merge-main")
 assert.deepEqual(duplicateMergeLeague.matchRosters[0].starters, ["merge-main"]);
 assert.deepEqual(duplicateMergeLeague.matchRosters[0].substitutes, ["merge-main"]);
 assert.equal(duplicateMergeLeague.matchParticipations[0].captainPlayerId, "merge-main");
+assert.equal(duplicateMergeLeague.matchParticipations[0].players.length, 1);
+assert.equal(duplicateMergeLeague.matchParticipations[0].players[0].playerId, "merge-main");
+assert.equal(duplicateMergeLeague.matchParticipations[1].players.length, 1);
+assert.equal(duplicateMergeLeague.matchParticipations[1].players[0].playerId, "merge-main");
 assert.equal(duplicateMergeLeague.matchReports[0].payload.events[0].assistPlayerId, "merge-main");
 
 affiliationStore = updatePlayer(affiliationStore, "liga-afiliacion", "juan-fresno", {

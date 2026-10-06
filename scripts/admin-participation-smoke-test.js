@@ -40,6 +40,7 @@ const ids = {
   scheduledMatch: "match-admin-scheduled",
   playerOne: "player-admin-one",
   playerTwo: "player-admin-two",
+  playerDuplicate: "player-admin-duplicate",
   awayPlayer: "player-admin-away",
   admin: "user-admin-participation",
   delegate: "user-delegate-admin-participation"
@@ -84,6 +85,7 @@ async function seedData() {
         players: [
           { id: ids.playerOne, competitionId: ids.competition, teamId: ids.home, name: "Jugador Uno Admin", number: 10, position: "DELANTERO", status: "active" },
           { id: ids.playerTwo, competitionId: ids.competition, teamId: ids.home, name: "Jugador Dos Admin", number: 11, position: "MEDIOCAMPISTA", status: "active" },
+          { id: ids.playerDuplicate, competitionId: ids.competition, teamId: ids.home, name: "#10 Jugador Uno Admin", number: 99, position: "DELANTERO", status: "active" },
           { id: ids.awayPlayer, competitionId: ids.competition, teamId: ids.away, name: "Jugador Rival Admin", number: 1, position: "ARQUERO", status: "active" }
         ],
         matches: [
@@ -283,16 +285,37 @@ try {
   const quickPlayer = getLeague(storeWithQuickPlayer).players.find((player) => player.name === "JUGADOR NUEVO ADMIN");
   assert.ok(quickPlayer?.id, "El alta rapida admin debe regresar el jugador en el store actualizado.");
 
-  const scheduled = await adminParticipation(token, ids.scheduledMatch, [ids.playerOne, quickPlayer.id], ids.playerOne);
+  const scheduled = await adminParticipation(token, ids.scheduledMatch, [ids.playerOne, ids.playerDuplicate, quickPlayer.id], ids.playerOne);
   assert.equal(scheduled.participation.matchId, ids.scheduledMatch);
   assert.equal(scheduled.participation.source, "admin_correction");
-  assert.equal(scheduled.participation.players.length, 2);
+  assert.equal(scheduled.participation.players.length, 3);
+
+  const mergedStore = await apiFetch(`/leagues/${ids.league}/players/merge-duplicate`, {
+    token,
+    method: "POST",
+    body: {
+      targetPlayerId: ids.playerOne,
+      duplicatePlayerId: ids.playerDuplicate
+    }
+  });
+  const mergedLeague = getLeague(mergedStore);
+  assert.equal(mergedLeague.players.some((player) => player.id === ids.playerDuplicate), false);
+  assert.equal(JSON.stringify(mergedLeague).includes(ids.playerDuplicate), false);
+  const mergedScheduledParticipation = mergedLeague.matchParticipations.find((participation) => (
+    participation.matchId === ids.scheduledMatch &&
+    participation.teamId === ids.home &&
+    participation.active !== false
+  ));
+  assert.ok(mergedScheduledParticipation, "La convocatoria debe conservarse despues de fusionar.");
+  assert.equal(mergedScheduledParticipation.players.filter((player) => player.playerId === ids.playerOne).length, 1);
+  assert.equal(mergedScheduledParticipation.players.some((player) => player.playerId === ids.playerDuplicate), false);
 
   const delegatePortalAfterAdmin = await apiFetch("/team-portal/me", { token: delegateToken });
   const scheduledForDelegate = delegatePortalAfterAdmin.matches.find((match) => match.id === ids.scheduledMatch);
   assert.equal(scheduledForDelegate.participationSubmitted, true);
   assert.equal(scheduledForDelegate.participation.players[0].playerId, ids.playerOne);
   assert.equal(scheduledForDelegate.participation.players.some((player) => player.playerId === quickPlayer.id), true);
+  assert.equal(scheduledForDelegate.participation.players.some((player) => player.playerId === ids.playerDuplicate), false);
 
   const delegatePortalWithPastPending = await apiFetch("/team-portal/me", { token: delegateToken });
   const pastPendingForDelegate = delegatePortalWithPastPending.matches.find((match) => match.id === ids.pastPendingMatch);

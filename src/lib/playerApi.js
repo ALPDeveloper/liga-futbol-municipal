@@ -38,3 +38,12 @@ export async function deletePlayerInApi(token, leagueId, playerId) {
   });
   return parseResponse(response);
 }
+
+export async function mergeDuplicatePlayerInApi(token, leagueId, payload) {
+  const response = await fetch(`${API_BASE_URL}/leagues/${encodeURIComponent(leagueId)}/players/merge-duplicate`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse(response);
+}

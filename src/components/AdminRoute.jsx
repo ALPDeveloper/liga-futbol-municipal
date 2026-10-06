@@ -58,7 +58,7 @@ import {
 import { createUser } from "../lib/userApi.js";
 import { deleteLeagueFromApi } from "../lib/leagueApi.js";
 import { advancePlayoffPhaseInApi, createMatchInApi, deleteMatchInApi, deletePlayoffMatchesInApi, generatePlayoffBracketInApi, resolveMatchDisciplineInApi, saveAdminMatchParticipationInApi, saveMatchResultInApi, saveMatchSheetInApi, updateMatchInApi } from "../lib/matchApi.js";
-import { createPlayerInApi, deletePlayerInApi, updatePlayerInApi } from "../lib/playerApi.js";
+import { createPlayerInApi, deletePlayerInApi, mergeDuplicatePlayerInApi, updatePlayerInApi } from "../lib/playerApi.js";
 import { updateLeagueRulesInApi } from "../lib/rulesApi.js";
 import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../lib/playerValidation.js";
 import { AdminView } from "./AdminView.jsx";
@@ -331,6 +331,22 @@ export function AdminRoute({
     }
   }
 
+  async function mergeDuplicatePlayerFromPanel(payload) {
+    if (!authToken) {
+      commit(mergeDuplicatePlayer(store, league.id, payload));
+      return true;
+    }
+    try {
+      const apiStore = await mergeDuplicatePlayerInApi(authToken, league.id, payload);
+      applyApiStore(apiStore);
+      setApiStatus("connected");
+      return true;
+    } catch (playerError) {
+      window.alert(playerError.message || "No se pudo fusionar el jugador duplicado.");
+      throw new Error(playerError.message || "No se pudo fusionar el jugador duplicado.");
+    }
+  }
+
   async function saveResultFromPanel(payload) {
     if (!authToken) {
       commit(saveResult(store, league.id, payload));
@@ -464,7 +480,7 @@ export function AdminRoute({
       onUpdateSponsor={(leagueId, sponsorId, payload) => commit(updateSponsor(store, leagueId, sponsorId, payload))}
       onUpdatePlayer={updatePlayerFromPanel}
       onUpdateTeam={(teamId, payload) => commit(updateTeam(store, league.id, teamId, payload))}
-      onMergeDuplicatePlayer={(payload) => commit(mergeDuplicatePlayer(store, league.id, payload))}
+      onMergeDuplicatePlayer={mergeDuplicatePlayerFromPanel}
       onUpdateTeamAffiliationPlayerNumber={(affiliationId, payload) => commit(updateTeamAffiliationPlayerNumber(store, league.id, affiliationId, payload))}
       onUpdateVenue={(venueId, payload) => commit(updateVenue(store, league.id, venueId, payload))}
       applyApiStore={applyApiStore}

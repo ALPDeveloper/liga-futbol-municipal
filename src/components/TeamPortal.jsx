@@ -1463,15 +1463,17 @@ export function TeamPortal({ authToken, currentUser, onLogout, onNavigate, publi
                       {activeParticipationCaptain && (
                         <p className="delegate-sign-note">Capitan: {activeParticipationCaptain.playerNameSnapshot}</p>
                       )}
-                      <div className="delegate-acta-mini-events full">
+                      <div className="delegate-acta-mini-events full delegate-acta-participants-list">
                         {activeParticipationPlayers.map((player) => (
-                          <span className="delegate-acta-event-row" key={player.id || player.playerId}>
+                          <span className="delegate-acta-event-row delegate-acta-participant-row" key={player.id || player.playerId}>
                             <b>{player.playerNumberSnapshot || "-"}</b>
-                            <small>
+                            <span className="delegate-acta-participant-main">
                               <em>{player.playerNameSnapshot}</em>
-                              <span>{player.playerId === activeMatch.participation?.captainPlayerId ? "Capitan" : "Participante"}</span>
-                              <i>{context.teamName}</i>
-                            </small>
+                              <small className="delegate-acta-participant-meta">
+                                <span>{player.playerId === activeMatch.participation?.captainPlayerId ? "Capitan" : "Participante"}</span>
+                                <i>{context.teamName}</i>
+                              </small>
+                            </span>
                           </span>
                         ))}
                       </div>

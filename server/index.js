@@ -127,7 +127,7 @@ import {
 } from "./security.js";
 import { findDuplicatePlayer, normalizePlayerNameForMatch, validatePlayerFullName } from "../src/lib/playerValidation.js";
 import { calculatePlayerAppearanceEligibility, calculateSuspensionNotices, getEligiblePlayersForTeam, getPlayerNumberForTeam, getTeam, upperText } from "../src/lib/domain.js";
-import { advancePlayoffPhase, deletePlayer, deletePlayoffMatches, generatePlayoffBracket, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
+import { advancePlayoffPhase, deletePlayer, deletePlayoffMatches, generatePlayoffBracket, mergeDuplicatePlayer, resolveMatchEventDiscipline, saveMatchSheet, saveResult, updatePlayer, updateTeamAffiliationPlayerNumber } from "../src/lib/actions.js";
 import {
   MATCH_CAPTURE_MODES,
   MATCH_REPORT_STATUSES,
@@ -2680,6 +2680,49 @@ app.post("/api/leagues/:leagueId/players", requireAuth, async (request, response
     detail: `Registro jugador ${upperText(payload.name || "")}`
   });
   response.status(201).json(nextStore);
+});
+
+app.post("/api/leagues/:leagueId/players/merge-duplicate", requireAuth, async (request, response) => {
+  const leagueId = String(request.params.leagueId || "").trim();
+  if (!hasAdminPermission(request.user, leagueId, "players")) {
+    return response.status(403).json({ error: "No puedes fusionar jugadores en esta liga" });
+  }
+
+  const payload = request.body || {};
+  const targetPlayerId = String(payload.targetPlayerId || "").trim();
+  const duplicatePlayerId = String(payload.duplicatePlayerId || "").trim();
+  if (!targetPlayerId || !duplicatePlayerId || targetPlayerId === duplicatePlayerId) {
+    return response.status(400).json({ error: "Selecciona jugador principal y registro duplicado distintos." });
+  }
+
+  const store = await getStoreData();
+  const league = store.leagues.find((item) => item.id === leagueId);
+  if (!league || league.status !== "active") return response.status(404).json({ error: "Liga no encontrada o suspendida" });
+
+  const targetPlayer = (league.players || []).find((player) => player.id === targetPlayerId);
+  const duplicatePlayer = (league.players || []).find((player) => player.id === duplicatePlayerId);
+  if (!targetPlayer || !duplicatePlayer) return response.status(404).json({ error: "No se encontraron ambos jugadores para fusionar." });
+
+  const nextStore = await importStoreData(mergeDuplicatePlayer(store, leagueId, {
+    ...payload,
+    targetPlayerId,
+    duplicatePlayerId
+  }));
+  const nextLeague = nextStore.leagues.find((item) => item.id === leagueId);
+  if (nextLeague?.players?.some((player) => player.id === duplicatePlayerId)) {
+    return response.status(409).json({ error: "No se pudo completar la fusion. Revisa que sea duplicado valido o usa vinculacion/afiliacion cuando sea otra categoria." });
+  }
+  clearPublicCache();
+
+  await logAudit({
+    user: request.user,
+    leagueId,
+    action: "player_merge_duplicate",
+    entityType: "player",
+    entityId: targetPlayerId,
+    detail: `Fusiono duplicado ${upperText(duplicatePlayer.name || duplicatePlayerId)} en ${upperText(targetPlayer.name || targetPlayerId)}`
+  });
+  response.json(nextStore);
 });
 
 app.patch("/api/leagues/:leagueId/players/:playerId", requireAuth, async (request, response) => {
