@@ -127,6 +127,84 @@ function parseJsonValue(value, fallback) {
   }
 }
 
+function replacePlayerReferenceValue(value, duplicatePlayerId, targetPlayerId) {
+  if (value === duplicatePlayerId) return targetPlayerId;
+  if (Array.isArray(value)) {
+    return value.map((item) => replacePlayerReferenceValue(item, duplicatePlayerId, targetPlayerId));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key === duplicatePlayerId ? targetPlayerId : key,
+        replacePlayerReferenceValue(item, duplicatePlayerId, targetPlayerId)
+      ])
+    );
+  }
+  return value;
+}
+
+function uniquePlayerIds(playerIds = [], duplicatePlayerId, targetPlayerId) {
+  return [...new Set((playerIds || [])
+    .map((playerId) => (playerId === duplicatePlayerId ? targetPlayerId : playerId))
+    .filter(Boolean))];
+}
+
+function mergePlayerReferenceObjects(entries = [], duplicatePlayerId, targetPlayerId, targetPlayer) {
+  const byPlayerId = new Map();
+  for (const sourceEntry of entries || []) {
+    const rawEntry = typeof sourceEntry === "string" ? { playerId: sourceEntry } : { ...(sourceEntry || {}) };
+    const nextEntry = replacePlayerReferenceValue(rawEntry, duplicatePlayerId, targetPlayerId);
+    if (!nextEntry.playerId) continue;
+    if (nextEntry.playerId === targetPlayerId) {
+      nextEntry.playerNameSnapshot = nextEntry.playerNameSnapshot || nextEntry.name || targetPlayer.name || "";
+      nextEntry.playerNumberSnapshot = nextEntry.playerNumberSnapshot || nextEntry.number || targetPlayer.number || "";
+      nextEntry.playerPhotoSnapshot = nextEntry.playerPhotoSnapshot || nextEntry.photoUrl || targetPlayer.photoUrl || "";
+    }
+    const currentEntry = byPlayerId.get(nextEntry.playerId);
+    if (!currentEntry) {
+      byPlayerId.set(nextEntry.playerId, nextEntry);
+      continue;
+    }
+    byPlayerId.set(nextEntry.playerId, {
+      ...nextEntry,
+      ...currentEntry,
+      playerNameSnapshot: currentEntry.playerNameSnapshot || nextEntry.playerNameSnapshot || "",
+      playerNumberSnapshot: currentEntry.playerNumberSnapshot || currentEntry.jerseyNumber || nextEntry.playerNumberSnapshot || nextEntry.jerseyNumber || "",
+      playerPhotoSnapshot: currentEntry.playerPhotoSnapshot || nextEntry.playerPhotoSnapshot || "",
+      jerseyNumber: currentEntry.jerseyNumber || nextEntry.jerseyNumber || ""
+    });
+  }
+  return [...byPlayerId.values()];
+}
+
+function replaceJsonStringValue(value, duplicatePlayerId, targetPlayerId) {
+  return JSON.stringify(replacePlayerReferenceValue(parseJsonValue(value, {}), duplicatePlayerId, targetPlayerId));
+}
+
+async function updateJsonColumnsForPlayerMerge(client, table, idColumn, jsonColumns, whereSql, whereValues, duplicatePlayerId, targetPlayerId) {
+  const rows = (await client.query(
+    `SELECT ${idColumn}, ${jsonColumns.join(", ")} FROM ${table} WHERE ${whereSql}`,
+    whereValues
+  )).rows;
+  for (const row of rows) {
+    const assignments = [];
+    const values = [];
+    for (const column of jsonColumns) {
+      const currentJson = JSON.stringify(parseJsonValue(row[column], {}));
+      const nextJson = replaceJsonStringValue(row[column], duplicatePlayerId, targetPlayerId);
+      if (currentJson === nextJson) continue;
+      values.push(nextJson);
+      assignments.push(`${column} = $${values.length}::jsonb`);
+    }
+    if (!assignments.length) continue;
+    values.push(row[idColumn]);
+    await client.query(
+      `UPDATE ${table} SET ${assignments.join(", ")} WHERE ${idColumn} = $${values.length}`,
+      values
+    );
+  }
+}
+
 function normalizeRefereeMatchSheetRow(row) {
   if (!row) return null;
   return {
@@ -2521,6 +2599,277 @@ export async function publishOfficialMatchFromReportData({ leagueId, match, repo
     }
   });
   transaction();
+}
+
+export async function mergeDuplicatePlayerData({
+  leagueId,
+  targetPlayerId,
+  duplicatePlayerId,
+  createAffiliationFromDuplicate = false,
+  startsAt = "",
+  endsAt = "",
+  affiliationNotes = ""
+}) {
+  if (!isPostgres()) return null;
+  const client = await postgresPool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const playersResult = await client.query(
+      `
+        SELECT players.*, teams.competition_id AS team_competition_id
+        FROM players
+        LEFT JOIN teams ON teams.id = players.team_id
+        WHERE players.league_id = $1 AND players.id = ANY($2::text[])
+        FOR UPDATE OF players
+      `,
+      [leagueId, [targetPlayerId, duplicatePlayerId]]
+    );
+    const targetPlayer = playersResult.rows.find((player) => player.id === targetPlayerId);
+    const duplicatePlayer = playersResult.rows.find((player) => player.id === duplicatePlayerId);
+    if (!targetPlayer || !duplicatePlayer || targetPlayer.id === duplicatePlayer.id) {
+      throw new Error("No se encontraron ambos jugadores para fusionar.");
+    }
+
+    const targetCompetitionId = targetPlayer.competition_id || targetPlayer.team_competition_id || "";
+    const duplicateCompetitionId = duplicatePlayer.competition_id || duplicatePlayer.team_competition_id || "";
+    if (targetCompetitionId !== duplicateCompetitionId && !createAffiliationFromDuplicate) {
+      throw new Error("Este movimiento es entre categorias distintas. Usa vinculacion/afiliacion cuando no sea duplicado de la misma categoria.");
+    }
+
+    const now = new Date().toISOString();
+    const targetNumber = targetPlayer.number ? String(targetPlayer.number) : "";
+    const targetPhoto = targetPlayer.photo_url || duplicatePlayer.photo_url || "";
+
+    await client.query(
+      `
+        UPDATE players
+        SET
+          photo_url = COALESCE(NULLIF(photo_url, ''), NULLIF($3, ''), ''),
+          photo_authorized = photo_authorized OR $4
+        WHERE league_id = $1 AND id = $2
+      `,
+      [leagueId, targetPlayerId, duplicatePlayer.photo_url || "", Boolean(duplicatePlayer.photo_authorized)]
+    );
+
+    if (createAffiliationFromDuplicate && targetPlayer.team_id !== duplicatePlayer.team_id) {
+      const affiliationExists = (await client.query(
+        `
+          SELECT 1
+          FROM team_affiliations
+          WHERE league_id = $1
+            AND source_team_id = $2
+            AND target_team_id = $3
+            AND status NOT IN ('inactive', 'revoked')
+          LIMIT 1
+        `,
+        [leagueId, targetPlayer.team_id, duplicatePlayer.team_id]
+      )).rowCount > 0;
+
+      if (!affiliationExists) {
+        await client.query(
+          `
+            INSERT INTO team_affiliations (
+              id, league_id, source_team_id, target_team_id, status,
+              starts_at, ends_at, player_numbers_json, notes
+            )
+            VALUES ($1, $2, $3, $4, 'active', NULLIF($5, '')::date, NULLIF($6, '')::date, $7::jsonb, $8)
+          `,
+          [
+            `team-affiliation-${crypto.randomUUID()}`,
+            leagueId,
+            targetPlayer.team_id,
+            duplicatePlayer.team_id,
+            startsAt || "",
+            endsAt || "",
+            JSON.stringify(duplicatePlayer.number ? { [targetPlayerId]: Number(duplicatePlayer.number || 0) } : {}),
+            upperText(affiliationNotes || "AFILIACION CREADA AL CONVERTIR DUPLICADO ENTRE CATEGORIAS")
+          ]
+        );
+      }
+    }
+
+    for (const [table, column] of [
+      ["player_sanctions", "player_id"],
+      ["player_injuries", "player_id"],
+      ["discipline_adjustments", "player_id"],
+      ["discipline_resets", "player_id"],
+      ["player_appearance_adjustments", "player_id"]
+    ]) {
+      await client.query(
+        `UPDATE ${table} SET ${column} = $1 WHERE league_id = $2 AND ${column} = $3`,
+        [targetPlayerId, leagueId, duplicatePlayerId]
+      );
+    }
+
+    for (const column of ["player_id", "secondary_player_id", "assist_player_id"]) {
+      await client.query(
+        `
+          UPDATE match_events event
+          SET ${column} = $1
+          FROM matches match
+          WHERE match.id = event.match_id
+            AND match.league_id = $2
+            AND event.${column} = $3
+        `,
+        [targetPlayerId, leagueId, duplicatePlayerId]
+      );
+    }
+
+    await client.query(
+      `
+        UPDATE match_rosters
+        SET
+          captain_player_id = CASE WHEN captain_player_id = $3 THEN $2 ELSE captain_player_id END,
+          goalkeeper_player_id = CASE WHEN goalkeeper_player_id = $3 THEN $2 ELSE goalkeeper_player_id END,
+          updated_at = $4
+        WHERE league_id = $1
+          AND (captain_player_id = $3 OR goalkeeper_player_id = $3)
+      `,
+      [leagueId, targetPlayerId, duplicatePlayerId, now]
+    );
+    await client.query(
+      `
+        UPDATE match_participations
+        SET
+          captain_player_id = CASE WHEN captain_player_id = $3 THEN $2 ELSE captain_player_id END,
+          updated_at = $4
+        WHERE league_id = $1
+          AND captain_player_id = $3
+      `,
+      [leagueId, targetPlayerId, duplicatePlayerId, now]
+    );
+    await client.query(
+      `
+        UPDATE match_report_signatures
+        SET captain_player_id = $2
+        WHERE league_id = $1 AND captain_player_id = $3
+      `,
+      [leagueId, targetPlayerId, duplicatePlayerId]
+    );
+
+    const rosterRows = (await client.query(
+      "SELECT id, players_json, starters_json, substitutes_json, lineup_json FROM match_rosters WHERE league_id = $1",
+      [leagueId]
+    )).rows;
+    for (const roster of rosterRows) {
+      const players = mergePlayerReferenceObjects(parseJsonValue(roster.players_json, []), duplicatePlayerId, targetPlayerId, {
+        name: targetPlayer.name,
+        number: targetNumber,
+        photoUrl: targetPhoto
+      });
+      const starters = uniquePlayerIds(parseJsonValue(roster.starters_json, []), duplicatePlayerId, targetPlayerId);
+      const substitutes = uniquePlayerIds(parseJsonValue(roster.substitutes_json, []), duplicatePlayerId, targetPlayerId);
+      const lineup = replacePlayerReferenceValue(parseJsonValue(roster.lineup_json, {}), duplicatePlayerId, targetPlayerId);
+      await client.query(
+        `
+          UPDATE match_rosters
+          SET players_json = $2::jsonb,
+              starters_json = $3::jsonb,
+              substitutes_json = $4::jsonb,
+              lineup_json = $5::jsonb,
+              updated_at = $6
+          WHERE id = $1
+        `,
+        [roster.id, JSON.stringify(players), JSON.stringify(starters), JSON.stringify(substitutes), JSON.stringify(lineup), now]
+      );
+    }
+
+    const affiliationRows = (await client.query(
+      "SELECT id, player_numbers_json FROM team_affiliations WHERE league_id = $1",
+      [leagueId]
+    )).rows;
+    for (const affiliation of affiliationRows) {
+      const playerNumbers = parseJsonValue(affiliation.player_numbers_json, {});
+      if (playerNumbers[duplicatePlayerId] === undefined) continue;
+      playerNumbers[targetPlayerId] = playerNumbers[duplicatePlayerId];
+      delete playerNumbers[duplicatePlayerId];
+      await client.query(
+        "UPDATE team_affiliations SET player_numbers_json = $2::jsonb WHERE id = $1",
+        [affiliation.id, JSON.stringify(playerNumbers)]
+      );
+    }
+
+    const disciplineRows = (await client.query(
+      "SELECT id, player_ids_json FROM discipline_links WHERE league_id = $1",
+      [leagueId]
+    )).rows;
+    for (const link of disciplineRows) {
+      const playerIds = uniquePlayerIds(parseJsonValue(link.player_ids_json, []), duplicatePlayerId, targetPlayerId);
+      if (playerIds.length > 1) {
+        await client.query("UPDATE discipline_links SET player_ids_json = $2::jsonb WHERE id = $1", [link.id, JSON.stringify(playerIds)]);
+      } else {
+        await client.query("DELETE FROM discipline_links WHERE id = $1", [link.id]);
+      }
+    }
+
+    await client.query(
+      `
+        UPDATE match_participation_players existing
+        SET
+          player_name_snapshot = COALESCE(NULLIF(existing.player_name_snapshot, ''), $3),
+          player_number_snapshot = COALESCE(NULLIF(existing.player_number_snapshot, ''), NULLIF(duplicate.player_number_snapshot, ''), NULLIF($4, '')),
+          player_photo_snapshot = COALESCE(NULLIF(existing.player_photo_snapshot, ''), NULLIF(duplicate.player_photo_snapshot, ''), NULLIF($5, ''))
+        FROM match_participation_players duplicate
+        JOIN match_participations participation ON participation.id = duplicate.match_participation_id
+        WHERE existing.match_participation_id = duplicate.match_participation_id
+          AND existing.player_id = $1
+          AND duplicate.player_id = $2
+          AND participation.league_id = $6
+      `,
+      [targetPlayerId, duplicatePlayerId, targetPlayer.name || "", targetNumber, targetPhoto, leagueId]
+    );
+    await client.query(
+      `
+        DELETE FROM match_participation_players duplicate
+        USING match_participation_players existing, match_participations participation
+        WHERE duplicate.match_participation_id = existing.match_participation_id
+          AND duplicate.match_participation_id = participation.id
+          AND existing.player_id = $1
+          AND duplicate.player_id = $2
+          AND participation.league_id = $3
+      `,
+      [targetPlayerId, duplicatePlayerId, leagueId]
+    );
+    await client.query(
+      `
+        UPDATE match_participation_players player
+        SET
+          player_id = $1,
+          player_name_snapshot = COALESCE(NULLIF(player_name_snapshot, ''), $4),
+          player_number_snapshot = COALESCE(NULLIF(player_number_snapshot, ''), NULLIF($5, '')),
+          player_photo_snapshot = COALESCE(NULLIF(player_photo_snapshot, ''), NULLIF($6, ''))
+        FROM match_participations participation
+        WHERE participation.id = player.match_participation_id
+          AND participation.league_id = $2
+          AND player.player_id = $3
+      `,
+      [targetPlayerId, leagueId, duplicatePlayerId, targetPlayer.name || "", targetNumber, targetPhoto]
+    );
+
+    await updateJsonColumnsForPlayerMerge(client, "match_reports", "id", ["payload_json"], "league_id = $1", [leagueId], duplicatePlayerId, targetPlayerId);
+    await updateJsonColumnsForPlayerMerge(client, "referee_match_sheets", "id", ["payload_json"], "league_id = $1", [leagueId], duplicatePlayerId, targetPlayerId);
+    await updateJsonColumnsForPlayerMerge(client, "match_sync_queue", "id", ["payload_json"], "league_id = $1", [leagueId], duplicatePlayerId, targetPlayerId);
+    await updateJsonColumnsForPlayerMerge(client, "match_session_operations", "operation_id", ["payload_json"], "league_id = $1", [leagueId], duplicatePlayerId, targetPlayerId);
+    await updateJsonColumnsForPlayerMerge(client, "match_sessions", "id", ["clock_state_json", "metadata_json"], "league_id = $1", [leagueId], duplicatePlayerId, targetPlayerId);
+    await updateJsonColumnsForPlayerMerge(client, "match_report_signatures", "id", ["act_snapshot_json", "metadata_json"], "league_id = $1", [leagueId], duplicatePlayerId, targetPlayerId);
+
+    const deleteResult = await client.query(
+      "DELETE FROM players WHERE league_id = $1 AND id = $2",
+      [leagueId, duplicatePlayerId]
+    );
+    if (deleteResult.rowCount !== 1) {
+      throw new Error("No se pudo eliminar el jugador duplicado despues de transferir su historial.");
+    }
+
+    await client.query("COMMIT");
+    return { targetPlayerId, duplicatePlayerId, merged: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createPlayerData({ id, leagueId, competitionId, teamId, name, number, position, photoUrl, photoAuthorized, status = "active" }) {

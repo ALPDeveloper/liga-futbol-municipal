@@ -73,6 +73,7 @@ import {
   listUsersData,
   markMatchTeamPinRevealedData,
   markMatchTeamPinSignedData,
+  mergeDuplicatePlayerData,
   markAdminActivationUsedData,
   markPasswordResetUsed,
   invalidateMatchReportSignaturesData,
@@ -2703,11 +2704,24 @@ app.post("/api/leagues/:leagueId/players/merge-duplicate", requireAuth, async (r
   const duplicatePlayer = (league.players || []).find((player) => player.id === duplicatePlayerId);
   if (!targetPlayer || !duplicatePlayer) return response.status(404).json({ error: "No se encontraron ambos jugadores para fusionar." });
 
-  const nextStore = await importStoreData(mergeDuplicatePlayer(store, leagueId, {
-    ...payload,
-    targetPlayerId,
-    duplicatePlayerId
-  }));
+  const nextStore = DATABASE_PROVIDER === "postgres"
+    ? await (async () => {
+        await mergeDuplicatePlayerData({
+          leagueId,
+          targetPlayerId,
+          duplicatePlayerId,
+          createAffiliationFromDuplicate: payload.createAffiliationFromDuplicate === true,
+          startsAt: payload.startsAt || "",
+          endsAt: payload.endsAt || "",
+          affiliationNotes: payload.affiliationNotes || ""
+        });
+        return getStoreData();
+      })()
+    : await importStoreData(mergeDuplicatePlayer(store, leagueId, {
+        ...payload,
+        targetPlayerId,
+        duplicatePlayerId
+      }));
   const nextLeague = nextStore.leagues.find((item) => item.id === leagueId);
   if (nextLeague?.players?.some((player) => player.id === duplicatePlayerId)) {
     return response.status(409).json({ error: "No se pudo completar la fusion. Revisa que sea duplicado valido o usa vinculacion/afiliacion cuando sea otra categoria." });
